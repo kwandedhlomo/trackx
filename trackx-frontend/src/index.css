@@ -1,3 +1,6 @@
+@import url('https://unpkg.com/leaflet@1.9.3/dist/leaflet.css');
+/* One time set up for the animated map on*/
+
 /* tailwindcss */
 @tailwind base;
 @tailwind components;
