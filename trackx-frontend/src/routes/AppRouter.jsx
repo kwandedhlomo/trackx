@@ -1,7 +1,10 @@
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 
-// Import your pages
+// Import pages
 import HomePage from "../pages/HomePage";
+import LandingPage from "../pages/LandingPage";
+import SignInPage from "../pages/SignInPage";
+import RegisterPage from "../pages/RegisterPage";
 // (Later: import LandingPage from "../pages/LandingPage";
 //         import SignInPage from "../pages/SignInPage";
 //         import ManageCasesPage, etc.)
@@ -11,8 +14,13 @@ function AppRouter() {
     <BrowserRouter>
       <Routes>
         {/* Define all your page routes here */}
+        {/* I made Landing page not have a route, so it will be the default route */}
+        <Route path="/" element={<LandingPage />} />     
         <Route path="/home" element={<HomePage />} />
-        
+        <Route path="/signin" element={<SignInPage />} />
+        <Route path="/register" element={<RegisterPage />} />
+
+
         {/* Future routes (once you create the pages) */}
         {/* <Route path="/" element={<LandingPage />} /> */}
         {/* <Route path="/signin" element={<SignInPage />} /> */}
@@ -25,5 +33,6 @@ function AppRouter() {
     </BrowserRouter>
   );
 }
+
 
 export default AppRouter;

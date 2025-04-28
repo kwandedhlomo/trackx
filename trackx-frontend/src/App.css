@@ -40,3 +40,18 @@
 .read-the-docs {
   color: #888;
 }
+
+
+
+/* Pulse animation for new markers */
+.pulse-marker {
+  width: 20px;
+  height: 20px;
+  background: rgba(0, 183, 255, 0.6);
+  border-radius: 50%;
+  position: absolute;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  z-index: 50;
+}
+
