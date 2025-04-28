@@ -4,18 +4,20 @@ import adfLogo from "../assets/adf-logo.png";
 import trackxLogo from "../assets/trackx-logo.png";
 import BarChartComponent from "../components/BarChartComponent";
 import MapComponent from "../components/MapComponent";
-import GlobeBackground from "../components/GlobeBackground"; // ✅ Add this line
+import GlobeBackground from "../components/GlobeBackground"; 
 
 function HomePage() {
-    const [clearMode, setClearMode] = useState(false); // ✅ Added toggle state
+    const [clearMode, setClearMode] = useState(false); 
   
     return (
-      <div className="relative min-h-screen bg-gradient-to-br from-black via-gray-900 to-black flex flex-col overflow-hidden">
+      <div className="relative flex flex-col">
+      {/* 🟢 Black background that grows properly */}
+      <div className="absolute inset-0 bg-black -z-20" />
         {/* 🌍 Globe Background */}
         <GlobeBackground />
   
         {/* 🔘 Clear Button */}
-        <div className="absolute top-4 right-4 z-20">
+        <div className="absolute top-20 right-4 z-20">
           <button
             onClick={() => setClearMode(!clearMode)}
             className="bg-blue-800 text-white px-4 py-2 rounded hover:bg-blue-700 transition-colors duration-200"
@@ -26,7 +28,7 @@ function HomePage() {
   
         {/* 🟦 Main Content (hidden when clearMode is true) */}
         {!clearMode && (
-          <div className="relative z-10">
+          <div className="flex-grow flex flex-col relative z-10">
             {/* 🟦 Navbar */}
             <nav className="flex justify-between items-center bg-black bg-opacity-60 backdrop-blur-md p-4 relative font-sans">
               <div className="flex items-center space-x-4">
@@ -58,7 +60,7 @@ function HomePage() {
             </div>
   
             {/* 🟦 Main Content */}
-            <main className="flex flex-col items-center justify-center flex-1 p-8 space-y-10">
+            <main className="flex flex-col items-center justify-center w-full p-8 space-y-10">
               {/* Two placeholder images */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-8 w-full max-w-6xl">
                 <div className="bg-white bg-opacity-10 border border-gray-700 rounded-lg h-64 flex items-center justify-center">
