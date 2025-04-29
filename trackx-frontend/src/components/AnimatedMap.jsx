@@ -60,11 +60,11 @@ function AnimatedMap() {
           />
         </MapContainer>
 
-        {/* 🔵 Semi-transparent blue overlay */}
+        {/*  Semi-transparent blue overlay */}
         <div className="absolute inset-0 bg-blue-900 bg-opacity-30 z-10"></div>
       </motion.div>
 
-      {/* 🔵 Animated Pulse Markers */}
+      {/*  Animated Pulse Markers */}
       {markers.map((marker) => (
         <motion.div
           key={marker.id}
