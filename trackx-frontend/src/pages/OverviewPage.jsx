@@ -1,6 +1,6 @@
 import React from "react";
 import { Link } from "react-router-dom";
-import trackxLogo from "../assets/trackx-logo-removebg-preview.png";
+import adflogo from "../assets/adf-logo.png";
 //import profileIcon from "../assets/profile-icon.png"; 
 import { motion } from "framer-motion";
 
@@ -14,7 +14,7 @@ function OverviewPage() {
     >
       {/* Navbar */}
       <div className="flex items-center justify-between px-6 py-4 bg-gray-900 shadow-md">
-        <img src={trackxLogo} alt="Logo" className="h-12" />
+        <img src={adflogo} alt="Logo" className="h-12" />
 
         <h1 className="text-xl font-bold text-white">Overview</h1>
 
