@@ -44,7 +44,7 @@ function AnimatedMap() {
           center={[-29.0, 24.0]}
           zoom={8}
           minZoom={7}
-          maxZoom={8}s
+          maxZoom={8}
           scrollWheelZoom={false}
           dragging={false}
           doubleClickZoom={false}
