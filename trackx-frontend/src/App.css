@@ -55,3 +55,8 @@
   z-index: 50;
 }
 
+/* Making the Tiles overlap by 1% to get the map to not have the tile outlines / grid on landing page*/
+.leaflet-tile {
+  transform: scale(1.01);
+  transform-origin: center center;
+}
