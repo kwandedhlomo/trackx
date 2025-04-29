@@ -1,11 +1,11 @@
 import React, { useState } from "react";
 import { Link } from "react-router-dom";
-import { Eye, EyeOff } from "lucide-react"; // ✅ Import eye icons
+import { Eye, EyeOff } from "lucide-react"; //  Import eye icons
 
 function SignInPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [showPassword, setShowPassword] = useState(false); // ✅ Manage show/hide state
+  const [showPassword, setShowPassword] = useState(false); //  Manage show/hide state
 
   const handleSignIn = (e) => {
     e.preventDefault();
@@ -42,7 +42,7 @@ function SignInPage() {
               <label className="sr-only" htmlFor="password">Password</label>
               <input
                 id="password"
-                type={showPassword ? "text" : "password"} // ✅ Toggle visibility
+                type={showPassword ? "text" : "password"} //  Toggle visibility
                 required
                 placeholder="Password"
                 value={password}
