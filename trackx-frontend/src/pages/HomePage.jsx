@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import adfLogo from "../assets/adf-logo.png";
-import trackxLogo from "../assets/trackx-logo.png";
+import adfLogo from "../assets/image-removebg-preview.png"; 
+import trackxLogo from "../assets/trackx-logo-removebg-preview.png";
 import BarChartComponent from "../components/BarChartComponent";
 import MapComponent from "../components/MapComponent";
 import GlobeBackground from "../components/GlobeBackground"; 
@@ -11,7 +11,7 @@ function HomePage() {
   
     return (
       <div className="relative flex flex-col min-h-screen">
-      {/* 🟢 Black background that grows properly */}
+      {/* Gradient background that grows properly */}
       <div className="absolute inset-0 w-full min-h-full bg-gradient-to-br from-black via-gray-900 to-black -z-20" />
         {/* 🌍 Globe Background */}
         <GlobeBackground interactive={clearMode} />
@@ -30,7 +30,7 @@ function HomePage() {
         {!clearMode && (
           <div className="flex-grow flex flex-col relative z-10">
             {/* 🟦 Navbar */}
-            <nav className="flex justify-between items-center bg-black bg-opacity-60 backdrop-blur-md p-4 relative font-sans">
+            <nav className="flex justify-between items-center bg-gradient-to-r from-black to-gray-900 bg-opacity-80 backdrop-blur-md p-4 relative font-sans">
               <div className="flex items-center space-x-4">
                 <div className="text-white text-3xl cursor-pointer">&#9776;</div>
                 <img src={adfLogo} alt="ADF Logo" className="h-10 w-auto" />

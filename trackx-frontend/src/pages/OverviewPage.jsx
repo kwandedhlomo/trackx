@@ -1,6 +1,6 @@
 import React from "react";
 import { Link } from "react-router-dom";
-import adflogo from "../assets/adf-logo.png";
+import adflogo from "../assets/image-removebg-preview.png";
 //import profileIcon from "../assets/profile-icon.png"; 
 import { motion } from "framer-motion";
 
@@ -10,10 +10,12 @@ function OverviewPage() {
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       transition={{ duration: 1 }}
-      className="min-h-screen bg-black text-white font-sans"
+      className="relative min-h-screen text-white font-sans overflow-hidden"
     >
+       {/* Gradient Background */}
+       <div className="absolute inset-0 bg-gradient-to-br from-black via-gray-900 to-black -z-10" />
       {/* Navbar */}
-      <div className="flex items-center justify-between px-6 py-4 bg-gray-900 shadow-md">
+      <div className="flex items-center justify-between px-6 py-4 bg-gradient-to-r from-black to-gray-900 shadow-md">
         <img src={adflogo} alt="Logo" className="h-12" />
 
         <h1 className="text-xl font-bold text-white">Overview</h1>
@@ -27,8 +29,8 @@ function OverviewPage() {
       </div>
 
       {/* Nav Tabs */}
-      <div className="flex justify-center space-x-8 bg-gray-800 py-2 text-white text-sm">
-        <Link to="/case-info" className="hover:underline">Case Information</Link>
+      <div className="flex justify-center space-x-8 bg-gradient-to-r from-black to-gray-900 py-2 text-white text-sm">
+        <Link to="/new-case" className="hover:underline">Case Information</Link>
         <Link to="/annotations" className="hover:underline">Annotations</Link>
         <span className="font-bold underline">Overview</span>
       </div>
