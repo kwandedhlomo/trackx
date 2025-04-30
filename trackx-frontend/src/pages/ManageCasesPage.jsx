@@ -12,7 +12,9 @@ function ManageCasesPage() {
       <nav className="flex justify-between items-center bg-black bg-opacity-60 backdrop-blur-md p-4 relative font-sans">
         <div className="flex items-center space-x-4">
           <div className="text-white text-3xl cursor-pointer">&#9776;</div>
-          <img src={adfLogo} alt="ADF Logo" className="h-10 w-auto" />
+          <Link to="/home">
+          <img src={adfLogo} alt="ADF Logo" className="h-10 w-auto cursor-pointer hover:opacity-80 transition" />
+          </Link>
         </div>
 
         <div className="absolute left-1/2 transform -translate-x-1/2 text-3xl font-extrabold text-white font-sans">
