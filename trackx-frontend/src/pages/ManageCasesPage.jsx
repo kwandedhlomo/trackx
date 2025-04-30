@@ -1,6 +1,6 @@
 import { Link } from "react-router-dom";
 import { FaSearch, FaMapMarkerAlt, FaCalendarAlt } from "react-icons/fa";
-import adfLogo from "../assets/adf-logo.png";
+import adfLogo from "../assets/image-removebg-preview.png";
 
 function ManageCasesPage() {
   return (

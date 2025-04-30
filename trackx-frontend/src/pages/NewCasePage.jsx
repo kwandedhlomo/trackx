@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import { Upload } from "lucide-react";
-import adflogo from "../assets/adf-logo.png";
+import adflogo from "../assets/image-removebg-preview.png";
 
 function NewCasePage() {
   const navigate = useNavigate();
@@ -78,10 +78,12 @@ function NewCasePage() {
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       transition={{ duration: 1 }}
-      className="min-h-screen bg-black text-white font-sans"
+      className="relative min-h-screen text-white font-sans overflow-hidden"
     >
+      {/* Gradient Background */}
+      <div className="absolute inset-0 bg-gradient-to-br from-black via-gray-900 to-black -z-10" />
       {/* Navbar */}
-      <div className="flex items-center justify-between px-6 py-4 bg-gray-900 shadow-md">
+      <div className="flex items-center justify-between px-6 py-4 bg-gradient-to-r from-black to-gray-900 shadow-md">
         <img src={adflogo} alt="Logo" className="h-12" />
 
         <h1 className="text-xl font-bold text-white">New Case</h1>
@@ -95,7 +97,7 @@ function NewCasePage() {
       </div>
 
       {/* Nav Tabs - Updated with clickable links */}
-      <div className="flex justify-center space-x-8 bg-gray-800 py-2 text-white text-sm">
+      <div className="flex justify-center space-x-8 bg-gradient-to-r from-black to-gray-900 py-2 text-white text-sm">
         <span className="font-bold underline">Case Information</span>
         <Link to="/annotations" className="text-gray-400 hover:text-white">Annotations</Link>
         <Link to="/overview" className="text-gray-400 hover:text-white">Overview</Link>
