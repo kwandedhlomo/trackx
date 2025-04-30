@@ -10,11 +10,11 @@ function HomePage() {
     const [clearMode, setClearMode] = useState(false); 
   
     return (
-      <div className="relative flex flex-col">
+      <div className="relative flex flex-col min-h-screen">
       {/* 🟢 Black background that grows properly */}
-      <div className="absolute inset-0 bg-black -z-20" />
+      <div className="absolute inset-0 w-full min-h-full bg-gradient-to-br from-black via-gray-900 to-black -z-20" />
         {/* 🌍 Globe Background */}
-        <GlobeBackground />
+        <GlobeBackground interactive={clearMode} />
   
         {/* 🔘 Clear Button */}
         <div className="absolute top-20 right-4 z-20">
