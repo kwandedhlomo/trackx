@@ -80,7 +80,9 @@ function AnnotationsPage() {
       <div className="absolute inset-0 bg-gradient-to-br from-black via-gray-900 to-black -z-10" />
       {/* Navbar */}
       <div className="flex items-center justify-between px-6 py-4 bg-gradient-to-r from-black to-gray-900 shadow-md">
-        <img src={adflogo} alt="Logo" className="h-12" />
+        <Link to="/home">
+        <img src={adflogo} alt="Logo" className="h-12 cursor-pointer hover:opacity-80 transition" />
+        </Link>
 
         <h1 className="text-xl font-bold text-white">Annotations</h1>
 
