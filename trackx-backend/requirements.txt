@@ -1,3 +1,5 @@
 fastapi
 uvicorn[standard]
 python-dotenv
+
+# this file is used to list the things you need to install to run the project backend. 
