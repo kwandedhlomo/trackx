@@ -1,16 +1,40 @@
 import React, { useState } from "react";
 import { Link } from "react-router-dom";
 import { Eye, EyeOff } from "lucide-react"; //  Import eye icons
+import { signInWithEmailAndPassword } from "firebase/auth";
+import { auth } from "../firebase"; // Make sure this path matches
+
 
 function SignInPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false); //  Manage show/hide state
 
-  const handleSignIn = (e) => {
+  const handleSignIn = async (e) => {
     e.preventDefault();
-    console.log("Sign In with:", email, password);
-    // later: add real authentication logic here
+  
+    try {
+      // Sign in with Firebase
+      const userCredential = await signInWithEmailAndPassword(auth, email, password);
+      const user = userCredential.user;
+  
+      // Get the Firebase ID token
+      const idToken = await user.getIdToken();
+  
+      // Send token to backend
+      const response = await fetch(`${import.meta.env.VITE_API_URL}/secure`, {
+        headers: {
+          Authorization: `Bearer ${idToken}`,
+        },
+      });
+      
+  
+      const data = await response.json();
+      console.log("Backend response:", data);
+      alert(`Hello ${data.message}`);
+    } catch (error) {
+      console.error("Login failed:", error.message);
+    }
   };
 
   return (

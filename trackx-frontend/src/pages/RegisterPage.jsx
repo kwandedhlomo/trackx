@@ -1,8 +1,14 @@
 import React, { useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom"; // Added useNavigate here
+//import { Link } from "react-router-dom";
 import { Eye, EyeOff } from "lucide-react"; // Using lucide-react for icons (optional)
+import { createUserWithEmailAndPassword } from "firebase/auth";
+import { doc, setDoc } from "firebase/firestore";
+import { auth, db } from "../firebase";
+
 
 function RegisterPage() {
+  const navigate = useNavigate(); //  Initialize navigate
   const [firstName, setFirstName] = useState("");
   const [surname, setSurname] = useState("");
   const [email, setEmail] = useState("");
@@ -14,19 +20,36 @@ function RegisterPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 
-  const handleRegister = (e) => {
+  const handleRegister = async (e) => {
     e.preventDefault();
-    console.log({
-      firstName,
-      surname,
-      email,
-      idNumber,
-      investigatorId,
-      dob,
-      password,
-      confirmPassword,
-    });
-    // later: Add API call to register user
+
+    if (password !== confirmPassword) {
+      alert("Passwords do not match");
+      return;
+    }
+
+    try {
+      //  Step 1: Create user in Firebase Auth
+      const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+      const user = userCredential.user;
+
+      // Step 2: Save additional info in Firestore
+      await setDoc(doc(db, "users", user.uid), {
+        firstName,
+        surname,
+        email,
+        idNumber,
+        investigatorId,
+        dob,
+        createdAt: new Date().toISOString(),
+      });
+
+      alert("Registration successful!");
+      navigate("/signin"); // Redirect to Sign In page
+    } catch (error) {
+      console.error("Registration error:", error.message);
+      alert("Registration failed. Check console for details.");
+    }
   };
 
   return (
