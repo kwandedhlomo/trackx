@@ -23,7 +23,7 @@ const app = initializeApp(firebaseConfig);
 
 // Get Auth & Firestore instances
 const auth = getAuth(app);
-const db = getFirestore(app); // This line is the missing piece
+const db = getFirestore(app); 
 
 // Export both
 export { auth, db };

@@ -1,8 +1,9 @@
 from fastapi import FastAPI, Request, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
-from auth.firebase_auth import verify_token
 import os
+
+from routes import auth
 
 # Load environment variables from .env
 load_dotenv()
@@ -20,14 +21,17 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Mount auth router
+app.include_router(auth.router, prefix="/auth")
+
 # Routes
 @app.get("/ping")
 def ping():
     return {"message": "pong"}
 
-@app.get("/secure")
-def secure_endpoint(user=Depends(verify_token)):
-    return {"message": f"Welcome, {user.get('email', 'unknown user')}"}
+# @app.get("/secure")
+# def secure_endpoint(user=Depends(verify_token)):
+#     return {"message": f"Welcome, {user.get('email', 'unknown user')}"}
 
 @app.get("/")
 def read_root():

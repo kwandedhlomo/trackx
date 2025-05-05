@@ -1,11 +1,13 @@
+'''
 import firebase_admin
-from firebase_admin import credentials, auth
+from firebase_admin import credentials
 from dotenv import load_dotenv
-from fastapi import HTTPException, Depends
+from fastapi import Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from services.auth_service import verify_firebase_token
 import os
 
-#  Load .env and Firebase
+# Load environment variables and initialize Firebase
 load_dotenv()
 cred_path = os.getenv("FIREBASE_CREDENTIALS")
 
@@ -13,14 +15,11 @@ if not firebase_admin._apps:
     cred = credentials.Certificate(cred_path)
     firebase_admin.initialize_app(cred)
 
-#  Set up bearer token scheme for FastAPI
+# Set up Bearer token scheme for FastAPI
 bearer_scheme = HTTPBearer()
 
-#  Dependency for protected endpoints
+# Dependency for protected endpoints
 async def verify_token(credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme)):
-    try:
-        id_token = credentials.credentials
-        decoded_token = auth.verify_id_token(id_token)
-        return decoded_token
-    except Exception:
-        raise HTTPException(status_code=401, detail="Invalid or expired token")
+    id_token = credentials.credentials
+    return verify_firebase_token(id_token)
+'''
