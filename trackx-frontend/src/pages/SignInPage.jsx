@@ -14,28 +14,35 @@ function SignInPage() {
     e.preventDefault();
   
     try {
-      // Sign in with Firebase
+      // 1. Sign in using Firebase Auth
       const userCredential = await signInWithEmailAndPassword(auth, email, password);
       const user = userCredential.user;
   
-      // Get the Firebase ID token
+      // 2. Get Firebase ID Token
       const idToken = await user.getIdToken();
   
-      // Send token to backend
-      const response = await fetch(`${import.meta.env.VITE_API_URL}/secure`, {
+      // 3. Send token to backend to verify
+      const response = await fetch(`${import.meta.env.VITE_API_URL}/auth/verify`, {
+        method: "POST",
         headers: {
           Authorization: `Bearer ${idToken}`,
         },
       });
-      
+  
+      if (!response.ok) {
+        throw new Error("Token verification failed");
+      }
   
       const data = await response.json();
-      console.log("Backend response:", data);
-      alert(`Hello ${data.message}`);
+      console.log("✅ Verified with backend:", data);
+  
+      alert(`Welcome back, ${data.email || "investigator"}!`);
     } catch (error) {
       console.error("Login failed:", error.message);
+      alert("Login failed. Please check your credentials and try again.");
     }
   };
+ 
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-black via-gray-900 to-black p-4">

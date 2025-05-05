@@ -22,18 +22,22 @@ function RegisterPage() {
 
   const handleRegister = async (e) => {
     e.preventDefault();
-
+  
     if (password !== confirmPassword) {
-      alert("Passwords do not match");
+      alert("Passwords do not match!");
       return;
     }
-
+  
     try {
-      //  Step 1: Create user in Firebase Auth
+      console.log("🔐 Creating user in Firebase Auth...");
       const userCredential = await createUserWithEmailAndPassword(auth, email, password);
       const user = userCredential.user;
-
-      // Step 2: Save additional info in Firestore
+  
+      console.log("✅ Firebase user created:", user.uid);
+      const idToken = await user.getIdToken();
+  
+      // ✅ Step: Add user to Firestore
+      console.log("🗃️ Adding user to Firestore...");
       await setDoc(doc(db, "users", user.uid), {
         firstName,
         surname,
@@ -41,16 +45,44 @@ function RegisterPage() {
         idNumber,
         investigatorId,
         dob,
-        createdAt: new Date().toISOString(),
+        createdAt: new Date().toISOString()
       });
-
-      alert("Registration successful!");
-      navigate("/signin"); // Redirect to Sign In page
+      console.log("✅ Firestore user saved!");
+  
+      // ✅ Step: Notify backend (optional if already handled above)
+      const response = await fetch(`${import.meta.env.VITE_API_URL}/auth/register`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${idToken}`,
+        },
+        body: JSON.stringify({
+          first_name: firstName,
+          surname: surname,
+          email,
+          id_number: idNumber,
+          investigator_id: investigatorId,
+          dob,
+          password,
+        }),
+      });
+  
+      const data = await response.json();
+  
+      if (!response.ok) {
+        console.error("❌ Backend responded with error:", data);
+        throw new Error(data.detail || "Registration failed");
+      }
+  
+      console.log("🎉 Registration successful!", data);
+      alert("User registered successfully!");
+      navigate("/signin");
     } catch (error) {
-      console.error("Registration error:", error.message);
-      alert("Registration failed. Check console for details.");
+      console.error("❗ Registration error:", error);
+      alert(error.message);
     }
   };
+  
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-black via-gray-900 to-black p-4">
