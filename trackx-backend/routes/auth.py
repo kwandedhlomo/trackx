@@ -1,9 +1,10 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Header
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from services.auth_service import verify_firebase_token
 from fastapi.responses import JSONResponse
 from models.user_model import UserRegisterRequest
 from services.auth_service import register_user
+
 
 router = APIRouter()
 bearer_scheme = HTTPBearer()
@@ -35,3 +36,5 @@ async def register(
         raise e
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+    
+

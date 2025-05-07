@@ -1,88 +1,112 @@
-import React, { useState } from "react";
-import { Link, useNavigate } from "react-router-dom"; // Added useNavigate here
-//import { Link } from "react-router-dom";
-import { Eye, EyeOff } from "lucide-react"; // Using lucide-react for icons (optional)
-import { createUserWithEmailAndPassword } from "firebase/auth";
-import { doc, setDoc } from "firebase/firestore";
-import { auth, db } from "../firebase";
+"use client"
+
+import { useState } from "react"
+import { Link, useNavigate } from "react-router-dom"
+import { Eye, EyeOff, Loader2 } from "lucide-react"
+import { createUserWithEmailAndPassword } from "firebase/auth"
+import { doc, setDoc } from "firebase/firestore"
+import { auth, db } from "../firebase"
+import "../css/register-animations.css"; //for the loading animation
+import { sendEmailVerification } from "firebase/auth"; //the import for the email verification
 
 
 function RegisterPage() {
-  const navigate = useNavigate(); //  Initialize navigate
-  const [firstName, setFirstName] = useState("");
-  const [surname, setSurname] = useState("");
-  const [email, setEmail] = useState("");
-  const [idNumber, setIdNumber] = useState("");
-  const [investigatorId, setInvestigatorId] = useState("");
-  const [dob, setDob] = useState("");
-  const [password, setPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
-  const [showPassword, setShowPassword] = useState(false);
-  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const navigate = useNavigate()
+  const [firstName, setFirstName] = useState("")
+  const [surname, setSurname] = useState("")
+  const [email, setEmail] = useState("")
+  const [idNumber, setIdNumber] = useState("")
+  const [investigatorId, setInvestigatorId] = useState("")
+  const [dob, setDob] = useState("")
+  const [password, setPassword] = useState("")
+  const [confirmPassword, setConfirmPassword] = useState("")
+  const [showPassword, setShowPassword] = useState(false)
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false)
+  const [isLoading, setIsLoading] = useState(false) // Add loading state
 
-  const handleRegister = async (e) => {
-    e.preventDefault();
-  
-    if (password !== confirmPassword) {
-      alert("Passwords do not match!");
-      return;
-    }
-  
-    try {
-      console.log("🔐 Creating user in Firebase Auth...");
-      const userCredential = await createUserWithEmailAndPassword(auth, email, password);
-      const user = userCredential.user;
-  
-      console.log("✅ Firebase user created:", user.uid);
-      const idToken = await user.getIdToken();
-  
-      // ✅ Step: Add user to Firestore
-      console.log("🗃️ Adding user to Firestore...");
-      await setDoc(doc(db, "users", user.uid), {
-        firstName,
-        surname,
-        email,
-        idNumber,
-        investigatorId,
-        dob,
-        createdAt: new Date().toISOString()
-      });
-      console.log("✅ Firestore user saved!");
-  
-      // ✅ Step: Notify backend (optional if already handled above)
-      const response = await fetch(`${import.meta.env.VITE_API_URL}/auth/register`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${idToken}`,
-        },
-        body: JSON.stringify({
-          first_name: firstName,
-          surname: surname,
-          email,
-          id_number: idNumber,
-          investigator_id: investigatorId,
-          dob,
-          password,
-        }),
-      });
-  
-      const data = await response.json();
-  
-      if (!response.ok) {
-        console.error("❌ Backend responded with error:", data);
-        throw new Error(data.detail || "Registration failed");
-      }
-  
-      console.log("🎉 Registration successful!", data);
-      alert("User registered successfully!");
-      navigate("/signin");
-    } catch (error) {
-      console.error("❗ Registration error:", error);
-      alert(error.message);
-    }
+  const isValidSouthAfricanId = (id) => {
+    const idRegex = /^\d{13}$/;
+    return idRegex.test(id);
   };
+
+const handleRegister = async (e) => {
+  e.preventDefault();
+
+  if (password !== confirmPassword) {
+    alert("Passwords do not match!");
+    return;
+  }
+
+  if (!isValidSouthAfricanId(idNumber)) {
+    alert("Please enter a valid 13-digit South African ID number.");
+    return;
+  }
   
+  try {
+    setIsLoading(true); // Start loading animation
+
+    console.log(" Creating user in Firebase Auth...");
+    const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+    const user = userCredential.user;
+
+    console.log(" Firebase user created:", user.uid);
+
+    // 🔁 Send email verification
+    console.log("📧 Sending email verification...");
+    await sendEmailVerification(user);
+    console.log(" Verification email sent!");
+
+    const idToken = await user.getIdToken();
+
+    // 🗃️ Save to Firestore
+    console.log("🗃️ Adding user to Firestore...");
+    await setDoc(doc(db, "users", user.uid), {
+      firstName,
+      surname,
+      email,
+      idNumber,
+      investigatorId,
+      dob,
+      createdAt: new Date().toISOString(),
+    });
+    console.log("✅ Firestore user saved!");
+
+    // ⛓️ Notify backend
+    const response = await fetch(`${import.meta.env.VITE_API_URL}/auth/register`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${idToken}`,
+      },
+      body: JSON.stringify({
+        first_name: firstName,
+        surname: surname,
+        email,
+        id_number: idNumber,
+        investigator_id: investigatorId,
+        dob,
+        password,
+      }),
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      console.error("❌ Backend responded with error:", data);
+      throw new Error(data.detail || "Registration failed");
+    }
+
+    console.log("🎉 Registration successful!", data);
+    // alert("Please verify your email before logging in.");
+    navigate("/verify-email"); // After the user logs in successfully, redirect to verify-email pagefor email verification status
+  } catch (error) {
+    console.error("❗ Registration error:", error);
+    alert(error.message);
+  } finally {
+    setIsLoading(false);
+  }
+};
+
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-black via-gray-900 to-black p-4">
@@ -234,14 +258,24 @@ function RegisterPage() {
             </div>
           </div>
 
-          {/* Submit Button */}
+          {/* Submit Button with Loading Animation */}
           <div>
-            <button
-              type="submit"
-              className="w-full py-2 px-4 bg-blue-700 hover:bg-blue-800 text-white font-bold rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-            >
-              Register
-            </button>
+          <button
+            type="submit"
+            disabled={isLoading}
+            className={`w-full py-2 px-4 bg-blue-700 hover:bg-blue-800 text-white font-bold rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-opacity duration-300 ${
+              isLoading ? "opacity-70 cursor-not-allowed" : ""
+            }`}
+          >
+            {isLoading ? (
+              <div className="flex items-center justify-center gap-2">
+                <Loader2 className="animate-spin w-5 h-5" />
+                <span>Registering...</span>
+              </div>
+            ) : (
+              "Register"
+            )}
+          </button>
           </div>
         </form>
 
@@ -253,7 +287,7 @@ function RegisterPage() {
         </div>
       </div>
     </div>
-  );
+  )
 }
 
-export default RegisterPage;
+export default RegisterPage
