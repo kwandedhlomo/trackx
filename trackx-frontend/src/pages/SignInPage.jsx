@@ -1,62 +1,57 @@
 import React, { useState } from "react";
-import { Link } from "react-router-dom";
-import { Eye, EyeOff } from "lucide-react"; //  Import eye icons
-import { signInWithEmailAndPassword } from "firebase/auth";
-import { auth } from "../firebase"; // Make sure this path matches
-
+import { Link, useNavigate } from "react-router-dom";
+import { Eye, EyeOff, Loader2 } from "lucide-react";
+import { signInWithEmailAndPassword, sendEmailVerification } from "firebase/auth";
+import { auth } from "../firebase";
 
 function SignInPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [showPassword, setShowPassword] = useState(false); //  Manage show/hide state
+  const [showPassword, setShowPassword] = useState(false);
+  const [errorMessage, setErrorMessage] = useState("");
+  const [isLoading, setIsLoading] = useState(false);
+  const navigate = useNavigate();
 
   const handleSignIn = async (e) => {
     e.preventDefault();
-  
+    setIsLoading(true);
+    setErrorMessage("");
+
     try {
-      // 1. Sign in using Firebase Auth
       const userCredential = await signInWithEmailAndPassword(auth, email, password);
       const user = userCredential.user;
-  
-      // 2. Get Firebase ID Token
-      const idToken = await user.getIdToken();
-  
-      // 3. Send token to backend to verify
-      const response = await fetch(`${import.meta.env.VITE_API_URL}/auth/verify`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${idToken}`,
-        },
-      });
-  
-      if (!response.ok) {
-        throw new Error("Token verification failed");
+
+      if (!user.emailVerified) {
+        try {
+          await sendEmailVerification(user);
+          console.log("📧 Verification email sent again.");
+        } catch (err) {
+          console.error("❌ Failed to resend verification:", err.message);
+          // Optional- might add more suer friendly message first.
+        }
+        navigate("/verify-email");
+        return;
       }
-  
-      const data = await response.json();
-      console.log("✅ Verified with backend:", data);
-  
-      alert(`Welcome back, ${data.email || "investigator"}!`);
+      
+
+      // Success → go to home
+      navigate("/home");
     } catch (error) {
       console.error("Login failed:", error.message);
-      alert("Login failed. Please check your credentials and try again.");
+      setErrorMessage("Incorrect Email or Password.");
+    } finally {
+      setIsLoading(false);
     }
   };
- 
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-black via-gray-900 to-black p-4">
       <div className="w-full max-w-md space-y-8">
-        {/* Page Title */}
         <h2 className="text-center text-3xl font-extrabold text-white">Sign In to TrackX</h2>
 
-        {/* Form */}
         <form onSubmit={handleSignIn} className="mt-8 space-y-6">
           <div className="rounded-md shadow-sm space-y-4">
-
-            {/* Email Field */}
             <div>
-              <label className="sr-only" htmlFor="email">Email address</label>
               <input
                 id="email"
                 type="email"
@@ -68,19 +63,16 @@ function SignInPage() {
               />
             </div>
 
-            {/* Password Field */}
             <div className="relative">
-              <label className="sr-only" htmlFor="password">Password</label>
               <input
                 id="password"
-                type={showPassword ? "text" : "password"} //  Toggle visibility
+                type={showPassword ? "text" : "password"}
                 required
                 placeholder="Password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 className="appearance-none rounded relative block w-full px-3 py-2 bg-gray-800 text-white placeholder-gray-400 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
               />
-              {/* Eye icon to toggle */}
               <div
                 className="absolute top-1/2 right-3 transform -translate-y-1/2 cursor-pointer text-gray-400"
                 onClick={() => setShowPassword(!showPassword)}
@@ -88,20 +80,33 @@ function SignInPage() {
                 {showPassword ? <EyeOff size={20} /> : <Eye size={20} />}
               </div>
             </div>
-
           </div>
+
+          {/* Error Message */}
+          {errorMessage && (
+            <p className="text-sm text-red-500 text-center">{errorMessage}</p>
+          )}
 
           {/* Sign In Button */}
           <div>
             <button
               type="submit"
-              className="group relative w-full flex justify-center py-2 px-4 border border-transparent text-sm font-medium rounded-md text-white bg-blue-700 hover:bg-blue-800 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+              disabled={isLoading}
+              className={`group relative w-full flex justify-center py-2 px-4 text-sm font-medium rounded-md text-white bg-blue-700 hover:bg-blue-800 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-opacity duration-300 ${
+                isLoading ? "opacity-70 cursor-not-allowed" : ""
+              }`}
             >
-              Sign In
+              {isLoading ? (
+                <div className="flex items-center justify-center gap-2">
+                  <Loader2 className="animate-spin w-5 h-5" />
+                  <span>Signing in...</span>
+                </div>
+              ) : (
+                "Sign In"
+              )}
             </button>
           </div>
 
-          {/* Forgot Password Link */}
           <div className="text-center text-sm mt-2">
             <Link to="/forgot-password" className="text-blue-400 hover:text-blue-300">
               Forgot your password?
@@ -109,7 +114,6 @@ function SignInPage() {
           </div>
         </form>
 
-        {/* Bottom Link */}
         <div className="text-center text-sm text-gray-400">
           Don't have an account?{" "}
           <Link to="/register" className="font-medium text-blue-400 hover:text-blue-300">
