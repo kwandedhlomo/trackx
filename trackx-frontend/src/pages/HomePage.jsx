@@ -1,21 +1,33 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
 import adfLogo from "../assets/image-removebg-preview.png"; 
 import trackxLogo from "../assets/trackx-logo-removebg-preview.png";
 import BarChartComponent from "../components/BarChartComponent";
 import MapComponent from "../components/MapComponent";
 import GlobeBackground from "../components/GlobeBackground"; 
+import { auth } from "../firebase"; 
+
 
 function HomePage() {
     const [clearMode, setClearMode] = useState(false); 
   
+    //This is only to check who the logged in user is
+    useEffect(() => { // Use Effect = 'React Hook' to be able to do something when a component mounts/updates etc
+      const user = auth.currentUser;
+      if (user) {
+        console.log("Logged in user:", user);
+      } else {
+        console.warn(" No user is currently logged in.");
+      }
+    }, []);
+
     return (
       <div className="relative flex flex-col min-h-screen">
       {/* Gradient background that grows properly */}
       <div className="absolute inset-0 w-full min-h-full bg-gradient-to-br from-black via-gray-900 to-black -z-20" />
         {/* 🌍 Globe Background */}
         <GlobeBackground interactive={clearMode} />
-  
+   
         {/* 🔘 Clear Button */}
         <div className="absolute top-20 right-4 z-20">
           <button

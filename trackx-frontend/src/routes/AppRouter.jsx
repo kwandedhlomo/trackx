@@ -10,6 +10,8 @@ import SimulationPage from "../pages/SimulationPage";
 import NewCasePage from "../pages/NewCasePage";
 import AnnotationsPage from "../pages/AnnotationsPage";
 import ManageCasesPage from "../pages/ManageCasesPage";
+import VerifyEmailPage from "../pages/VerifyEmailPage";
+
 // (Later: import LandingPage from "../pages/LandingPage";
 //         import SignInPage from "../pages/SignInPage";
 //         import ManageCasesPage, etc.)
@@ -29,6 +31,9 @@ function AppRouter() {
         <Route path="/new-case" element={<NewCasePage />} />
         <Route path="/annotations" element={<AnnotationsPage />} />
         <Route path="/manage-cases" element={<ManageCasesPage />} />
+        <Route path="/verify-email" element={<VerifyEmailPage />} /> 
+
+        
 
         {/* Add more routes as needed */}
 
