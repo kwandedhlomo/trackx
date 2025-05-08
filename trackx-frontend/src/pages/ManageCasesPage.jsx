@@ -1,8 +1,33 @@
 import { Link } from "react-router-dom";
 import { FaSearch, FaMapMarkerAlt, FaCalendarAlt } from "react-icons/fa";
 import adfLogo from "../assets/image-removebg-preview.png";
+import { useState } from "react";
+import axios from "axios"; 
+import { useEffect } from "react";
+
+
 
 function ManageCasesPage() {
+  const [searchTerm, setSearchTerm] = useState("");
+  const [region, setRegion] = useState("");
+  const [date, setDate] = useState("");
+  const [cases, setCases] = useState([]);
+
+  const handleSearch = async () => {
+    try {
+      const response = await axios.get("http://localhost:8000/cases/search", {
+        params: {
+          case_name: searchTerm,
+          region: region,
+          date: date
+        }
+      });
+      setCases(response.data.cases); // ✅ This extracts just the array of cases
+    } catch (error) {
+      console.error("Search failed:", error);
+    }
+  };
+
   return (
     <div className="relative flex flex-col min-h-screen">
       {/* Gradient Background */}
@@ -54,6 +79,8 @@ function ManageCasesPage() {
               type="text"
               placeholder="Search Case"
               className="pl-10 pr-4 py-2 w-full rounded bg-white bg-opacity-10 text-white border border-gray-600 placeholder-gray-400"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
               onFocus={(e) => e.target.placeholder = ''}
               onBlur={(e) => e.target.placeholder = 'Search Case'}
             />
@@ -62,11 +89,22 @@ function ManageCasesPage() {
           {/* Region Filter */}
           <div className="relative flex-1 min-w-[160px]">
             <FaMapMarkerAlt className="absolute left-3 top-2.5 text-gray-400" />
-            <input
-              type="text"
-              placeholder="Region"
-              className="pl-10 pr-4 py-2 w-full rounded bg-white bg-opacity-10 text-white border border-gray-600 placeholder-gray-400"
-            />
+            <select
+              className="pl-10 pr-4 py-2 w-full rounded bg-white bg-opacity-10 text-white border border-gray-600 appearance-none"
+              value={region}
+              onChange={(e) => setRegion(e.target.value)}
+            >
+              <option value="" disabled>Select Region</option>
+              <option value="Western Cape">Western Cape</option>
+              <option value="Eastern Cape">Eastern Cape</option>
+              <option value="Northern Cape">Northern Cape</option>
+              <option value="Gauteng">Gauteng</option>
+              <option value="KwaZulu-Natal">KwaZulu-Natal</option>
+              <option value="Free State">Free State</option>
+              <option value="Mpumalanga">Mpumalanga</option>
+              <option value="Limpopo">Limpopo</option>
+              <option value="North West">North West</option>
+            </select>
           </div>
 
           {/* Date Filter */}
@@ -74,21 +112,30 @@ function ManageCasesPage() {
             <FaCalendarAlt className="absolute left-3 top-2.5 text-gray-400" />
             <input
               type="date"
+              value={date}
+              onChange={(e) => setDate(e.target.value)}
               className="pl-10 pr-4 py-2 w-full rounded bg-white bg-opacity-10 text-white border border-gray-600"
             />
           </div>
+
+          <button
+            onClick={handleSearch}
+            className="bg-blue-700 text-white px-4 py-2 rounded hover:bg-blue-600"
+          >
+            Search
+          </button>
         </div>
+
+        
 
         {/* Case List */}
         <div className="w-full max-w-4xl bg-white bg-opacity-10 border border-gray-700 rounded-lg p-6">
           <h2 className="text-xl font-semibold mb-4 text-blue-500">Matching Cases</h2>
           <ul className="space-y-4">
-            {["ADF_XY_PE_2025", "ADF_XY_KZN_2024", "ADF_XY_KZN_2024", "ADF_XM_FLKN_2023"].map((caseId, index) => (
-              <li key={index} className="flex justify-between items-center border-b border-gray-700 pb-2">
-                <span className="text-gray-300">{caseId}</span>
-                <button className="text-sm border border-gray-300 text-white py-1 px-3 rounded hover:bg-blue-800 hover:text-white transition-colors duration-200">
-                  Manage
-                </button>
+            {cases.map((caseItem, index) => (
+              <li key={index} className="flex justify-between items-center bg-black bg-opacity-20 rounded px-4 py-3 border border-gray-600">
+                <span className="text-white font-medium">{caseItem.caseTitle}</span>
+                <button className="bg-blue-700 text-white px-4 py-2 rounded hover:bg-blue-600 transition">Manage</button>
               </li>
             ))}
           </ul>
