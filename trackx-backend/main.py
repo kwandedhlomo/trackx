@@ -4,6 +4,7 @@ from dotenv import load_dotenv
 import os
 
 from routes import auth
+from routes import cases
 
 # Load environment variables from .env
 load_dotenv()
@@ -23,6 +24,7 @@ app.add_middleware(
 
 # Mount auth router
 app.include_router(auth.router, prefix="/auth")
+app.include_router(cases.router)
 
 # Routes
 @app.get("/ping")
