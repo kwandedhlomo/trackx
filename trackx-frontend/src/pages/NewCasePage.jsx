@@ -4,6 +4,7 @@ import { motion } from "framer-motion";
 import { Upload, Info, CheckCircle, AlertCircle } from "lucide-react";
 import Papa from "papaparse";
 import adflogo from "../assets/adf-logo.png";
+import axios from "axios";
 
 function NewCasePage() {
   const navigate = useNavigate();
@@ -19,6 +20,66 @@ function NewCasePage() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [csvStats, setCsvStats] = useState(null);
   const [showGuide, setShowGuide] = useState(false);
+
+const handleCreateCase = async () => {
+  try {
+    if (!caseNumber || !caseTitle || !dateOfIncident || !region || !parsedData) {
+      alert("Please fill all required fields and upload a valid CSV file");
+      return;
+    }
+
+    setIsProcessing(true);
+
+    // Build case object matching backend model (CaseCreateRequest)
+    const casePayload = {
+      case_number: caseNumber,
+      case_title: caseTitle,
+      date_of_incident: dateOfIncident,
+      region: region,
+      between: between || "",
+      csv_data: parsedData.stoppedPoints.map(point => ({
+        latitude: point.lat,
+        longitude: point.lng,
+        timestamp: point.timestamp || null,
+        description: point.description || null,
+        ignitionStatus: point.ignitionStatus || false
+      }))
+    };
+
+    console.log("Attempting to create case with payload:", casePayload);
+
+    // Send as JSON
+    const response = await axios.post("http://localhost:8000/cases/create", casePayload, {
+      headers: {
+        'Content-Type': 'application/json'
+      }
+    });
+
+    console.log("Response received:", response.data);
+
+    if (response.data) {
+      console.log("Case created successfully:", response.data);
+      alert("Case created successfully!");
+      navigate("/manage-cases");
+    }
+
+  } catch (error) {
+    console.error("Failed to create case:", error);
+
+    if (error.response) {
+      console.error("Error response data:", error.response.data);
+      console.error("Error status:", error.response.status);
+      alert(`Failed to create case: ${JSON.stringify(error.response.data.detail)}`);
+    } else if (error.request) {
+      console.error("Error request:", error.request);
+      alert("Failed to create case: No response from server. Check your network connection.");
+    } else {
+      alert(`Failed to create case: ${error.message}`);
+    }
+  } finally {
+    setIsProcessing(false);
+  }
+};
 
   /**
    * Determines ignition status based on description text
@@ -292,7 +353,7 @@ function NewCasePage() {
   };
 
   // Handle form submission
-  const handleNext = (e) => {
+  const handleNext = async (e) => {
     e.preventDefault();
     
     // Basic validation
@@ -300,6 +361,10 @@ function NewCasePage() {
       alert("Please fill all required fields and upload a valid CSV file");
       return;
     }
+
+      // Calling case creation function
+  await handleCreateCase();
+  alert("Case created and moving to next step!");
     
     // Create the complete case data object
     const caseData = {
