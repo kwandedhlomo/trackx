@@ -13,11 +13,15 @@ load_dotenv()
 app = FastAPI()
 
 #  Setup CORS to allow frontend to access backend
-origins = os.getenv("ALLOWED_ORIGINS", "").split(",")
+raw_origins = os.getenv("ALLOWED_ORIGINS", "")
+origins = [origin.strip() for origin in raw_origins.split(",") if origin.strip()]
+if "*" in origins:
+    origins = ["*"]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,
-    allow_credentials=True,
+     allow_origins=["*"],
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
