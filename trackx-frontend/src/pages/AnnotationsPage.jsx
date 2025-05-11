@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
-import { ArrowLeft, ArrowRight, MapPin } from "lucide-react";
+import { ArrowLeft, ArrowRight, MapPin, AlertTriangle } from "lucide-react";
 import adflogo from "../assets/image-removebg-preview.png";
 
 function AnnotationsPage() {
@@ -16,6 +16,9 @@ function AnnotationsPage() {
   // State for current location index and annotations
   const [currentIndex, setCurrentIndex] = useState(0);
   const [annotations, setAnnotations] = useState([]);
+  
+  // State to track which locations are selected for report inclusion
+  const [selectedForReport, setSelectedForReport] = useState([]);
 
   // Google Maps API Key - In production, this should be stored securely
   // You would typically load this from an environment variable
@@ -67,6 +70,15 @@ function AnnotationsPage() {
       });
       
       setAnnotations(initialAnnotations);
+      
+      // Initialize selected locations (either from existing data or select all by default)
+      if (caseData.selectedForReport && Array.isArray(caseData.selectedForReport)) {
+        setSelectedForReport(caseData.selectedForReport);
+      } else {
+        // By default, select all locations for the report
+        setSelectedForReport(caseData.locations.map((_, index) => index));
+      }
+      
       setIsLoading(false);
     } catch (error) {
       console.error("Error loading case data:", error);
@@ -119,10 +131,11 @@ function AnnotationsPage() {
           annotation: annotations[index]
         }));
         
-        // Update case data
+        // Update case data with annotations and selected locations
         const updatedCaseData = {
           ...caseData,
-          locations: locationsWithAnnotations
+          locations: locationsWithAnnotations,
+          selectedForReport: selectedForReport
         };
         
         localStorage.setItem('trackxCaseData', JSON.stringify(updatedCaseData));
@@ -142,6 +155,22 @@ function AnnotationsPage() {
     };
     setAnnotations(newAnnotations);
   };
+  
+  // Toggle location selection for report
+  const toggleLocationSelection = () => {
+    setSelectedForReport(prev => {
+      if (prev.includes(currentIndex)) {
+        // If already selected, remove it
+        return prev.filter(idx => idx !== currentIndex);
+      } else {
+        // If not selected, add it
+        return [...prev, currentIndex];
+      }
+    });
+  };
+  
+  // Check if the current location is selected for the report
+  const isCurrentLocationSelected = selectedForReport.includes(currentIndex);
   
   // Calculate progress indicator
   const progressText = `Location ${currentIndex + 1} of ${locations.length}`;
@@ -291,13 +320,28 @@ function AnnotationsPage() {
       {/* Main Content */}
       {currentLocation && (
         <div className="max-w-6xl mx-auto px-6 py-8">
-          {/* Location Info */}
+          {/* Location Info and Include in Report Checkbox */}
           <div className="mb-6 flex justify-between items-center">
             <div className="flex items-center space-x-2">
               <MapPin className="text-blue-500" />
               <h2 className="text-xl font-semibold">{getLocationAddress(currentLocation)}</h2>
             </div>
-            <div className="text-gray-400">{progressText}</div>
+            <div className="flex items-center space-x-4">
+              <div className="text-gray-400">{progressText}</div>
+              {/* Include in Report Checkbox */}
+              <div className="flex items-center">
+                <input
+                  type="checkbox"
+                  id="includeInReport"
+                  checked={isCurrentLocationSelected}
+                  onChange={toggleLocationSelection}
+                  className="form-checkbox h-5 w-5 text-blue-600 rounded border-gray-600 bg-gray-700 focus:ring-blue-500"
+                />
+                <label htmlFor="includeInReport" className="ml-2 text-sm text-gray-300">
+                  Include in Report
+                </label>
+              </div>
+            </div>
           </div>
 
           {/* Map Views and Annotation Form */}
