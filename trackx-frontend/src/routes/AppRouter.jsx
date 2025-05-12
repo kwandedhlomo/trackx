@@ -11,6 +11,7 @@ import NewCasePage from "../pages/NewCasePage";
 import AnnotationsPage from "../pages/AnnotationsPage";
 import ManageCasesPage from "../pages/ManageCasesPage";
 import VerifyEmailPage from "../pages/VerifyEmailPage";
+import EditCasePage from "../pages/EditCase";
 
 // (Later: import LandingPage from "../pages/LandingPage";
 //         import SignInPage from "../pages/SignInPage";
@@ -32,6 +33,7 @@ function AppRouter() {
         <Route path="/annotations" element={<AnnotationsPage />} />
         <Route path="/manage-cases" element={<ManageCasesPage />} />
         <Route path="/verify-email" element={<VerifyEmailPage />} /> 
+        <Route path="/edit-case" element={<EditCasePage />} />
 
         
 
