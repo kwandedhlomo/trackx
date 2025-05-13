@@ -10,6 +10,7 @@ import { auth } from "../firebase";
 
 function HomePage() {
     const [clearMode, setClearMode] = useState(false); 
+    const [showMenu, setShowMenu] = useState(false);
   
     //This is only to check who the logged in user is
     useEffect(() => { // Use Effect = 'React Hook' to be able to do something when a component mounts/updates etc
@@ -44,7 +45,12 @@ function HomePage() {
             {/* 🟦 Navbar */}
             <nav className="flex justify-between items-center bg-gradient-to-r from-black to-gray-900 bg-opacity-80 backdrop-blur-md p-4 relative font-sans">
               <div className="flex items-center space-x-4">
-                <div className="text-white text-3xl cursor-pointer">&#9776;</div>
+              <div
+                className="text-white text-3xl cursor-pointer"
+                onClick={() => setShowMenu(!showMenu)}
+              >
+                &#9776;
+              </div>
                 <img src={adfLogo} alt="ADF Logo" className="h-10 w-auto" />
               </div>
   
@@ -65,6 +71,13 @@ function HomePage() {
                 </div>
               </div>
             </nav>
+            {showMenu && (
+              <div className="absolute top-16 left-0 bg-black bg-opacity-90 backdrop-blur-md text-white w-64 p-6 z-30 space-y-4 border-r border-gray-700 shadow-lg">
+                <Link to="/home" className="block hover:text-blue-400" onClick={() => setShowMenu(false)}>🏠 Home</Link>
+                <Link to="/new-case" className="block hover:text-blue-400" onClick={() => setShowMenu(false)}>📝 Create New Case / Report</Link>
+                <Link to="/manage-cases" className="block hover:text-blue-400" onClick={() => setShowMenu(false)}>📁 Manage Cases</Link>
+              </div>
+            )}
   
             {/* 🟦 Slogan */}
             <div className="text-center text-gray-300 text-lg tracking-wide mt-4 font-sans">
