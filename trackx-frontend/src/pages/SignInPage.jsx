@@ -21,6 +21,7 @@ function SignInPage() {
       const userCredential = await signInWithEmailAndPassword(auth, email, password);
       const user = userCredential.user;
 
+
       if (!user.emailVerified) {
         try {
           await sendEmailVerification(user);
@@ -33,7 +34,6 @@ function SignInPage() {
         return;
       }
       
-
       // Success → go to home
       navigate("/home");
     } catch (error) {

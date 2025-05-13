@@ -4,6 +4,10 @@ import { motion } from "framer-motion";
 import { Upload, Info, CheckCircle, AlertCircle } from "lucide-react";
 import Papa from "papaparse";
 import adflogo from "../assets/image-removebg-preview.png";
+import { auth } from "../firebase";
+import { signOut } from "firebase/auth";
+import { useAuth } from "../context/AuthContext";
+
 
 function NewCasePage() {
   const navigate = useNavigate();
@@ -19,6 +23,9 @@ function NewCasePage() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [csvStats, setCsvStats] = useState(null);
   const [showGuide, setShowGuide] = useState(false);
+  const { profile } = useAuth();
+
+  
 
   /**
    * Determines ignition status based on description text
@@ -318,6 +325,16 @@ function NewCasePage() {
     navigate("/annotations");
   };
 
+  // For Sign Out functionality
+  const handleSignOut = async () => {
+    try {
+      await signOut(auth);
+      navigate("/"); // Redirect to LandingPage
+    } catch (error) {
+      console.error("Sign-out failed:", error.message);
+    }
+  };
+
   return (
     <motion.div
       initial={{ opacity: 0 }}
@@ -336,10 +353,16 @@ function NewCasePage() {
         <h1 className="text-xl font-bold text-white">New Case</h1>
 
         <div className="flex items-center space-x-4">
-          <div>
-            <p className="text-sm">Name Surname</p>
-            <button className="text-red-400 hover:text-red-600 text-xs">Sign Out</button>
-          </div>
+        <div className="text-right">
+          <p className="text-sm text-white">{profile ? `${profile.firstName} ${profile.surname}` : "Loading..."}</p>
+          <button
+            onClick={handleSignOut}
+            className="text-red-400 hover:text-red-600 text-xs"
+          >
+            Sign Out
+          </button>
+        </div>
+
         </div>
       </div>
 
