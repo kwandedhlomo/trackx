@@ -197,7 +197,7 @@ const handleRegister = async (e) => {
             />
           </div>
 
-          {/* Date of Birth */}
+          {/* Date of Birth 
           <div className="space-y-1">
             <label htmlFor="dob" className="text-sm text-gray-300">
               Date of Birth
@@ -211,6 +211,7 @@ const handleRegister = async (e) => {
               required
             />
           </div>
+          */}
 
           {/* Password Field */}
           <div className="relative space-y-1">
