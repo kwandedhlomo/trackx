@@ -3,7 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import { Upload, Info, CheckCircle, AlertCircle } from "lucide-react";
 import Papa from "papaparse";
-import adflogo from "../assets/adf-logo.png";
+import adflogo from "../assets/image-removebg-preview.png";
 
 function NewCasePage() {
   const navigate = useNavigate();
