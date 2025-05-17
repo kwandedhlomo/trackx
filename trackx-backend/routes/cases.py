@@ -1,5 +1,7 @@
 from fastapi import APIRouter, Query, HTTPException, Body, Form, UploadFile, File
 from services.case_service import search_cases
+from services.case_service import update_case
+from services.case_service import delete_case
 from fastapi.responses import JSONResponse
 from fastapi.encoders import jsonable_encoder
 from models.case_model import CaseCreateRequest, GpsPoint
@@ -13,14 +15,11 @@ router = APIRouter()
 
 @router.get("/cases/search")
 async def search_cases_route(
-    name: str = Query(None),
+    case_name: str = Query(None),
     region: str = Query(None),
     date: str = Query(None)
 ):
-    """
-    Accepts optional search filters and returns matching cases.
-    """
-    results = await search_cases(case_name=name, region=region, date=date)
+    results = await search_cases(case_name=case_name, region=region, date=date)
     return JSONResponse(content=jsonable_encoder({"cases": results}))
 
 @router.post("/cases/create")
