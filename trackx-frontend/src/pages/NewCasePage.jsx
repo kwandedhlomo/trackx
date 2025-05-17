@@ -6,6 +6,10 @@ import Papa from "papaparse";
 import adflogo from "../assets/adf-logo.png";
 import adflogo from "../assets/image-removebg-preview.png";
 import axios from "axios";
+import { auth } from "../firebase";
+import { signOut } from "firebase/auth";
+import { useAuth } from "../context/AuthContext";
+
 
 function NewCasePage() {
   const navigate = useNavigate();
@@ -81,6 +85,9 @@ const handleCreateCase = async () => {
     setIsProcessing(false);
   }
 };
+  const { profile } = useAuth();
+
+  
 
   /**
    * Determines ignition status based on description text
@@ -384,6 +391,16 @@ const handleCreateCase = async () => {
     navigate("/annotations");
   };
 
+  // For Sign Out functionality
+  const handleSignOut = async () => {
+    try {
+      await signOut(auth);
+      navigate("/"); // Redirect to LandingPage
+    } catch (error) {
+      console.error("Sign-out failed:", error.message);
+    }
+  };
+
   return (
     <motion.div
       initial={{ opacity: 0 }}
@@ -402,10 +419,16 @@ const handleCreateCase = async () => {
         <h1 className="text-xl font-bold text-white">New Case</h1>
 
         <div className="flex items-center space-x-4">
-          <div>
-            <p className="text-sm">Name Surname</p>
-            <button className="text-red-400 hover:text-red-600 text-xs">Sign Out</button>
-          </div>
+        <div className="text-right">
+          <p className="text-sm text-white">{profile ? `${profile.firstName} ${profile.surname}` : "Loading..."}</p>
+          <button
+            onClick={handleSignOut}
+            className="text-red-400 hover:text-red-600 text-xs"
+          >
+            Sign Out
+          </button>
+        </div>
+
         </div>
       </div>
 
