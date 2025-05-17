@@ -6,12 +6,29 @@ import BarChartComponent from "../components/BarChartComponent";
 import MapComponent from "../components/MapComponent";
 import GlobeBackground from "../components/GlobeBackground"; 
 import { auth } from "../firebase"; 
+import { useAuth } from "../context/AuthContext";
+import { signOut } from "firebase/auth";
+import { useNavigate } from "react-router-dom";
 
 
 function HomePage() {
     const [clearMode, setClearMode] = useState(false); 
     const [showMenu, setShowMenu] = useState(false);
-  
+    const { profile } = useAuth();
+    const navigate = useNavigate(); // For redirecting
+
+
+    // For Sign Out functionality
+    const handleSignOut = async () => {
+      try {
+        await signOut(auth);
+        navigate("/"); // Redirect to LandingPage
+      } catch (error) {
+        console.error("Sign-out failed:", error.message);
+      }
+    };
+
+    
     //This is only to check who the logged in user is
     useEffect(() => { // Use Effect = 'React Hook' to be able to do something when a component mounts/updates etc
       const user = auth.currentUser;
@@ -63,8 +80,8 @@ function HomePage() {
               <div className="flex items-center space-x-6 text-white font-sans">
                 <Link to="/home" className="hover:text-gray-300">Home</Link>
                 <div className="flex flex-col text-right">
-                  <span className="text-white">Username</span>
-                  <button className="text-sm text-gray-300 hover:text-white">Sign Out</button>
+                  <span className="text-white">{profile ? profile.firstName : "Loading..."}</span>
+                  <button onClick={handleSignOut} className="text-sm text-gray-300 hover:text-white">Sign Out</button>
                 </div>
                 <div className="text-sm text-gray-300">
                   {new Date().toLocaleString()}
