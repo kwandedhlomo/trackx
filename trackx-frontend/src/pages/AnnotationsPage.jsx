@@ -1,11 +1,15 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
-import { ArrowLeft, ArrowRight, MapPin, AlertTriangle } from "lucide-react";
+import { ArrowLeft, ArrowRight, MapPin, AlertTriangle, Camera } from "lucide-react";
 import adflogo from "../assets/image-removebg-preview.png";
 
 function AnnotationsPage() {
   const navigate = useNavigate();
+  
+  // Refs for capturing snapshots
+  const mapImageRef = useRef(null);
+  const streetViewImageRef = useRef(null);
   
   // State to store locations from localStorage
   const [locations, setLocations] = useState([]);
@@ -19,6 +23,11 @@ function AnnotationsPage() {
   
   // State to track which locations are selected for report inclusion
   const [selectedForReport, setSelectedForReport] = useState([]);
+  
+  // State to store snapshots
+  const [snapshots, setSnapshots] = useState([]);
+  const [isCapturingSnapshot, setIsCapturingSnapshot] = useState(false);
+  const [snapshotCaptured, setSnapshotCaptured] = useState(false);
 
   // Google Maps API Key - In production, this should be stored securely
   // You would typically load this from an environment variable
@@ -79,6 +88,36 @@ function AnnotationsPage() {
         setSelectedForReport(caseData.locations.map((_, index) => index));
       }
       
+      // Load any saved snapshots from sessionStorage
+      const savedSnapshots = sessionStorage.getItem('locationSnapshots');
+      if (savedSnapshots) {
+        try {
+          const parsedSnapshots = JSON.parse(savedSnapshots);
+          setSnapshots(parsedSnapshots);
+          
+          // Check if the current location has a snapshot
+          if (parsedSnapshots[0] && parsedSnapshots[0].index === 0) {
+            setSnapshotCaptured(true);
+          }
+        } catch (error) {
+          console.error("Error parsing saved snapshots:", error);
+        }
+      } else {
+        // Initialize empty snapshots array
+        setSnapshots(new Array(caseData.locations.length).fill(null));
+      }
+      
+      // Check if there's a specific location index to navigate to
+      const storedLocationIndex = localStorage.getItem('trackxCurrentLocationIndex');
+      if (storedLocationIndex && !isNaN(parseInt(storedLocationIndex))) {
+        const index = parseInt(storedLocationIndex);
+        if (index >= 0 && index < caseData.locations.length) {
+          setCurrentIndex(index);
+        }
+        // Clear the stored index after using it
+        localStorage.removeItem('trackxCurrentLocationIndex');
+      }
+      
       setIsLoading(false);
     } catch (error) {
       console.error("Error loading case data:", error);
@@ -86,6 +125,12 @@ function AnnotationsPage() {
       setIsLoading(false);
     }
   }, []);
+  
+  // Check if snapshot is captured whenever the current index changes
+  useEffect(() => {
+    const currentSnapshot = snapshots.find(snapshot => snapshot && snapshot.index === currentIndex);
+    setSnapshotCaptured(!!currentSnapshot);
+  }, [currentIndex, snapshots]);
   
   // Get current location
   const currentLocation = locations[currentIndex] || null;
@@ -154,6 +199,100 @@ function AnnotationsPage() {
       [field]: value
     };
     setAnnotations(newAnnotations);
+    
+    // Also update the description in the snapshot if it exists
+    updateSnapshotDescription(value);
+  };
+  
+  // Update snapshot description
+  const updateSnapshotDescription = (description) => {
+    if (!snapshots) return;
+    
+    const newSnapshots = [...snapshots];
+    const snapshotIndex = newSnapshots.findIndex(
+      snapshot => snapshot && snapshot.index === currentIndex
+    );
+    
+    if (snapshotIndex !== -1) {
+      newSnapshots[snapshotIndex] = {
+        ...newSnapshots[snapshotIndex],
+        description
+      };
+      
+      setSnapshots(newSnapshots);
+      
+      // Save to sessionStorage
+      sessionStorage.setItem('locationSnapshots', JSON.stringify(newSnapshots));
+    }
+  };
+  
+  // Capture snapshots from map and street view images
+  const captureSnapshots = async () => {
+    if (!mapImageRef.current || !streetViewImageRef.current) {
+      alert("Cannot capture snapshots. Image elements not found.");
+      return;
+    }
+    
+    setIsCapturingSnapshot(true);
+    
+    try {
+      // Use html2canvas to capture the images
+      const html2canvas = (await import('html2canvas')).default;
+      
+      // Helper function to get image data
+      const getImageData = async (imgElement) => {
+        // Create a canvas element
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        
+        // Set canvas dimensions to match the image
+        canvas.width = imgElement.naturalWidth || imgElement.width;
+        canvas.height = imgElement.naturalHeight || imgElement.height;
+        
+        // Draw the image onto canvas
+        ctx.drawImage(imgElement, 0, 0, canvas.width, canvas.height);
+        
+        // Get the image data as base64 string
+        return canvas.toDataURL('image/png');
+      };
+      
+      // Capture map and street view images
+      const mapImage = await getImageData(mapImageRef.current);
+      const streetViewImage = await getImageData(streetViewImageRef.current);
+      
+      // Create new snapshot object
+      const newSnapshot = {
+        index: currentIndex,
+        mapImage,
+        streetViewImage,
+        description: annotations[currentIndex]?.description || ""
+      };
+      
+      // Update snapshots array
+      const newSnapshots = [...snapshots];
+      const existingIndex = newSnapshots.findIndex(
+        snapshot => snapshot && snapshot.index === currentIndex
+      );
+      
+      if (existingIndex !== -1) {
+        newSnapshots[existingIndex] = newSnapshot;
+      } else {
+        newSnapshots[currentIndex] = newSnapshot;
+      }
+      
+      setSnapshots(newSnapshots);
+      setSnapshotCaptured(true);
+      
+      // Save to sessionStorage
+      sessionStorage.setItem('locationSnapshots', JSON.stringify(newSnapshots));
+      
+      alert("Snapshots captured successfully!");
+    } catch (error) {
+      console.error("Error capturing snapshots:", error);
+      alert("Error capturing snapshots: " + error.message);
+    } finally {
+      setIsCapturingSnapshot(false);
+    }
   };
   
   // Toggle location selection for report
@@ -344,6 +483,33 @@ function AnnotationsPage() {
             </div>
           </div>
 
+          {/* Snapshot Status Indicator */}
+          <div className={`mb-4 p-3 rounded flex items-center ${snapshotCaptured ? 'bg-green-900 bg-opacity-30' : 'bg-yellow-900 bg-opacity-30'}`}>
+            <div className={`mr-3 p-1 rounded-full ${snapshotCaptured ? 'bg-green-500' : 'bg-yellow-500'}`}>
+              <Camera size={18} className="text-white" />
+            </div>
+            <div className="flex-grow">
+              <p className={snapshotCaptured ? 'text-green-400' : 'text-yellow-400'}>
+                {snapshotCaptured 
+                  ? "Snapshots have been captured for this location" 
+                  : "No snapshots captured yet. Capture snapshots to include in the report."}
+              </p>
+            </div>
+            <button
+              onClick={captureSnapshots}
+              disabled={isCapturingSnapshot}
+              className={`px-4 py-2 rounded text-white ${
+                isCapturingSnapshot 
+                  ? 'bg-gray-700 cursor-not-allowed' 
+                  : (snapshotCaptured ? 'bg-green-700 hover:bg-green-600' : 'bg-blue-700 hover:bg-blue-600')
+              }`}
+            >
+              {isCapturingSnapshot 
+                ? 'Capturing...' 
+                : (snapshotCaptured ? 'Recapture Snapshots' : 'Capture Snapshots')}
+            </button>
+          </div>
+
           {/* Map Views and Annotation Form */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
             {/* Map Images */}
@@ -354,6 +520,7 @@ function AnnotationsPage() {
                 <div className="h-64 bg-gray-900 flex items-center justify-center">
                   {getGoogleMapUrl(currentLocation) ? (
                     <img 
+                      ref={mapImageRef}
                       src={getGoogleMapUrl(currentLocation)} 
                       alt="Map view of location" 
                       className="w-full h-full object-cover"
@@ -361,6 +528,7 @@ function AnnotationsPage() {
                         e.target.onerror = null;
                         e.target.src = "https://via.placeholder.com/600x300?text=Map+Image+Unavailable";
                       }}
+                      crossOrigin="anonymous" // Important for capturing the image
                     />
                   ) : (
                     <div className="text-center text-gray-500">
@@ -377,6 +545,7 @@ function AnnotationsPage() {
                 <div className="h-64 bg-gray-900 flex items-center justify-center">
                   {getStreetViewUrl(currentLocation) ? (
                     <img 
+                      ref={streetViewImageRef}
                       src={getStreetViewUrl(currentLocation)} 
                       alt="Street view of location" 
                       className="w-full h-full object-cover"
@@ -384,6 +553,7 @@ function AnnotationsPage() {
                         e.target.onerror = null;
                         e.target.src = "https://via.placeholder.com/600x300?text=Street+View+Not+Available";
                       }}
+                      crossOrigin="anonymous" // Important for capturing the image
                     />
                   ) : (
                     <div className="text-center text-gray-500">
