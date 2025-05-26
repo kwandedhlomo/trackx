@@ -27,7 +27,7 @@ function AnimatedMap() {
   return (
     <div className="absolute inset-0 z-0 overflow-hidden">
 
-      {/* 🎥 Breathing effect on the map */}
+      {/* Breathing effect on the map */}
       <motion.div
         initial={{ scale: 1 }}
         animate={{ scale: 1.01 }}
@@ -39,7 +39,7 @@ function AnimatedMap() {
         }}
         className="w-full h-full"
       >
-        {/* 🌍 MAP (Voyager No Labels) */}
+        {/* MAP (Voyager No Labels) */}
         <MapContainer
           center={[-29.0, 24.0]}
           zoom={8}
@@ -60,11 +60,11 @@ function AnimatedMap() {
           />
         </MapContainer>
 
-        {/*  Semi-transparent blue overlay */}
+        {/* Semi-transparent blue overlay */}
         <div className="absolute inset-0 bg-blue-900 bg-opacity-30 z-10"></div>
       </motion.div>
 
-      {/*  Animated Pulse Markers */}
+      {/* Animated Pulse Markers */}
       {markers.map((marker) => (
         <motion.div
           key={marker.id}

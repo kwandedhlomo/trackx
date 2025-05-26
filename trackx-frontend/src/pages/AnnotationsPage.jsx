@@ -29,9 +29,8 @@ function AnnotationsPage() {
   const [isCapturingSnapshot, setIsCapturingSnapshot] = useState(false);
   const [snapshotCaptured, setSnapshotCaptured] = useState(false);
 
-  // Google Maps API Key - In production, this should be stored securely
-  // You would typically load this from an environment variable
-  const GOOGLE_MAPS_API_KEY = "AIzaSyBy0dcphg3Np6Y87uj7FYQYyDIdmAfmgK8"; // Replace with your actual API key
+  // Google Maps API Key 
+  const GOOGLE_MAPS_API_KEY = "AIzaSyBy0dcphg3Np6Y87uj7FYQYyDIdmAfmgK8"; 
   
   // Load case data from localStorage when component mounts
   useEffect(() => {
@@ -67,9 +66,8 @@ function AnnotationsPage() {
       // Set the locations
       setLocations(caseData.locations);
       
-      // Initialize annotations array (either from existing data or create new)
+      // Initialize annotations array
       const initialAnnotations = caseData.locations.map(location => {
-        // If the location already has annotations from a previous session, use those
         if (location.annotation) {
           return location.annotation;
         }
@@ -80,7 +78,7 @@ function AnnotationsPage() {
       
       setAnnotations(initialAnnotations);
       
-      // Initialize selected locations (either from existing data or select all by default)
+      // Initialize selected locations 
       if (caseData.selectedForReport && Array.isArray(caseData.selectedForReport)) {
         setSelectedForReport(caseData.selectedForReport);
       } else {
@@ -159,8 +157,7 @@ function AnnotationsPage() {
   
   // Save current annotation to the annotations array
   const saveCurrentAnnotation = () => {
-    // This function just updates the local state
-    // The full save to localStorage happens in saveAllAnnotations
+    
   };
   
   // Save all annotations to localStorage
@@ -385,7 +382,7 @@ function AnnotationsPage() {
     );
   }
   
-  // If there are no locations despite loading successfully
+ 
   if (locations.length === 0) {
     return (
       <div className="min-h-screen bg-black text-white flex flex-col items-center justify-center">

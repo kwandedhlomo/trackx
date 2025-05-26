@@ -2,8 +2,8 @@ import React from "react";
 import { Link } from "react-router-dom";
 import trackxLogo from "../assets/trackx-logo-removebg-preview.png";
 import ADFLogoNoBg from "../assets/image-removebg-preview.png";
-import AnimatedMap from "../components/AnimatedMap"; // Reusable import
-import { motion } from "framer-motion"; // 🛠 Import framer-motion
+import AnimatedMap from "../components/AnimatedMap"; 
+import { motion } from "framer-motion"; 
 
 function LandingPage() {
   return (
@@ -13,12 +13,12 @@ function LandingPage() {
       transition={{ duration: 1 }}
       className="relative min-h-screen overflow-hidden font-sans bg-black"
     >
-      {/* 🔵 Animated Map as Background */}
+      {/*  Animated Map as Background */}
       <div className="absolute inset-0 z-0">
         <AnimatedMap />
       </div>
 
-      {/* 🟣 Foreground Content */}
+      {/* Foreground Content */}
       <div className="relative z-10 flex flex-col items-center justify-center min-h-screen text-center text-white space-y-6 px-4">
         
         {/* ADF Logo */}

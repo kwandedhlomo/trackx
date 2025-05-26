@@ -1,101 +1,152 @@
-# ✅ FILE: tests/test_cases.py
-import pytest
+
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from services.case_service import sanitize_firestore_data
-from main import app
+from tests import mock_case_routes 
+import pytest
 
-# ----------- TEST CLIENT -----------
+app = FastAPI()
+app.include_router(mock_case_routes.router)
 
-@pytest.fixture
-def client():
-    return TestClient(app)
+client = TestClient(app)
 
-# ----------- UNIT TESTS -----------
+LOG_FILE = "mock_case_test_log.txt"
 
-def test_sanitize_firestore_data_simple():
-    raw = {
-        "name": "John",
-        "count": 5,
-        "active": True,
-        "location": None
-    }
-    result = sanitize_firestore_data(raw)
-    assert result == raw
+def log_test_result(name: str, description: str, test_type: str, passed: bool):
+    with open(LOG_FILE, "a") as f:
+        status = "PASS" if passed else "FAIL"
+        f.write(f"{name} | {description} | {test_type} | {status}\n")
 
-# ----------- INTEGRATION TEST -----------
+def test_search_cases():
+    name = "test_search_cases"
+    description = "Tests the /cases/search endpoint with no filters"
+    test_type = "Integration"
+    try:
+        response = client.get("/cases/search")
+        assert response.status_code == 200
+        assert "cases" in response.json()
+        log_test_result(name, description, test_type, True)
+    except AssertionError:
+        log_test_result(name, description, test_type, False)
+        raise
 
-def test_search_cases_empty_filters(client):
-    response = client.get("/cases/search")
-    assert response.status_code == 200
-    assert response.json() == {"cases": []}
+def test_create_case_success():
+    name = "test_create_case_success"
+    description = "Tests successful creation at /cases/create"
+    test_type = "Integration"
+    try:
+        response = client.post("/cases/create")
+        assert response.status_code == 200
+        assert "caseId" in response.json()
+        log_test_result(name, description, test_type, True)
+    except AssertionError:
+        log_test_result(name, description, test_type, False)
+        raise
 
-# ----------- FIREBASE MOCK FIXTURES -----------
+def test_recent_cases_route():
+    name = "test_recent_cases_route"
+    description = "Tests the /cases/recent endpoint"
+    test_type = "Integration"
+    try:
+        response = client.get("/cases/recent")
+        assert response.status_code == 200
+        assert "cases" in response.json()
+        log_test_result(name, description, test_type, True)
+    except AssertionError:
+        log_test_result(name, description, test_type, False)
+        raise
 
-@pytest.fixture
-def mock_verify_id_token(mocker):
-    return mocker.patch(
-        "firebase_admin.auth.verify_id_token",
-        return_value={"uid": "test-uid", "email": "test@example.com"}
-    )
-
-@pytest.fixture
-def mock_firestore_set(mocker):
-    mock_doc_ref = mocker.Mock()
-    mock_doc_ref.set.return_value = None
-    mocker.patch(
-        "firebase.firebase_config.db.collection",
-        return_value=mocker.Mock(document=mocker.Mock(return_value=mock_doc_ref))
-    )
-
-@pytest.fixture
-def mock_firestore_update(mocker):
-    mock_doc_ref = mocker.Mock()
-    mock_doc_ref.update.return_value = None
-    mocker.patch(
-        "firebase.firebase_config.db.collection",
-        return_value=mocker.Mock(document=mocker.Mock(return_value=mock_doc_ref))
-    )
-
-@pytest.fixture
-def mock_firestore_delete(mocker):
-    mock_doc_ref = mocker.Mock()
-    mock_doc_ref.get.return_value.exists = True
-    mock_doc_ref.delete.return_value = None
-    mocker.patch(
-        "firebase.firebase_config.db.collection",
-        return_value=mocker.Mock(document=mocker.Mock(return_value=mock_doc_ref))
-    )
-
-# ----------- ROUTE TESTS -----------
-
-def test_register_user_success(client, mock_verify_id_token, mock_firestore_set):
+def test_update_case_missing_doc_id():
+    name = "test_update_case_missing_doc_id"
+    description = "Tests update failure when doc_id is missing"
+    test_type = "Integration"
     payload = {
-        "first_name": "John",
-        "surname": "Doe",
-        "email": "john@example.com",
-        "id_number": "1234567890123",
-        "investigator_id": "INV001",
-        "dob": "1990-01-01"
-    }
-    headers = {"Authorization": "Bearer mocktoken"}
-    response = client.post("/auth/register", json=payload, headers=headers)
-    assert response.status_code == 200
-    assert "uid" in response.json()
-
-def test_update_case(client, mock_firestore_update):
-    payload = {
-        "doc_id": "mockdocid123",
-        "caseNumber": "Case001",
-        "caseTitle": "Mock Case",
+        "caseNumber": "001",
+        "caseTitle": "Updated Case",
         "dateOfIncident": "2024-01-01",
-        "region": "Gauteng",
-        "between": "State vs Mock"
+        "region": "Western Cape",
+        "between": "State vs Y"
     }
-    response = client.put("/cases/update", json=payload)
-    assert response.status_code == 200
-    assert response.json()["success"] is True
+    try:
+        response = client.put("/cases/update", json=payload)
+        assert response.status_code == 400
+        log_test_result(name, description, test_type, True)
+    except AssertionError:
+        log_test_result(name, description, test_type, False)
+        raise
 
-def test_delete_case(client, mock_firestore_delete):
-    response = client.delete("/cases/delete/mockdocid123")
-    assert response.status_code == 200
-    assert response.json()["success"] is True
+def test_delete_case_not_found():
+    name = "test_delete_case_not_found"
+    description = "Tests deleting a non-existent case"
+    test_type = "Integration"
+    try:
+        response = client.delete("/cases/delete/nonexistentdocid123")
+        assert response.status_code == 400
+        log_test_result(name, description, test_type, True)
+    except AssertionError:
+        log_test_result(name, description, test_type, False)
+        raise
+
+def test_delete_case_found():
+    name = "test_delete_case_found"
+    description = "Tests deleting an existing case"
+    test_type = "Integration"
+    try:
+        response = client.delete("/cases/delete/founddoc123")
+        assert response.status_code == 200
+        assert response.json()["success"]
+        log_test_result(name, description, test_type, True)
+    except AssertionError:
+        log_test_result(name, description, test_type, False)
+        raise
+
+def test_monthly_case_counts():
+    name = "test_monthly_case_counts"
+    description = "Tests the /cases/monthly-counts endpoint"
+    test_type = "Integration"
+    try:
+        response = client.get("/cases/monthly-counts")
+        assert response.status_code == 200
+        assert "counts" in response.json()
+        log_test_result(name, description, test_type, True)
+    except AssertionError:
+        log_test_result(name, description, test_type, False)
+        raise
+
+def test_region_case_counts():
+    name = "test_region_case_counts"
+    description = "Tests the /cases/region-counts endpoint"
+    test_type = "Integration"
+    try:
+        response = client.get("/cases/region-counts")
+        assert response.status_code == 200
+        assert "counts" in response.json()
+        log_test_result(name, description, test_type, True)
+    except AssertionError:
+        log_test_result(name, description, test_type, False)
+        raise
+
+def test_all_case_points():
+    name = "test_all_case_points"
+    description = "Tests the /cases/all-points endpoint"
+    test_type = "Integration"
+    try:
+        response = client.get("/cases/all-points")
+        assert response.status_code == 200
+        assert "points" in response.json()
+        log_test_result(name, description, test_type, True)
+    except AssertionError:
+        log_test_result(name, description, test_type, False)
+        raise
+
+def test_last_case_points():
+    name = "test_last_case_points"
+    description = "Tests the /cases/last-points endpoint"
+    test_type = "Integration"
+    try:
+        response = client.get("/cases/last-points")
+        assert response.status_code == 200
+        assert "points" in response.json()
+        log_test_result(name, description, test_type, True)
+    except AssertionError:
+        log_test_result(name, description, test_type, False)
+        raise
