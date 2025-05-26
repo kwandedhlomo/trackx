@@ -1,22 +1,49 @@
 import { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
+import {
+  PieChart,
+  Pie,
+  Cell,
+  Tooltip,
+  Legend,
+  ResponsiveContainer,
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  BarChart,
+  Bar
+} from "recharts";
 import adfLogo from "../assets/image-removebg-preview.png"; 
 import trackxLogo from "../assets/trackx-logo-removebg-preview.png";
 import BarChartComponent from "../components/BarChartComponent";
-import MapComponent from "../components/MapComponent";
+import HeatMapComponent from "../components/HeatMapComponent";
 import GlobeBackground from "../components/GlobeBackground"; 
 import { auth } from "../firebase"; 
 import { useAuth } from "../context/AuthContext";
 import { signOut } from "firebase/auth";
 import { useNavigate } from "react-router-dom";
+import axios from "axios";
 
 
 function HomePage() {
     const [clearMode, setClearMode] = useState(false); 
     const [showMenu, setShowMenu] = useState(false);
+    const [recentCases, setRecentCases] = useState([]);
+    const [statusStats, setStatusStats] = useState({ resolved: 0, unresolved: 0 });
     const { profile } = useAuth();
-    const navigate = useNavigate(); // For redirecting
+    const navigate = useNavigate(); 
+    const [monthlyCaseCounts, setMonthlyCaseCounts] = useState([]);
+    const [regionCounts, setRegionCounts] = useState([]);
+    const [heatPoints, setHeatPoints] = useState([]);
+    const [globePoints, setGlobePoints] = useState([]);
 
+
+    const BLUE = "#1E40AF"; 
+    const RED = "#B91C1C";  
+  
+    const COLORS = [BLUE, RED];
 
     // For Sign Out functionality
     const handleSignOut = async () => {
@@ -29,8 +56,8 @@ function HomePage() {
     };
 
     
-    //This is only to check who the logged in user is
-    useEffect(() => { // Use Effect = 'React Hook' to be able to do something when a component mounts/updates etc
+    //check who the logged in user is
+    useEffect(() => { 
       const user = auth.currentUser;
       if (user) {
         console.log("Logged in user:", user);
@@ -39,14 +66,107 @@ function HomePage() {
       }
     }, []);
 
+    useEffect(() => {
+      const fetchRecentCases = async () => {
+        try {
+          const response = await axios.get("http://localhost:8000/cases/recent");
+          setRecentCases(response.data.cases);
+        } catch (error) {
+          console.error("Failed to fetch recent cases:", error);
+        }
+      };
+      fetchRecentCases();
+    }, []);
+
+    useEffect(() => {
+      const fetchAllCases = async () => {
+        try {
+          const response = await axios.get("http://localhost:8000/cases/search", {
+            params: {}
+          });
+  
+          const allCases = response.data.cases || [];
+          const resolved = allCases.filter((c) => c.status === "resolved").length;
+          const unresolved = allCases.filter((c) => c.status === "unresolved").length;
+  
+          setStatusStats({ resolved, unresolved });
+        } catch (err) {
+          console.error("Failed to fetch case statuses:", err);
+        }
+      };
+  
+      fetchAllCases();
+    }, []);
+  
+    const pieData = [
+      { name: "Resolved", value: statusStats.resolved },
+      { name: "Unresolved", value: statusStats.unresolved },
+    ];
+
+    useEffect(() => {
+      const fetchMonthlyCounts = async () => {
+        try {
+          const response = await axios.get("http://localhost:8000/cases/monthly-counts");
+          setMonthlyCaseCounts(response.data.counts);
+        } catch (error) {
+          console.error("Failed to fetch monthly case counts:", error);
+        }
+      };
+    
+      fetchMonthlyCounts();
+    }, []);
+
+    useEffect(() => {
+      const fetchRegionCounts = async () => {
+        try {
+          const response = await axios.get("http://localhost:8000/cases/region-counts");
+          setRegionCounts(response.data.counts || []);
+        } catch (err) {
+          console.error("Failed to fetch region counts:", err);
+        }
+      };
+    
+      fetchRegionCounts();
+    }, []);
+
+    useEffect(() => {
+      const fetchHeatPoints = async () => {
+        try {
+          const response = await axios.get("http://localhost:8000/cases/all-points");
+          const points = response.data.points || [];
+    
+          //console.log("Heatmap points fetched:", points);
+          setHeatPoints(points);
+          //console.log("HomePage fetched points:", points);
+        } catch (err) {
+          console.error("Failed to fetch heatmap points:", err);
+        }
+      };
+    
+      fetchHeatPoints();
+    }, []);
+
+    useEffect(() => {
+      const fetchGlobePoints = async () => {
+        try {
+          const response = await axios.get("http://localhost:8000/cases/last-points");
+          setGlobePoints(response.data.points || []);
+        } catch (err) {
+          console.error("Failed to fetch globe points:", err);
+        }
+      };
+    
+      fetchGlobePoints();
+    }, []);
+
     return (
       <div className="relative flex flex-col min-h-screen">
       {/* Gradient background that grows properly */}
       <div className="absolute inset-0 w-full min-h-full bg-gradient-to-br from-black via-gray-900 to-black -z-20" />
-        {/* 🌍 Globe Background */}
-        <GlobeBackground interactive={clearMode} />
+        {/*  Globe Background */}
+        <GlobeBackground interactive={clearMode} globePoints={globePoints} />
    
-        {/* 🔘 Clear Button */}
+        {/*  Clear Button */}
         <div className="absolute top-20 right-4 z-20">
           <button
             onClick={() => setClearMode(!clearMode)}
@@ -56,7 +176,7 @@ function HomePage() {
           </button>
         </div>
   
-        {/* 🟦 Main Content (hidden when clearMode is true) */}
+        {/* Main Content (hidden when clearMode is true) */}
         {!clearMode && (
           <div className="flex-grow flex flex-col relative z-10">
             {/* 🟦 Navbar */}
@@ -96,37 +216,66 @@ function HomePage() {
               </div>
             )}
   
-            {/* 🟦 Slogan */}
+            {/*Slogan */}
             <div className="text-center text-gray-300 text-lg tracking-wide mt-4 font-sans">
               Let's track the case
             </div>
   
-            {/* 🟦 Main Content */}
+            {/* Main Content */}
             <main className="flex flex-col items-center justify-center w-full p-8 space-y-10">
               {/* Two placeholder images */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-8 w-full max-w-6xl">
-                <div className="bg-white bg-opacity-10 border border-gray-700 rounded-lg h-64 flex items-center justify-center">
-                  <span className="text-gray-300">[Snapshot Placeholder]</span>
-                </div>
-                <div className="bg-white bg-opacity-10 border border-gray-700 rounded-lg h-64 flex items-center justify-center">
-                  <span className="text-gray-300">[Route Simulation Placeholder]</span>
-                </div>
+              <div className="bg-white bg-opacity-10 border border-gray-700 rounded-lg p-6">
+                <h3 className="text-lg text-blue-500 mb-4 font-semibold">Resolution Status</h3>
+                <ResponsiveContainer width="100%" height={250}>
+                  <PieChart>
+                    <Pie data={pieData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={80} label>
+                      {pieData.map((entry, index) => (
+                        <Cell key={`cell-${index}`} fill={COLORS[index]} />
+                      ))}
+                    </Pie>
+                    <Tooltip />
+                    <Legend />
+                  </PieChart>
+                </ResponsiveContainer>
               </div>
+              <div className="bg-white bg-opacity-10 border border-gray-700 rounded-lg p-6">
+                <h3 className="text-lg text-blue-500 mb-4 font-semibold">Case Distribution Over Time</h3>
+                <ResponsiveContainer width="100%" height={230}>
+                  <LineChart data={monthlyCaseCounts} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#444" />
+                    <XAxis dataKey="month" stroke="#ccc" />
+                    <YAxis stroke="#ccc" allowDecimals={false} />
+                    <Tooltip />
+                    <Legend />
+                    <Line type="monotone" dataKey="count" stroke={BLUE} strokeWidth={2} />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
   
-              {/* Recent Cases */}
-              <div className="w-full max-w-4xl bg-white bg-opacity-10 border border-gray-700 rounded-lg p-6">
-                <h2 className="text-xl font-semibold mb-4 text-blue-500">Recent Cases</h2>
-                <ul className="space-y-4">
-                  {["ADF_XY_PE_2025", "ADF_XY_KZN_2024", "ADF_XY_KZN_2024", "ADF_XM_FLKN_2023"].map((caseId, index) => (
+            {/* Recent Cases */}
+            <div className="w-full max-w-4xl bg-white bg-opacity-10 border border-gray-700 rounded-lg p-6">
+              <h2 className="text-xl font-semibold mb-4 text-blue-500">Recent Cases</h2>
+              <ul className="space-y-4">
+                {recentCases.length > 0 ? (
+                  recentCases.map((caseItem, index) => (
                     <li key={index} className="flex justify-between items-center border-b border-gray-700 pb-2">
-                      <span className="text-gray-300">{caseId}</span>
-                      <button className="text-sm border border-gray-300 text-white py-1 px-3 rounded hover:bg-blue-800 hover:text-white transition-colors duration-200">
+                      <span className="text-gray-300">{caseItem.caseTitle}</span>
+                      <Link
+                        to="/edit-case"
+                        state={{ caseData: { ...caseItem, doc_id: caseItem.doc_id } }}
+                        className="text-sm border border-gray-300 text-white py-1 px-3 rounded hover:bg-blue-800 hover:text-white transition-colors duration-200"
+                      >
                         Manage
-                      </button>
+                      </Link>
                     </li>
-                  ))}
-                </ul>
-              </div>
+                  ))
+                ) : (
+                  <p className="text-gray-400 text-sm">No recent cases available.</p>
+                )}
+              </ul>
+            </div>
   
               {/* Create New Case Button */}
               <Link
@@ -139,15 +288,25 @@ function HomePage() {
               {/* Dashboard Section */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-8 w-full max-w-6xl mt-10">
                 {/* Bar Chart */}
-                <div className="bg-white bg-opacity-10 border border-gray-700 rounded-lg p-6">
-                  <h3 className="text-lg text-blue-500 mb-4 font-semibold">Case Frequency by Region</h3>
-                  <BarChartComponent />
-                </div>
+                  <div className="bg-white bg-opacity-10 border border-gray-700 rounded-lg p-6">
+                    <h3 className="text-lg text-blue-500 mb-4 font-semibold">Case Frequency by Region</h3>
+                    <ResponsiveContainer width="100%" height={230}>
+                      <BarChart data={regionCounts} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#444" />
+                        <XAxis dataKey="region" stroke="#ccc" />
+                        <YAxis stroke="#ccc" allowDecimals={false} />
+                        <Tooltip />
+                        <Legend />
+                        <Bar dataKey="count" fill={BLUE} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
   
+
                 {/* Map Visualization */}
                 <div className="bg-white bg-opacity-10 border border-gray-700 rounded-lg p-6">
                   <h3 className="text-lg text-blue-500 mb-4 font-semibold">Vehicle Movement Heatmap</h3>
-                  <MapComponent />
+                  <HeatMapComponent casePoints={heatPoints} />
                 </div>
               </div>
             </main>

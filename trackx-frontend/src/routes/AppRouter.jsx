@@ -16,15 +16,12 @@ import VerifyEmailPage from "../pages/VerifyEmailPage";
 import EditCasePage from "../pages/EditCase";
 
 
-//LOOKS DIFFERENT, BUT VERY SIMILAR TO BEFORE 
-// ADDED A TAG FOR ROUTES WHICH ARE PROTECTED (NEED AUTH)
-// ADDED A TAG FOR ROUTES WHICH ARE NOT PROTECTED (NO NEED FOR AUTH)
 
 
 function AppRouter() {
   const { loading } = useAuth();
 
-  // Optional: while checking auth state, don't load routes yet
+  
   if (loading) return null;
 
   return (

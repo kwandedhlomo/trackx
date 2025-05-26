@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import { Link } from "react-router-dom";
-import adflogo from "../assets/adf-logo.png";
+import adflogo from "../assets/image-removebg-preview.png";
 import { motion } from "framer-motion";
 import { AlertTriangle, MapPin, FileText, Camera } from "lucide-react";
 import jsPDF from "jspdf";
@@ -86,7 +86,7 @@ function OverviewPage() {
         setLocationTitles(Array(caseData.locations.length).fill(""));
       }
 
-      // ADDED: Load stored snapshots from session storage
+      
       const storedSnapshots = sessionStorage.getItem('locationSnapshots');
       if (storedSnapshots) {
         const parsedSnapshots = JSON.parse(storedSnapshots);
@@ -127,7 +127,7 @@ function OverviewPage() {
     }
   };
 
-  // UPDATED: Generate PDF report with snapshots
+ 
   const generatePDF = async () => {
     if (!reportRef.current) return null;
     
@@ -205,7 +205,7 @@ function OverviewPage() {
           yPosition += 4;
         }
         
-        // ADDED: Add snapshot images if available
+        
         const snapshot = snapshots.find(s => s && s.index === locationIndex);
         if (snapshot) {
           // Add map image if available

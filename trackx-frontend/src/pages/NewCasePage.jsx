@@ -3,7 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import { Upload, Info, CheckCircle, AlertCircle } from "lucide-react";
 import Papa from "papaparse";
-import { adflogo, adflogoPreview } from "../assets/logos";
+import adflogo from "../assets/image-removebg-preview.png";
 import axios from "axios";
 import { auth } from "../firebase";
 import { signOut } from "firebase/auth";
@@ -96,7 +96,7 @@ const handleCreateCase = async () => {
   const determineIgnitionStatus = (description) => {
     if (!description) return null;
     
-    // Convert to lowercase for case-insensitive matching
+    
     const desc = description.toLowerCase();
     
     // Check for "stopped" indicators
@@ -188,9 +188,9 @@ const handleCreateCase = async () => {
     setParseError(null);
     
     Papa.parse(file, {
-      header: true, // First row is header
-      dynamicTyping: true, // Convert numbers to numbers, not strings
-      skipEmptyLines: true, // Skip empty rows
+      header: true, 
+      dynamicTyping: true, 
+      skipEmptyLines: true, 
       complete: function(results) {
         setIsProcessing(false);
         
@@ -248,7 +248,7 @@ const handleCreateCase = async () => {
           
           console.log("Possible matches:", possibleColumns);
           
-          // Check if we have at least potential matches for lat/lng
+          
           if (possibleColumns.lat.length === 0 || possibleColumns.lng.length === 0) {
             setParseError("Could not identify latitude/longitude columns in the CSV");
             setParsedData(null);
@@ -274,7 +274,7 @@ const handleCreateCase = async () => {
             // Get description if available
             const description = bestColumns.description ? row[bestColumns.description] : null;
             
-            // Get ignition status from column or derive from description
+            // Get ignition status from column or from description
             let ignitionStatus = bestColumns.ignition ? row[bestColumns.ignition] : null;
             
             // If ignition status is not available but description is, try to determine it
@@ -292,7 +292,7 @@ const handleCreateCase = async () => {
               timestamp,
               description,
               ignitionStatus,
-              rawData: row // Store the full row data for reference
+              rawData: row 
             };
           }).filter(item => {
             // Filter out any rows with invalid lat/lng

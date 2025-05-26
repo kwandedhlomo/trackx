@@ -1,29 +1,34 @@
-// GlobeBackground.jsx
 import { useEffect, useRef } from "react";
+import { useNavigate } from "react-router-dom";
 import Globe from "globe.gl";
 
-function GlobeBackground({ interactive }) {
+function GlobeBackground({ interactive, globePoints }) {
   const globeContainerRef = useRef();
   const globeInstanceRef = useRef(null);
+  const navigate = useNavigate();
 
   useEffect(() => {
     if (!globeInstanceRef.current) {
       globeInstanceRef.current = Globe()(globeContainerRef.current)
         .globeImageUrl("https://unpkg.com/three-globe/example/img/earth-dark.jpg")
-        .backgroundColor("rgba(0, 0, 0, 0)") // Transparent background
-        .pointsData([
-          { lat: -33.918861, lng: 18.4233, size: 0.5, color: "blue" },
-          { lat: -29.8587, lng: 31.0218, size: 0.5, color: "blue" },
-        ])
+        .backgroundColor("rgba(0, 0, 0, 0)")
         .pointLat("lat")
         .pointLng("lng")
         .pointColor("color")
-        .pointRadius("size");
+        .pointRadius("size")
+        .pointLabel((d) => `<b>${d.caseTitle}</b>`)
+        .onPointClick((point) => {
+          if (point.doc_id) {
+            navigate("/edit-case", { state: { docId: point.doc_id } });
+          }
+        });
+    } else {
+      globeInstanceRef.current.pointsData(globePoints);
     }
 
     globeInstanceRef.current.controls().autoRotate = true;
-    globeInstanceRef.current.controls().autoRotateSpeed = 0.3;
-  }, []);
+    globeInstanceRef.current.controls().autoRotateSpeed = 0.1;
+  }, [globePoints, navigate]);
 
   return (
     <div

@@ -25,9 +25,9 @@ function SignInPage() {
       if (!user.emailVerified) {
         try {
           await sendEmailVerification(user);
-          console.log("📧 Verification email sent again.");
+          console.log("Verification email sent again.");
         } catch (err) {
-          console.error("❌ Failed to resend verification:", err.message);
+          console.error("Failed to resend verification:", err.message);
           // Optional- might add more suer friendly message first.
         }
         navigate("/verify-email");

@@ -19,7 +19,7 @@ function ManageCasesPage() {
           date: date
         }
       });
-      setCases(response.data.cases); // ✅ Firestore doc_id should be included
+      setCases(response.data.cases); 
     } catch (error) {
       console.error("Search failed:", error);
     }
@@ -30,7 +30,7 @@ function ManageCasesPage() {
     try {
       await axios.delete(`http://localhost:8000/cases/delete/${doc_id}`);
       alert("Case deleted successfully.");
-      handleSearch(); // Refresh the list
+      handleSearch(); 
     } catch (err) {
       console.error("Delete failed:", err);
       alert("Failed to delete case.");
@@ -96,15 +96,15 @@ function ManageCasesPage() {
               onChange={(e) => setRegion(e.target.value)}
             >
               <option value="" disabled>Select Region</option>
-              <option value="Western Cape">Western Cape</option>
-              <option value="Eastern Cape">Eastern Cape</option>
-              <option value="Northern Cape">Northern Cape</option>
-              <option value="Gauteng">Gauteng</option>
-              <option value="KwaZulu-Natal">KwaZulu-Natal</option>
-              <option value="Free State">Free State</option>
-              <option value="Mpumalanga">Mpumalanga</option>
-              <option value="Limpopo">Limpopo</option>
-              <option value="North West">North West</option>
+              <option value="western-cape">Western Cape</option>
+              <option value="eastern-cape">Eastern Cape</option>
+              <option value="northern-cape">Northern Cape</option>
+              <option value="gauteng">Gauteng</option>
+              <option value="kwazulu-natal">KwaZulu-Natal</option>
+              <option value="free-state">Free State</option>
+              <option value="mpumalanga">Mpumalanga</option>
+              <option value="limpopo">Limpopo</option>
+              <option value="north-west">North West</option>
             </select>
           </div>
 

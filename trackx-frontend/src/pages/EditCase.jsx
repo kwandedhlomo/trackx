@@ -7,13 +7,39 @@ import axios from "axios";
 function EditCasePage() {
   const location = useLocation();
   const navigate = useNavigate();
-  const { caseData } = location.state || {};
+  const caseDataFromLocation = location.state?.caseData || null;
+  const docIdFromLocation = location.state?.docId || null;
+
+  const [loading, setLoading] = useState(true);
+  const [caseData, setCaseData] = useState(caseDataFromLocation);
 
   const [caseNumber, setCaseNumber] = useState("");
   const [caseTitle, setCaseTitle] = useState("");
   const [dateOfIncident, setDateOfIncident] = useState("");
   const [region, setRegion] = useState("");
   const [between, setBetween] = useState("");
+  const [status, setStatus] = useState("unresolved");
+
+  useEffect(() => {
+    const fetchCase = async (id) => {
+      try {
+        const res = await axios.get("http://localhost:8000/cases/search", { params: {} });
+        const allCases = res.data.cases;
+        const found = allCases.find((c) => c.doc_id === id);
+        if (found) setCaseData(found);
+      } catch (err) {
+        console.error("Failed to fetch case by ID:", err);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    if (!caseDataFromLocation && docIdFromLocation) {
+      fetchCase(docIdFromLocation);
+    } else {
+      setLoading(false);
+    }
+  }, [caseDataFromLocation, docIdFromLocation]);
 
   useEffect(() => {
     if (caseData) {
@@ -22,30 +48,24 @@ function EditCasePage() {
       setDateOfIncident(caseData.dateOfIncident?.split("T")[0] || "");
       setRegion(caseData.region || "");
       setBetween(caseData.between || "");
+      setStatus(caseData.status || "unresolved");
     }
   }, [caseData]);
 
   const handleUpdate = async (e) => {
     e.preventDefault();
-  
+
     try {
-        console.log({
-            doc_id: caseData.doc_id,
-            caseNumber,
-            caseTitle,
-            dateOfIncident,
-            region,
-            between
-          });
       const response = await axios.put("http://localhost:8000/cases/update", {
-        doc_id: caseData.doc_id, // you need to pass this from ManageCasesPage
+        doc_id: caseData?.doc_id || docIdFromLocation,
         caseNumber,
         caseTitle,
         dateOfIncident,
         region,
         between,
+        status,
       });
-  
+
       if (response.data.success) {
         alert("Case updated successfully!");
         navigate("/manage-cases");
@@ -57,6 +77,8 @@ function EditCasePage() {
       alert("An error occurred during update.");
     }
   };
+
+  if (loading) return <div className="text-white p-4">Loading case...</div>;
 
   return (
     <motion.div
@@ -101,21 +123,33 @@ function EditCasePage() {
               <label className="block text-sm font-medium text-gray-300 mb-1">Region *</label>
               <select value={region} onChange={(e) => setRegion(e.target.value)} required className="w-full p-2 bg-gray-800 border border-gray-600 rounded text-white">
                 <option value="">Select a region</option>
-                <option value="Western Cape">Western Cape</option>
-                <option value="Eastern Cape">Eastern Cape</option>
-                <option value="Northern Cape">Northern Cape</option>
-                <option value="Gauteng">Gauteng</option>
-                <option value="KwaZulu-Natal">KwaZulu-Natal</option>
-                <option value="Free State">Free State</option>
-                <option value="Mpumalanga">Mpumalanga</option>
-                <option value="Limpopo">Limpopo</option>
-                <option value="North West">North West</option>
+                <option value="western-cape">Western Cape</option>
+                <option value="eastern-cape">Eastern Cape</option>
+                <option value="northern-cape">Northern Cape</option>
+                <option value="gauteng">Gauteng</option>
+                <option value="kwazulu-natal">KwaZulu-Natal</option>
+                <option value="free-state">Free State</option>
+                <option value="mpumalanga">Mpumalanga</option>
+                <option value="limpopo">Limpopo</option>
+                <option value="north-west">North West</option>
               </select>
             </div>
             <div className="md:col-span-2">
               <label className="block text-sm font-medium text-gray-300 mb-1">Between</label>
               <input type="text" value={between} onChange={(e) => setBetween(e.target.value)} className="w-full p-2 bg-gray-800 border border-gray-600 rounded text-white" placeholder="e.g. The State vs. John Doe" />
             </div>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-300 mb-1">Status *</label>
+            <select
+              value={status}
+              onChange={(e) => setStatus(e.target.value)}
+              required
+              className="w-full p-2 bg-gray-800 border border-gray-600 rounded text-white"
+            >
+              <option value="unresolved">Unresolved</option>
+              <option value="resolved">Resolved</option>
+            </select>
           </div>
 
           <div className="flex justify-between mt-10">

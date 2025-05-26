@@ -5,7 +5,7 @@ from datetime import datetime
 class GpsPoint(BaseModel):
     latitude: float
     longitude: float
-    timestamp: Union[datetime, str] = None  # Allow string format timestamps
+    timestamp: Union[datetime, str] = None  
     speed: Optional[float] = None
     altitude: Optional[float] = None
     heading: Optional[float] = None
@@ -18,4 +18,4 @@ class CaseCreateRequest(BaseModel):
     date_of_incident: str
     region: str
     between: Optional[str] = None
-    csv_data: List[GpsPoint]  # This uses the GpsPoint model
+    csv_data: List[GpsPoint]  

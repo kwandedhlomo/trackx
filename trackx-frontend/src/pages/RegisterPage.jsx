@@ -6,8 +6,8 @@ import { Eye, EyeOff, Loader2 } from "lucide-react"
 import { createUserWithEmailAndPassword } from "firebase/auth"
 import { doc, setDoc } from "firebase/firestore"
 import { auth, db } from "../firebase"
-import "../css/register-animations.css"; //for the loading animation
-import { sendEmailVerification } from "firebase/auth"; //the import for the email verification
+import "../css/register-animations.css"; 
+import { sendEmailVerification } from "firebase/auth"; 
 
 
 function RegisterPage() {
@@ -51,14 +51,14 @@ const handleRegister = async (e) => {
 
     console.log(" Firebase user created:", user.uid);
 
-    // 🔁 Send email verification
+    // Send email verification
     console.log("📧 Sending email verification...");
     await sendEmailVerification(user);
     console.log(" Verification email sent!");
 
     const idToken = await user.getIdToken();
 
-    // 🗃️ Save to Firestore
+    // Save to Firestore
     console.log("🗃️ Adding user to Firestore...");
     await setDoc(doc(db, "users", user.uid), {
       firstName,
@@ -71,7 +71,7 @@ const handleRegister = async (e) => {
     });
     console.log("✅ Firestore user saved!");
 
-    // ⛓️ Notify backend
+    // Notify backend
     const response = await fetch(`${import.meta.env.VITE_API_URL}/auth/register`, {
       method: "POST",
       headers: {
@@ -92,15 +92,15 @@ const handleRegister = async (e) => {
     const data = await response.json();
 
     if (!response.ok) {
-      console.error("❌ Backend responded with error:", data);
+      console.error("Backend responded with error:", data);
       throw new Error(data.detail || "Registration failed");
     }
 
-    console.log("🎉 Registration successful!", data);
+    console.log("Registration successful!", data);
     // alert("Please verify your email before logging in.");
     navigate("/verify-email"); // After the user logs in successfully, redirect to verify-email pagefor email verification status
   } catch (error) {
-    console.error("❗ Registration error:", error);
+    console.error("Registration error:", error);
     alert(error.message);
   } finally {
     setIsLoading(false);
