@@ -18,13 +18,14 @@ import {
 import adfLogo from "../assets/image-removebg-preview.png"; 
 import trackxLogo from "../assets/trackx-logo-removebg-preview.png";
 import BarChartComponent from "../components/BarChartComponent";
-import HeatMapComponent from "../components/HeatMapComponent";
+// import HeatMapComponent from "../components/HeatMapComponent";
 import GlobeBackground from "../components/GlobeBackground"; 
 import { auth } from "../firebase"; 
 import { useAuth } from "../context/AuthContext";
 import { signOut } from "firebase/auth";
 import { useNavigate } from "react-router-dom";
 import axios from "axios";
+import MiniHeatMapWindow from "../components/MiniHeatMapWindow";
 
 
 function HomePage() {
@@ -135,7 +136,7 @@ function HomePage() {
           const response = await axios.get("http://localhost:8000/cases/all-points");
           const points = response.data.points || [];
     
-          //console.log("Heatmap points fetched:", points);
+          console.log("🔥 Raw heatmap points from backend:", points);
           setHeatPoints(points);
           //console.log("HomePage fetched points:", points);
         } catch (err) {
@@ -306,7 +307,7 @@ function HomePage() {
                 {/* Map Visualization */}
                 <div className="bg-white bg-opacity-10 border border-gray-700 rounded-lg p-6">
                   <h3 className="text-lg text-blue-500 mb-4 font-semibold">Vehicle Movement Heatmap</h3>
-                  <HeatMapComponent casePoints={heatPoints} />
+                  <MiniHeatMapWindow points={heatPoints} />
                 </div>
               </div>
             </main>

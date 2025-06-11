@@ -14,6 +14,8 @@ import AnnotationsPage from "../pages/AnnotationsPage";
 import ManageCasesPage from "../pages/ManageCasesPage";
 import VerifyEmailPage from "../pages/VerifyEmailPage";
 import EditCasePage from "../pages/EditCase";
+import HeatmapPage from '../pages/HeatmapPage';
+
 
 
 
@@ -90,6 +92,15 @@ function AppRouter() {
             </ProtectedRoute>
           }
         />
+
+        <Route path="/heatmap"
+          element={
+            <ProtectedRoute>
+              <HeatmapPage/>
+            </ProtectedRoute>
+        } 
+        />
+
       </Routes>
     </BrowserRouter>
   );

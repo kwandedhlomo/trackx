@@ -523,7 +523,7 @@ function AnnotationsPage() {
                       className="w-full h-full object-cover"
                       onError={(e) => {
                         e.target.onerror = null;
-                        e.target.src = "https://via.placeholder.com/600x300?text=Map+Image+Unavailable";
+                        e.target.src = "https://placehold.co/600x300?text=Street+View+Not+Available";
                       }}
                       crossOrigin="anonymous" // Important for capturing the image
                     />
@@ -548,7 +548,7 @@ function AnnotationsPage() {
                       className="w-full h-full object-cover"
                       onError={(e) => {
                         e.target.onerror = null;
-                        e.target.src = "https://via.placeholder.com/600x300?text=Street+View+Not+Available";
+                        e.target.src = "https://placehold.co/600x300?text=Street+View+Not+Available";
                       }}
                       crossOrigin="anonymous" // Important for capturing the image
                     />
