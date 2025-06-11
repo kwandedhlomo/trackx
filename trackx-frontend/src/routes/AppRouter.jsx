@@ -15,6 +15,8 @@ import ManageCasesPage from "../pages/ManageCasesPage";
 import VerifyEmailPage from "../pages/VerifyEmailPage";
 import EditCasePage from "../pages/EditCase";
 import HeatmapPage from '../pages/HeatmapPage';
+import SimulationPage2 from "../pages/SimulationPage2";
+
 
 
 
@@ -56,7 +58,7 @@ function AppRouter() {
           path="/simulation"
           element={
             <ProtectedRoute>
-              <SimulationPage />
+              <SimulationPage2/>
             </ProtectedRoute>
           }
         />
@@ -100,8 +102,16 @@ function AppRouter() {
             </ProtectedRoute>
         } 
         />
-
+        <Route
+          path="/simulation2"
+          element={
+            <ProtectedRoute>
+              <SimulationPage2/>
+            </ProtectedRoute>
+          }
+        />
       </Routes>
+      
     </BrowserRouter>
   );
 }export default AppRouter;
