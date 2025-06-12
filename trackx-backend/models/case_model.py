@@ -19,3 +19,4 @@ class CaseCreateRequest(BaseModel):
     region: str
     between: Optional[str] = None
     csv_data: List[GpsPoint]  
+    all_points: List[GpsPoint] 

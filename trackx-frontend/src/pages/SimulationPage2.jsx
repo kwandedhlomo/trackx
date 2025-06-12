@@ -1,25 +1,39 @@
-// src/pages/SimulationPage2.jsx
-import React from "react";
-import { Viewer, Entity, PolylineGraphics } from "resium";
-import { Cartesian3, Color } from "cesium";
+import React, { useEffect, useState, useRef } from "react";
+import { Viewer, CzmlDataSource } from "resium";
+import * as Cesium from "cesium"; // ✅ Fix here
 import adflogo from "../assets/image-removebg-preview.png";
 import { motion } from "framer-motion";
+import axios from "axios";
+
+
 
 function SimulationPage2() {
-  const caseName = "Example Case XYZ";
+  const [czml, setCzml] = useState(null);
+  const [error, setError] = useState(null);
+  const caseDataString = localStorage.getItem("trackxCaseData");
+  const caseNumber = caseDataString ? JSON.parse(caseDataString).caseNumber : null;
+  const viewerRef = useRef(); // 👈 New
 
-  // 🔹 Sample static route data for now
-  const routePoints = [
-    { lat: -33.918861, lng: 18.4233, height: 0 },
-    { lat: -33.9192, lng: 18.4241, height: 10 },
-    { lat: -33.9178, lng: 18.4215, height: 20 },
-    { lat: -33.9181, lng: 18.4249, height: 5 },
-  ];
+  useEffect(() => {
+    const fetchCZML = async () => {
+      try {
+        if (!caseNumber) {
+          setError("No case number found.");
+          return;
+        }
 
-  // 🔹 Convert route points into Cesium Cartesian3 positions
-  const polylinePositions = routePoints.map((point) =>
-    Cartesian3.fromDegrees(point.lng, point.lat, point.height)
-  );
+        const res = await axios.get(
+          `http://localhost:8000/cases/czml/${caseNumber}`
+        );
+        setCzml(res.data);
+      } catch (err) {
+        console.error("Error fetching CZML:", err);
+        setError("Failed to load simulation data.");
+      }
+    };
+
+    fetchCZML();
+  }, [caseNumber]);
 
   return (
     <motion.div
@@ -45,21 +59,22 @@ function SimulationPage2() {
 
       {/* Content */}
       <div className="px-6 py-8 space-y-6">
-        {/* Title */}
-        <h2 className="text-lg font-semibold mb-4">
-          CesiumJS Simulation of {caseName}
-        </h2>
+        <h2 className="text-lg font-semibold mb-4">CZML Simulation</h2>
 
-        {/* Cesium 3D Viewer */}
+        {error && <p className="text-red-400">{error}</p>}
+
         <div className="w-full h-[500px] border border-gray-600 rounded overflow-hidden">
-          <Viewer full>
-            <Entity name="Simulated Route">
-              <PolylineGraphics
-                positions={polylinePositions}
-                width={4}
-                material={Color.CYAN}
+          <Viewer full ref={viewerRef} animation timeline shouldAnimate={true}>
+            {czml && (
+              <CzmlDataSource
+                data={czml}
+                onLoad={(dataSource) => {
+                  if (viewerRef.current && viewerRef.current.cesiumElement) {
+                    viewerRef.current.cesiumElement.flyTo(dataSource.entities.values[0]); // ✅ Works now
+                  }
+                }}
               />
-            </Entity>
+            )}
           </Viewer>
         </div>
 
