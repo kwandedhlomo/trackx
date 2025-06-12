@@ -346,6 +346,7 @@ function OverviewPage() {
       
       // Save to localStorage
       const caseDataString = localStorage.getItem('trackxCaseData');
+      console.log("CASE DATA:", caseDataString);
       if (caseDataString) {
         const caseData = JSON.parse(caseDataString);
         const updatedCaseData = {
@@ -404,7 +405,11 @@ function OverviewPage() {
       }
     } else if (report.type === 'simulation') {
       // For simulation videos, redirect to simulation page
-      alert(`Redirecting to simulation view for ${report.name}...`);
+      const caseDataString = localStorage.getItem('trackxCaseData');
+      if (caseDataString) {
+        const caseData = JSON.parse(caseDataString);
+        localStorage.setItem('trackxSimulationCaseId', caseData.id);  // ✅ Save the case_id
+      }
       window.location.href = '/simulation';
     } else {
       // For other report types or non-generated PDFs

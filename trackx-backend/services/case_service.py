@@ -8,6 +8,8 @@ from google.cloud import firestore
 import logging
 from collections import defaultdict
 from datetime import datetime
+import pytz
+import json
 
 logger = logging.getLogger(__name__)
 
@@ -58,11 +60,11 @@ async def search_cases(case_name: str = "", region: str = "", date: str = ""):
     return results
 
 async def create_case(payload: CaseCreateRequest) -> str:
-    """Create a new case with optional GPS points"""
+    """Create a new case with optional GPS points and allPoints data."""
     try:
         case_id = str(uuid.uuid4())
 
-        # Save to Firestore "cases" collection
+        # Main case metadata
         case_data = {
             "caseNumber": payload.case_number,
             "caseTitle": payload.case_title,
@@ -73,34 +75,49 @@ async def create_case(payload: CaseCreateRequest) -> str:
             "status": "unresolved"
         }
 
-        # Create case document
+        # Save case document
         db.collection("cases").document(case_id).set(case_data)
         logger.info(f"Created case document with ID: {case_id}")
 
-        if not payload.csv_data:
-            return case_id
+        # Handle `csv_data` → "points" subcollection
+        if payload.csv_data:
+            batch = db.batch()
+            points_ref = db.collection("cases").document(case_id).collection("points")
 
-        # Save csv_data points under "points" subcollection
-        batch = db.batch()
-        points_ref = db.collection("cases").document(case_id).collection("points")
+            for point in payload.csv_data:
+                point_doc = points_ref.document()
+                batch.set(point_doc, {
+                    "lat": point.latitude,
+                    "lng": point.longitude,
+                    "timestamp": point.timestamp,
+                    "speed": getattr(point, "speed", None),
+                    "altitude": getattr(point, "altitude", None),
+                    "heading": getattr(point, "heading", None),
+                    "accuracy": getattr(point, "accuracy", None),
+                    "additional_data": getattr(point, "additional_data", None),
+                    "createdAt": firestore.SERVER_TIMESTAMP
+                })
 
-        for point in payload.csv_data: 
-            point_doc = points_ref.document()
-            batch.set(point_doc, {
-                 "lat": point.latitude,      
-                 "lng": point.longitude,    
-                 "timestamp": point.timestamp,
-                 "speed": point.speed,
-                 "altitude": point.altitude,
-                 "heading": point.heading,
-                 "accuracy": point.accuracy,
-                 "additional_data": point.additional_data,
-                 "createdAt": firestore.SERVER_TIMESTAMP
-    })
+            batch.commit()
+            logger.info(f"Added {len(payload.csv_data)} points to case {case_id}")
 
-        # Commit the batch
-        batch.commit()
-        logger.info(f"Added {len(payload.csv_data)} points to case {case_id}")
+        # ✅ Handle `all_points` → "allPoints" subcollection
+        if hasattr(payload, "all_points") and payload.all_points:
+            batch = db.batch()
+            allpoints_ref = db.collection("cases").document(case_id).collection("allPoints")
+
+            for point in payload.all_points:
+                point_doc = allpoints_ref.document()
+                batch.set(point_doc, {
+                    "lat": point.latitude,
+                    "lng": point.longitude,
+                    "timestamp": point.timestamp,
+                    "description": getattr(point, "description", None),
+                    "createdAt": firestore.SERVER_TIMESTAMP
+                })
+
+            batch.commit()
+            logger.info(f"Added {len(payload.all_points)} allPoints to case {case_id}")
 
         return case_id
 
@@ -245,40 +262,115 @@ async def fetch_all_case_points():
         print("❌ Error fetching case points:", e)
         return []
 
-async def fetch_last_points_per_case():
+async def fetch_all_points_by_case_number(case_number: str):
     try:
-        cases_ref = db.collection("cases")
-        case_docs = list(cases_ref.stream())
+        db_ref = db.collection("cases")
+        
+        # Find the case with this case_number
+        matching_case_query = db_ref.where("caseNumber", "==", case_number)
+        case_docs = matching_case_query.stream()
+        case_doc_list = list(case_docs)  # ✅ FIXED
 
-        last_points = []
+        if not case_doc_list:
+            print(f"No case found with caseNumber: {case_number}")
+            return []
 
-        for case_doc in case_docs:
-            case_id = case_doc.id
-            case_data = case_doc.to_dict()
-            status = case_data.get("status", "unresolved")  # default to unresolved if missing
+        case_doc = case_doc_list[0]
+        case_ref = case_doc.reference
 
-            # Determine color based on status
-            color = "#1E40AF" if status == "resolved" else "#B91C1C"  # Tailwind blue-800 or red-700
+        all_points_ref = case_ref.collection("allPoints")
+        all_points_docs = all_points_ref.stream()
+        all_points = [doc.to_dict() for doc in all_points_docs]  # ✅ FIXED
 
-            # Fetch the most recent point
-            points_ref = cases_ref.document(case_id).collection("points")
-            points = list(points_ref.order_by("timestamp", direction=firestore.Query.DESCENDING).limit(1).stream())
+        return all_points
 
-            for point in points:
-                data = point.to_dict()
-                lat = data.get("lat")
-                lng = data.get("lng")
-                if lat is not None and lng is not None:
-                    last_points.append({
-                        "lat": lat,
-                        "lng": lng,
-                        "color": color,
-                        "size": 0.3,
-                        "caseTitle": case_data.get("caseTitle", "Unknown Case"),
-                        "doc_id": case_id
-                    })
-
-        return last_points
     except Exception as e:
-        print("Error fetching last points:", e)
+        print(f"Error fetching allPoints for caseNumber {case_number}: {e}")
         return []
+    
+def generate_czml(case_id: str, points: list) -> list:
+    """
+    Generates a CZML document for Cesium animation from a list of GPS points,
+    using a simple polyline path instead of a 3D model.
+    """
+    if not points:
+        raise ValueError("No points provided for CZML generation")
+
+    points = sorted(points, key=lambda p: p.get("timestamp"))
+
+    def to_iso_zulu(ts_str):
+        try:
+            ts_str = ts_str.replace("Z", "+00:00")
+            dt = datetime.fromisoformat(ts_str)
+            return dt.astimezone(pytz.utc).isoformat().replace("+00:00", "Z")
+        except Exception:
+            return None
+
+    availability_start = to_iso_zulu(points[0]["timestamp"])
+    availability_end = to_iso_zulu(points[-1]["timestamp"])
+
+    czml = [
+        {
+            "id": "document",
+            "name": f"Track for case {case_id}",
+            "version": "1.0",
+            "clock": {
+                "interval": f"{availability_start}/{availability_end}",
+                "currentTime": availability_start,
+                "multiplier": 10,
+                "range": "LOOP_STOP",
+                "step": "SYSTEM_CLOCK_MULTIPLIER"
+            }
+        },
+        {
+            "id": "pathEntity",
+            "availability": f"{availability_start}/{availability_end}",
+            "position": {
+                "interpolationAlgorithm": "LAGRANGE",
+                "interpolationDegree": 1,
+                "referenceFrame": "FIXED",
+                "epoch": availability_start,
+                "cartographicDegrees": []
+            },
+            "path": {
+                "material": {
+                    "solidColor": {
+                        "color": {
+                            "rgba": [0, 255, 255, 255]  # Cyan line
+                        }
+                    }
+                },
+                "width": 4,
+                "leadTime": 0,
+                "trailTime": 60,
+                "resolution": 5
+            }
+        }
+    ]
+
+    start_time = datetime.fromisoformat(points[0]["timestamp"].replace("Z", "+00:00"))
+    for point in points:
+        point_time = datetime.fromisoformat(point["timestamp"].replace("Z", "+00:00"))
+        time_offset = (point_time - start_time).total_seconds()
+        czml[1]["position"]["cartographicDegrees"].extend([
+            time_offset,
+            point["lng"],
+            point["lat"],
+            0
+        ])
+
+    print("✅ Generated CZML:")
+    print(json.dumps(czml, indent=2))
+
+    return czml
+
+async def fetch_all_points_for_case(case_id: str) -> list:
+    """
+    Retrieve allPoints subcollection for a given case.
+    """
+    try:
+        points_ref = db.collection("cases").document(case_id).collection("allPoints")
+        docs = points_ref.stream()
+        return [doc.to_dict() for doc in docs]
+    except Exception as e:
+        raise Exception(f"Failed to fetch allPoints: {str(e)}")

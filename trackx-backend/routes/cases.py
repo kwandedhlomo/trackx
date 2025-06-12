@@ -80,8 +80,24 @@ async def get_all_case_points():
     points = await fetch_all_case_points()
     return {"points": points}
 
-@router.get("/cases/last-points")
-async def get_last_case_points():
-    from services.case_service import fetch_last_points_per_case
-    points = await fetch_last_points_per_case()
-    return {"points": points}
+#@router.get("/cases/last-points")
+#async def get_last_case_points():
+#    from services.case_service import fetch_last_points_per_case
+#    points = await fetch_last_points_per_case()
+#    return {"points": points}
+
+@router.get("/cases/czml/{case_number}")
+async def get_case_czml(case_number: str):
+    from services.case_service import generate_czml, fetch_all_points_by_case_number
+
+    try:
+        points = await fetch_all_points_by_case_number(case_number)
+        if not points:
+            raise HTTPException(status_code=404, detail="No allPoints found.")
+
+        czml_data = generate_czml(case_number, points)
+        return JSONResponse(content=czml_data)
+
+    except Exception as e:
+        print(f"Error generating CZML: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to generate CZML.")

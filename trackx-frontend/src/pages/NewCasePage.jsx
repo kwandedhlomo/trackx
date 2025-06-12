@@ -25,6 +25,26 @@ function NewCasePage() {
   const [csvStats, setCsvStats] = useState(null);
   const [showGuide, setShowGuide] = useState(false);
 
+
+/**
+ * Extracts time from description and returns ISO timestamp using dateOfIncident
+ * @param {string} description - The full description (e.g., "09:00:00 Ignition On 0 km/h")
+ * @returns {string|null} - ISO timestamp (e.g., "2024-05-01T09:00:00Z") or null if parsing fails
+ */
+function convertToISO(description) {
+  if (!description || !dateOfIncident) return null;
+
+  const timeMatch = description.match(/\b\d{2}:\d{2}:\d{2}\b/); // matches "HH:MM:SS"
+  if (!timeMatch) return null;
+
+  const timePart = timeMatch[0]; // e.g., "09:00:00"
+  const isoString = `${dateOfIncident}T${timePart}Z`;
+
+  // Optional: validate ISO date
+  const date = new Date(isoString);
+  return isNaN(date.getTime()) ? null : date.toISOString();
+}
+
 const handleCreateCase = async () => {
   try {
     if (!caseNumber || !caseTitle || !dateOfIncident || !region || !parsedData) {
@@ -47,6 +67,12 @@ const handleCreateCase = async () => {
         timestamp: point.timestamp || null,
         description: point.description || null,
         ignitionStatus: point.ignitionStatus || false
+      })),
+      all_points: parsedData.raw.map(point => ({
+        latitude: point.lat,
+        longitude: point.lng,
+        timestamp: convertToISO(point.description),
+        description: point.description || null
       }))
     };
 
