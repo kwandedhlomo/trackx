@@ -342,7 +342,7 @@ def generate_czml(case_id: str, points: list) -> list:
                 },
                 "width": 4,
                 "leadTime": 0,
-                "trailTime": 60,
+                "trailTime": 2000,
                 "resolution": 5
             }
         }
