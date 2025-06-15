@@ -17,6 +17,9 @@ async def register_user(user: UserRegisterRequest, id_token: str):
     uid = decoded_token["uid"]
 
     user_doc = {
+        "role": "User",         
+        "isApproved": False,        
+        "userID": uid,   
         "firstName": user.first_name,
         "surname": user.surname,
         "email": user.email,
