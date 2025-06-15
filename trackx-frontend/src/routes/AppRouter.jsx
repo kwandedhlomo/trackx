@@ -19,6 +19,9 @@ import SimulationPage2 from "../pages/SimulationPage2";
 import WaitingRoomPage from "../pages/WaitingRoomPage";
 import AdminDashboardPage from "../pages/AdminDashboardPage";
 import PendingUsersPage from "../pages/PendingUsersPage";
+import AdminPanel from '../pages/AdminPanel.jsx'; 
+
+
 
 
 
@@ -57,6 +60,15 @@ function AppRouter() {
             </ProtectedRoute>
           }
           />
+
+          <Route 
+          path="/all-users" 
+          element={
+            <ProtectedRoute>
+            <AdminPanel />
+            </ProtectedRoute>
+            } />
+
         <Route
           path="/home"
           element={

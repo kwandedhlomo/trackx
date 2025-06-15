@@ -3,8 +3,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 import os
 
+from routes import admin
 from routes import auth
 from routes import cases
+
+
 
 # Load environment variables from .env
 load_dotenv()
@@ -12,12 +15,13 @@ load_dotenv()
 # Create FastAPI instance
 app = FastAPI()
 
+
 #  Setup CORS to allow frontend to access backend
 raw_origins = os.getenv("ALLOWED_ORIGINS", "")
 origins = [origin.strip() for origin in raw_origins.split(",") if origin.strip()]
 if "*" in origins:
     origins = ["*"]
-
+# 
 app.add_middleware(
     CORSMiddleware,
      allow_origins=["*"],
@@ -29,6 +33,7 @@ app.add_middleware(
 # Mount auth router
 app.include_router(auth.router, prefix="/auth")
 app.include_router(cases.router)
+app.include_router(admin.admin_router)
 
 # Routes
 @app.get("/ping")
