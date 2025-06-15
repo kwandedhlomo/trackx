@@ -3,6 +3,8 @@ import { Link, useNavigate } from "react-router-dom";
 import { Eye, EyeOff, Loader2 } from "lucide-react";
 import { signInWithEmailAndPassword, sendEmailVerification } from "firebase/auth";
 import { auth } from "../firebase";
+import { getDoc, doc } from "firebase/firestore";
+import { db } from "../firebase";
 
 function SignInPage() {
   const [email, setEmail] = useState("");
@@ -12,37 +14,54 @@ function SignInPage() {
   const [isLoading, setIsLoading] = useState(false);
   const navigate = useNavigate();
 
-  const handleSignIn = async (e) => {
-    e.preventDefault();
-    setIsLoading(true);
-    setErrorMessage("");
+const handleSignIn = async (e) => {
+  e.preventDefault();
+  setIsLoading(true);
+  setErrorMessage("");
 
-    try {
-      const userCredential = await signInWithEmailAndPassword(auth, email, password);
-      const user = userCredential.user;
+  try {
+    const userCredential = await signInWithEmailAndPassword(auth, email, password);
+    const user = userCredential.user;
 
-
-      if (!user.emailVerified) {
-        try {
-          await sendEmailVerification(user);
-          console.log("Verification email sent again.");
-        } catch (err) {
-          console.error("Failed to resend verification:", err.message);
-          // Optional- might add more suer friendly message first.
-        }
-        navigate("/verify-email");
-        return;
+    if (!user.emailVerified) {
+      try {
+        await sendEmailVerification(user);
+        console.log("Verification email sent again.");
+      } catch (err) {
+        console.error("Failed to resend verification:", err.message);
       }
-      
-      // Success → go to home
-      navigate("/home");
-    } catch (error) {
-      console.error("Login failed:", error.message);
-      setErrorMessage("Incorrect Email or Password.");
-    } finally {
-      setIsLoading(false);
+      navigate("/verify-email");
+      return;
     }
-  };
+
+    const userDocRef = doc(db, "users", user.uid);
+    const userDoc = await getDoc(userDocRef);
+
+    if (!userDoc.exists()) {
+      console.warn("No user document found for this user.");
+      setErrorMessage("User not found.");
+      return;
+    }
+
+    const userData = userDoc.data();
+
+    if (!userData.isApproved) {
+      setErrorMessage("Your account is pending approval by an administrator.");
+      return;
+    }
+
+    if (userData.role && userData.role.toLowerCase() === "admin") {
+      navigate("/admin-dashboard");
+    } else {
+      navigate("/home");
+    }
+  } catch (error) {
+    console.error("Login failed:", error.message);
+    setErrorMessage("Incorrect Email or Password.");
+  } finally {
+    setIsLoading(false);
+  }
+};
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-black via-gray-900 to-black p-4">

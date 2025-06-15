@@ -58,6 +58,13 @@ const handleRegister = async (e) => {
 
     const idToken = await user.getIdToken();
 
+     // Generate a userID
+    const generateUserId = () => {
+    const randomString = Math.random().toString(36).substring(2, 8).toUpperCase();
+    return `USER-${randomString}`;
+  };
+    const generatedUserId = generateUserId();
+
     // Save to Firestore
     console.log("🗃️ Adding user to Firestore...");
     await setDoc(doc(db, "users", user.uid), {
@@ -67,6 +74,8 @@ const handleRegister = async (e) => {
       idNumber,
       investigatorId,
       dob,
+      role: "user",
+      isApproved: false,
       createdAt: new Date().toISOString(),
     });
     console.log("✅ Firestore user saved!");
