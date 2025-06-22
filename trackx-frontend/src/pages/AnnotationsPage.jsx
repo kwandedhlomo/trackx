@@ -30,7 +30,7 @@ function AnnotationsPage() {
   const [snapshotCaptured, setSnapshotCaptured] = useState(false);
 
   // Google Maps API Key 
-  const GOOGLE_MAPS_API_KEY = "AIzaSyBy0dcphg3Np6Y87uj7FYQYyDIdmAfmgK8"; 
+  const GOOGLE_MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
   
   // Load case data from localStorage when component mounts
   useEffect(() => {

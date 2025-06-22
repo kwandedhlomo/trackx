@@ -4,6 +4,8 @@ import adflogo from "../assets/image-removebg-preview.png";
 import { motion } from "framer-motion";
 import { AlertTriangle, MapPin, FileText, Camera } from "lucide-react";
 import jsPDF from "jspdf";
+// Google Maps API Key for PDF report generation
+const GOOGLE_MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
 
 function OverviewPage() {
   // Create refs for PDF report generation
