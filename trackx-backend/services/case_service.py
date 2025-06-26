@@ -593,3 +593,37 @@ def interpolate_points_with_ors(points: list) -> list:
     print(f"✅ Final padded point count: {len(padded)}")
     return padded
 
+
+async def fetch_all_case_points_with_case_ids(): #this is the newest function for heatmap - 2025/06/26
+    """
+    Returns all GPS points from all cases, with each point tagged with its parent caseId.
+    """
+    try:
+        all_points = []
+        cases_ref = db.collection("cases")
+        case_docs = list(cases_ref.stream())
+
+        for case_doc in case_docs:
+            case_id = case_doc.id
+            points_ref = db.collection("cases").document(case_id).collection("points")
+            points = list(points_ref.stream())
+
+            for point in points:
+                data = point.to_dict()
+                lat = data.get("lat")
+                lng = data.get("lng")
+                timestamp = data.get("timestamp")
+
+                if lat is not None and lng is not None and timestamp:
+                    all_points.append({
+                        "lat": lat,
+                        "lng": lng,
+                        "timestamp": timestamp,
+                        "caseId": case_id
+                    })
+
+        print(f"✅ Custom route fetched {len(all_points)} points with case IDs.")
+        return all_points
+    except Exception as e:
+        print("❌ Error in fetch_all_case_points_with_case_ids:", e)
+        return []
