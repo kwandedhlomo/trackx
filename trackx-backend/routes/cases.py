@@ -12,6 +12,7 @@ import json
 import csv
 import io
 from typing import Optional
+from firebase.firebase_config import db  
 
 router = APIRouter()
 
@@ -101,3 +102,20 @@ async def get_case_czml(case_number: str):
     except Exception as e:
         print(f"Error generating CZML: {str(e)}")
         raise HTTPException(status_code=500, detail="Failed to generate CZML.")
+    
+
+    # For the heatmap page: Added by jon
+@router.get("/cases/all-points-with-case-ids")
+async def get_all_points_with_case_ids():
+    from services.case_service import fetch_all_case_points_with_case_ids
+    points = await fetch_all_case_points_with_case_ids()
+    return {"points": points}
+
+@router.get("/cases/all")
+async def get_all_cases():
+    try:
+        cases_ref = db.collection("cases").stream()
+        cases = [{"id": doc.id, **doc.to_dict()} for doc in cases_ref]
+        return cases
+    except Exception as e:
+        return {"error": str(e)}
