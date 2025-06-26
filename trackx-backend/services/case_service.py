@@ -10,7 +10,13 @@ from collections import defaultdict
 from datetime import datetime
 import pytz
 import json
+import requests
+import time
+from datetime import timedelta
+from datetime import timezone
 
+
+# SIMULATION_PROGRESS = {}
 logger = logging.getLogger(__name__)
 
 def sanitize_firestore_data(data):
@@ -262,6 +268,32 @@ async def fetch_all_case_points():
         print("❌ Error fetching case points:", e)
         return []
 
+    
+async def fetch_interpolated_points(case_id: str) -> list:
+    try:
+        points_ref = db.collection("cases").document(case_id).collection("interpolatedPoints")
+        docs = list(points_ref.stream())
+        return [doc.to_dict() for doc in docs]
+    except Exception as e:
+        print(f"❌ Failed to fetch interpolated points: {e}")
+        return []
+
+async def store_interpolated_points(case_id: str, points: list):
+    try:
+        batch = db.batch()
+        points_ref = db.collection("cases").document(case_id).collection("interpolatedPoints")
+        
+        for pt in points:
+            doc = points_ref.document()
+            batch.set(doc, pt)
+
+        batch.commit()
+        print(f"✅ Stored {len(points)} interpolated points for case {case_id}")
+    except Exception as e:
+        print(f"❌ Failed to store interpolated points: {e}")
+
+
+
 async def fetch_all_points_by_case_number(case_number: str):
     try:
         db_ref = db.collection("cases")
@@ -278,7 +310,7 @@ async def fetch_all_points_by_case_number(case_number: str):
         case_doc = case_doc_list[0]
         case_ref = case_doc.reference
 
-        all_points_ref = case_ref.collection("allPoints")
+        all_points_ref = case_ref.collection("allPoints").order_by("timestamp")
         all_points_docs = all_points_ref.stream()
         all_points = [doc.to_dict() for doc in all_points_docs]  # ✅ FIXED
 
@@ -296,18 +328,85 @@ def generate_czml(case_id: str, points: list) -> list:
     if not points:
         raise ValueError("No points provided for CZML generation")
 
-    points = sorted(points, key=lambda p: p.get("timestamp"))
+    print(f"🚀 Starting CZML generation with {len(points)} points")
+    
+    for i, point in enumerate(points):
+        if i < 5 or i > len(points) - 5:  # show first and last few
+            print(f"\n--- Processing point {i} ---")
 
-    def to_iso_zulu(ts_str):
-        try:
-            ts_str = ts_str.replace("Z", "+00:00")
-            dt = datetime.fromisoformat(ts_str)
-            return dt.astimezone(pytz.utc).isoformat().replace("+00:00", "Z")
-        except Exception:
+    def to_iso_zulu(ts_val):
+        print(f"🔍 Processing timestamp: {repr(ts_val)} (type: {type(ts_val)})")
+        
+        if isinstance(ts_val, list):
+            print(f"📋 Timestamp is a list with {len(ts_val)} items: {ts_val}")
+            if len(ts_val) == 0:
+                print("❌ Empty list provided as timestamp")
+                return None
+            ts_val = ts_val[0]
+            print(f"🎯 Using first item from list: {repr(ts_val)} (type: {type(ts_val)})")
+        
+        if isinstance(ts_val, list):
+            print(f"❌ Timestamp is STILL a list after extraction: {ts_val}")
             return None
 
-    availability_start = to_iso_zulu(points[0]["timestamp"])
-    availability_end = to_iso_zulu(points[-1]["timestamp"])
+        if ts_val is None or ts_val == "":
+            print("❌ Timestamp is None or empty")
+            return None
+
+        try:
+            if not isinstance(ts_val, str):
+                print(f"🔄 Converting {type(ts_val)} to string: {ts_val}")
+                ts_val = str(ts_val)
+
+            print(f"🔧 About to replace Z in: {repr(ts_val)}")
+            # Avoid double +00:00 issue
+            if ts_val.endswith("Z") and "+00:00" not in ts_val:
+                ts_val = ts_val.replace("Z", "+00:00")
+            print(f"🔧 After Z replacement: {repr(ts_val)}")
+
+            dt = datetime.fromisoformat(ts_val)
+            result = dt.astimezone(pytz.utc).isoformat().replace("+00:00", "Z")
+            print(f"✅ Successfully converted to: {result}")
+            return result
+        except Exception as e:
+            print(f"❌ Failed to convert timestamp {repr(ts_val)}: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
+
+    cleaned_points = []
+    for i, p in enumerate(points):
+        print(f"\n--- Processing point {i} ---")
+        ts = p.get("timestamp")
+        print(f"Raw timestamp from point: {repr(ts)} (type: {type(ts)})")
+        
+        if not ts:
+            print(f"⚠️ Skipping point {i} with missing timestamp")
+            continue
+
+        iso_ts = to_iso_zulu(ts)
+        if not iso_ts:
+            print(f"⚠️ Skipping point {i} with bad timestamp: {repr(ts)}")
+            continue
+
+        cleaned_points.append({
+            "lat": p["lat"],
+            "lng": p["lng"],
+            "timestamp": iso_ts
+        })
+        print(f"✅ Added cleaned point {i}")
+
+    cleaned_points.sort(key=lambda x: x["timestamp"])
+
+    if len(cleaned_points) < 2:
+        raise ValueError("Not enough valid points after cleaning to generate CZML.")
+
+    print(f"🧹 Cleaned points: {len(cleaned_points)}")
+    
+    availability_start = cleaned_points[0]["timestamp"]
+    availability_end = cleaned_points[-1]["timestamp"]
+    print(f"⏱ CZML Interval - Start: {availability_start}, End: {availability_end}")
+
 
     czml = [
         {
@@ -336,7 +435,7 @@ def generate_czml(case_id: str, points: list) -> list:
                 "material": {
                     "solidColor": {
                         "color": {
-                            "rgba": [0, 255, 255, 255]  # Cyan line
+                            "rgba": [0, 255, 255, 255]
                         }
                     }
                 },
@@ -348,8 +447,8 @@ def generate_czml(case_id: str, points: list) -> list:
         }
     ]
 
-    start_time = datetime.fromisoformat(points[0]["timestamp"].replace("Z", "+00:00"))
-    for point in points:
+    start_time = datetime.fromisoformat(availability_start.replace("Z", "+00:00"))
+    for point in cleaned_points:
         point_time = datetime.fromisoformat(point["timestamp"].replace("Z", "+00:00"))
         time_offset = (point_time - start_time).total_seconds()
         czml[1]["position"]["cartographicDegrees"].extend([
@@ -359,10 +458,9 @@ def generate_czml(case_id: str, points: list) -> list:
             0
         ])
 
-    print("✅ Generated CZML:")
-    print(json.dumps(czml, indent=2))
-
+    print(f"✅ Generated CZML with {len(cleaned_points)} points.")
     return czml
+
 
 async def fetch_all_points_for_case(case_id: str) -> list:
     """
@@ -376,37 +474,122 @@ async def fetch_all_points_for_case(case_id: str) -> list:
         raise Exception(f"Failed to fetch allPoints: {str(e)}")
     
 
-    # For heatmap pages:
-async def fetch_all_case_points_with_case_ids():
-    """
-    Returns all GPS points from all cases, with each point tagged with its parent caseId.
-    """
+# HELPER FUNCTION FOR POINTS api service.
+
+ORS_API_KEY = "5b3ce3597851110001cf6248c3b41afd16e04795a3eaaf7b3c0cd61f"  # Replace with your actual key or use an environment variable
+
+# Fix the import - try different approaches
+try:
+    from google.api_core.datetime_helpers import DatetimeWithNanoseconds
+except ImportError:
     try:
-        all_points = []
-        cases_ref = db.collection("cases")
-        case_docs = list(cases_ref.stream())
+        from google.cloud.firestore_v1._helpers import DatetimeWithNanoseconds
+    except ImportError:
+        # Fallback - create a dummy class if we can't import it
+        class DatetimeWithNanoseconds:
+            pass
 
-        for case_doc in case_docs:
-            case_id = case_doc.id
-            points_ref = db.collection("cases").document(case_id).collection("points")
-            points = list(points_ref.stream())
+def interpolate_points_with_ors(points: list) -> list:
+    """
+    Pads the GPS route by calling ORS API between each pair of points and interpolating.
+    Guarantees strictly ordered and valid timestamps for Cesium playback.
+    """
 
-            for point in points:
-                data = point.to_dict()
-                lat = data.get("lat")
-                lng = data.get("lng")
-                timestamp = data.get("timestamp")
+    if not points or len(points) < 2:
+        print("⚠️ Not enough points to interpolate.")
+        return points
 
-                if lat is not None and lng is not None and timestamp:
-                    all_points.append({
-                        "lat": lat,
-                        "lng": lng,
-                        "timestamp": timestamp,
-                        "caseId": case_id
-                    })
+    # Sanitize and prepare base points
+    sanitized_points = []
+    for pt in points:
+        lat = pt.get("lat")
+        lng = pt.get("lng")
+        timestamp = pt.get("timestamp")
 
-        print(f"✅ Custom route fetched {len(all_points)} points with case IDs.")
-        return all_points
-    except Exception as e:
-        print("❌ Error in fetch_all_case_points_with_case_ids:", e)
-        return []
+        if not lat or not lng:
+            continue
+
+        if hasattr(timestamp, 'isoformat'):
+            timestamp_str = timestamp.isoformat().replace("+00:00", "Z")
+        elif isinstance(timestamp, str):
+            timestamp_str = timestamp
+        elif isinstance(timestamp, list) and timestamp:
+            timestamp_str = str(timestamp[0])
+        else:
+            continue
+
+        sanitized_points.append({
+            "lat": lat,
+            "lng": lng,
+            "timestamp": timestamp_str
+        })
+
+    if len(sanitized_points) < 2:
+        print("⚠️ Not enough valid points after sanitization.")
+        return sanitized_points
+
+
+
+    padded = []
+
+    for i in range(len(sanitized_points) - 1):
+        start = sanitized_points[i]
+        end = sanitized_points[i + 1]
+
+        padded.append(start)  # keep original start
+
+        # ORS API request
+        url = "https://api.openrouteservice.org/v2/directions/driving-car/geojson"
+        headers = {
+            "Authorization": ORS_API_KEY,
+            "Content-Type": "application/json"
+        }
+        body = {
+            "coordinates": [[start["lng"], start["lat"]], [end["lng"], end["lat"]]],
+        }
+
+        try:
+            res = requests.post(url, headers=headers, json=body)
+            res.raise_for_status()
+            route = res.json()["features"][0]["geometry"]["coordinates"]
+
+            #SIMULATION_PROGRESS[case_id]["done"] += 1
+
+            # Time interpolation
+            ts1 = start["timestamp"]
+            ts2 = end["timestamp"]
+
+            if ts1.endswith("Z") and "+00:00" not in ts1:
+                ts1 = ts1.replace("Z", "+00:00")
+            if ts2.endswith("Z") and "+00:00" not in ts2:
+                ts2 = ts2.replace("Z", "+00:00")
+
+            t_start = datetime.fromisoformat(ts1)
+            t_end = datetime.fromisoformat(ts2)
+
+            total_duration = (t_end - t_start).total_seconds()
+            num_steps = max(2, len(route))  # route includes start & end
+
+            for j, [lng, lat] in enumerate(route[1:-1], start=1):  # skip endpoints
+                frac = j / num_steps
+                interp_time = t_start + timedelta(seconds=total_duration * frac)
+
+                padded.append({
+                    "lat": lat,
+                    "lng": lng,
+                    "timestamp": interp_time.replace(tzinfo=timezone.utc).isoformat().replace("+00:00", "Z")
+                })
+
+        except Exception as e:
+            print(f"❌ ORS failed for segment {i}: {e}")
+
+        time.sleep(1)  # respect ORS limits
+
+    padded.append(sanitized_points[-1])  # add last point
+
+    # Sort all points by timestamp to avoid Cesium errors
+    padded.sort(key=lambda p: p["timestamp"])
+
+    print(f"✅ Final padded point count: {len(padded)}")
+    return padded
+
