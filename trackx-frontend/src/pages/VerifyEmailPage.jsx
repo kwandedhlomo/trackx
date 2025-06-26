@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
-import { auth } from "../firebase";
+import { auth, db } from "../firebase";
 import { onAuthStateChanged, sendEmailVerification } from "firebase/auth";
 import { useNavigate } from "react-router-dom";
 import Lottie from "lottie-react";
 import BlueLoadingAnimation from "../assets/BlueLoadingAnimation.json";
+import { doc, getDoc } from "firebase/firestore";
 
 function VerifyEmailPage() {
   const [isVerified, setIsVerified] = useState(false);
@@ -22,7 +23,19 @@ function VerifyEmailPage() {
         if (user.emailVerified) {
           clearInterval(interval);
           setIsVerified(true);
-          navigate("/home");
+           try {
+            const userDoc = await getDoc(doc(db, "users", user.uid));
+            const userData = userDoc.exists() ? userDoc.data() : null;
+
+            if (userData?.isApproved) {
+              navigate("/home");
+            } else {
+              navigate("/waiting-room");
+            }
+          } catch (err) {
+            console.error("Error fetching user approval status:", err);
+            navigate("/waiting-room");
+          }
         } else {
           setChecking(false);
         }

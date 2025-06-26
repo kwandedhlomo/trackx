@@ -16,6 +16,11 @@ import VerifyEmailPage from "../pages/VerifyEmailPage";
 import EditCasePage from "../pages/EditCase";
 import HeatmapPage from '../pages/HeatmapPage';
 import SimulationPage2 from "../pages/SimulationPage2";
+import WaitingRoomPage from "../pages/WaitingRoomPage";
+import AdminDashboardPage from "../pages/AdminDashboardPage";
+import PendingUsersPage from "../pages/PendingUsersPage";
+import AdminPanel from '../pages/AdminPanel.jsx'; 
+
 
 
 
@@ -36,8 +41,34 @@ function AppRouter() {
         <Route path="/signin" element={<SignInPage />} />
         <Route path="/register" element={<RegisterPage />} />
         <Route path="/verify-email" element={<VerifyEmailPage />} />
+        <Route path="/waiting-room" element={<WaitingRoomPage />} />
 
         {/* Protected routes — only accessible if logged in and verified */}
+        <Route
+          path="/admin-dashboard"
+          element={
+            <ProtectedRoute>
+              <AdminDashboardPage />
+            </ProtectedRoute>
+          }
+          />
+           <Route
+          path="/pending-users"
+          element={
+            <ProtectedRoute>
+              <PendingUsersPage />
+            </ProtectedRoute>
+          }
+          />
+
+          <Route 
+          path="/all-users" 
+          element={
+            <ProtectedRoute>
+            <AdminPanel />
+            </ProtectedRoute>
+            } />
+
         <Route
           path="/home"
           element={
