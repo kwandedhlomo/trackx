@@ -12,6 +12,8 @@ import json
 import csv
 import io
 from typing import Optional
+from firebase.firebase_config import db  # at the top if needed
+
 
 router = APIRouter()
 
@@ -80,24 +82,94 @@ async def get_all_case_points():
     points = await fetch_all_case_points()
     return {"points": points}
 
+
+#new attempt: 
+@router.get("/cases/czml/{case_number}")
+async def get_case_czml(case_number: str):
+    from services.case_service import (
+        generate_czml,
+        fetch_all_points_by_case_number,
+        interpolate_points_with_ors,
+        fetch_interpolated_points,
+        store_interpolated_points,
+    )
+
+    try:
+        print(f"🔍 Fetching allPoints for case: {case_number}")
+        # Step 1: Get the case document by caseNumber
+        matching_query = db.collection("cases").where("caseNumber", "==", case_number).stream()
+        case_docs = list(matching_query)
+        if not case_docs:
+            raise HTTPException(status_code=404, detail="Case not found.")
+
+        case_doc = case_docs[0]
+        case_doc_id = case_doc.id
+
+        # Step 2: Get the actual allPoints
+        raw_points = await fetch_all_points_by_case_number(case_number)
+        if not raw_points:
+            raise HTTPException(status_code=404, detail="No allPoints found.")
+
+        print("🔎 Checking for saved interpolated points...")
+        cached_points = await fetch_interpolated_points(case_doc_id)
+
+        if cached_points:
+            print(f"✅ Using {len(cached_points)} cached interpolated points.")
+            interpolated_points = cached_points
+        else:
+            print(f"⏳ Interpolating {len(raw_points)} points...")
+            interpolated_points = interpolate_points_with_ors(raw_points)
+            await store_interpolated_points(case_doc_id, interpolated_points)
+
+        print(f"🌀 Generating CZML from {len(interpolated_points)} points...")
+        czml_data = generate_czml(case_number, interpolated_points)
+
+        return JSONResponse(content=czml_data)
+
+    except Exception as e:
+        import traceback
+        print("❌ Exception in get_case_czml:")
+        traceback.print_exc()
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+
+#old: 
 #@router.get("/cases/last-points")
 #async def get_last_case_points():
 #    from services.case_service import fetch_last_points_per_case
 #    points = await fetch_last_points_per_case()
 #    return {"points": points}
 
-@router.get("/cases/czml/{case_number}")
-async def get_case_czml(case_number: str):
-    from services.case_service import generate_czml, fetch_all_points_by_case_number
+# @router.get("/cases/czml/{case_number}")
+# async def get_case_czml(case_number: str):
+#     from services.case_service import generate_czml, fetch_all_points_by_case_number, interpolate_points_with_ors
 
-    try:
-        points = await fetch_all_points_by_case_number(case_number)
-        if not points:
-            raise HTTPException(status_code=404, detail="No allPoints found.")
+#     try:
+#         print(f"🔍 Fetching allPoints for case: {case_number}")
+#         raw_points = await fetch_all_points_by_case_number(case_number)
+#         if not raw_points:
+#             raise HTTPException(status_code=404, detail="No allPoints found.")
 
-        czml_data = generate_czml(case_number, points)
-        return JSONResponse(content=czml_data)
+#         print(f"✅ Retrieved {len(raw_points)} points. Now interpolating...")
+#         interpolated_points = interpolate_points_with_ors(raw_points)
 
-    except Exception as e:
-        print(f"Error generating CZML: {str(e)}")
-        raise HTTPException(status_code=500, detail="Failed to generate CZML.")
+#         print(f" Interpolated to {len(interpolated_points)} points. Now generating CZML...")
+#         czml_data = generate_czml(case_number, interpolated_points)
+
+#         return JSONResponse(content=czml_data)
+
+#     except Exception as e:
+#         import traceback
+#         print("❌ Exception in get_case_czml:")
+#         traceback.print_exc()
+#         return JSONResponse(status_code=500, content={"error": str(e)})
+######---------------- end
+
+# @router.get("/cases/simulation-progress/{case_id}")
+# def simulation_progress(case_id: str):
+#     progress = SIMULATION_PROGRESS.get(case_id)
+#     if not progress:
+#         return {"done": 0, "total": 0, "status": "not_started"}
+
+#     status = "done" if progress["done"] >= progress["total"] else "in_progress"
+#     return {**progress, "status": status}
