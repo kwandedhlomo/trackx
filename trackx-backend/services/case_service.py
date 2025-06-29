@@ -14,6 +14,7 @@ import requests
 import time
 from datetime import timedelta
 from datetime import timezone
+from datetime import datetime
 
 
 # SIMULATION_PROGRESS = {}
@@ -282,16 +283,38 @@ async def store_interpolated_points(case_id: str, points: list):
     try:
         batch = db.batch()
         points_ref = db.collection("cases").document(case_id).collection("interpolatedPoints")
-        
+
         for pt in points:
             doc = points_ref.document()
-            batch.set(doc, pt)
+
+            # Safely parse timestamp
+            ts = pt.get("timestamp")
+            parsed_ts = None
+
+            if isinstance(ts, str):
+                try:
+                    parsed_ts = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+                except:
+                    parsed_ts = None
+            elif isinstance(ts, list) and ts:
+                try:
+                    parsed_ts = datetime.fromisoformat(str(ts[0]).replace("Z", "+00:00"))
+                except:
+                    parsed_ts = None
+            elif isinstance(ts, datetime):
+                parsed_ts = ts
+
+            # Store Firestore-native timestamp (or None)
+            batch.set(doc, {
+                "lat": pt["lat"],
+                "lng": pt["lng"],
+                "timestamp": parsed_ts,
+            })
 
         batch.commit()
         print(f"✅ Stored {len(points)} interpolated points for case {case_id}")
     except Exception as e:
         print(f"❌ Failed to store interpolated points: {e}")
-
 
 
 async def fetch_all_points_by_case_number(case_number: str):

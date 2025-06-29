@@ -518,9 +518,27 @@ Please ensure your PDF contains GPS coordinates in one of these formats:
       });
 
       if (response.data) {
-        alert("Case created successfully!");
-        navigate("/manage-cases");
+        const firestoreDocId = response.data.case_id || response.data.id || response.data.doc_id;
+        console.log("✅ Created case Firestore ID:", firestoreDocId);
+
+        // Save full case info to localStorage including Firestore ID
+  // ⬇️ Capture caseId from response
+        const caseData = {
+          caseId: response.data.caseId,
+          caseNumber,
+          caseTitle,
+          dateOfIncident,
+          region,
+          between,
+          locations: parsedData.stoppedPoints
+        };
+
+        localStorage.setItem('trackxCaseData', JSON.stringify(caseData));
+
+        alert("Case created and moving to next step!");
+        navigate("/annotations");
       }
+
 
     } catch (error) {
       console.error("Failed to create case:", error);
@@ -794,8 +812,10 @@ Please ensure your PDF contains GPS coordinates in one of these formats:
 
     await handleCreateCase();
     alert("Case created and moving to next step!");
-    
+    const previous = JSON.parse(localStorage.getItem('trackxCaseData')) || {};
+
     const caseData = {
+      caseId: previous.caseId || null, // ✅ preserves caseId if it was set during creation
       caseNumber,
       caseTitle,
       dateOfIncident,

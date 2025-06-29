@@ -49,4 +49,3 @@ def read_root():
     return {"status": "TrackX Backend is running"}
 
 
-app.include_router(cases.router)
