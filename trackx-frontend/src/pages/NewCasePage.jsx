@@ -575,6 +575,7 @@ Please ensure your PDF contains GPS coordinates in one of these formats:
       return 'Stopped';
     }
     
+    // Check for "idling" indicators
     if (
       desc.includes('idling') || 
       desc.includes('idle') || 
@@ -586,6 +587,7 @@ Please ensure your PDF contains GPS coordinates in one of these formats:
       return 'Idle';
     }
     
+    // Check for "moving" indicators
     if (
       desc.includes('moving') || 
       desc.includes('motion') || 
@@ -599,6 +601,7 @@ Please ensure your PDF contains GPS coordinates in one of these formats:
       return 'Moving';
     }
     
+    // Default return if no match
     return null;
   };
 
@@ -621,6 +624,7 @@ Please ensure your PDF contains GPS coordinates in one of these formats:
     }
   };
 
+  // Handle file selection
   const handleFileSelect = (e) => {
     if (e.target.files && e.target.files[0]) {
       handleFile(e.target.files[0]);
@@ -668,6 +672,7 @@ Please ensure your PDF contains GPS coordinates in one of these formats:
         }
         
         try {
+          // Check if the CSV has any data
           if (!results.data || results.data.length === 0) {
             setParseError("CSV file appears to be empty");
             setParsedData(null);
@@ -713,6 +718,7 @@ Please ensure your PDF contains GPS coordinates in one of these formats:
             return;
           }
           
+          // Use the first match for each column type
           const bestColumns = {
             lat: possibleColumns.lat[0],
             lng: possibleColumns.lng[0],
@@ -721,16 +727,24 @@ Please ensure your PDF contains GPS coordinates in one of these formats:
             ignition: possibleColumns.ignition.length > 0 ? possibleColumns.ignition[0] : null
           };
           
+          // Process the data using our best column matches
           const processedData = results.data.map((row, index) => {
+            // Get lat/lng values from the identified columns
             const lat = parseFloat(row[bestColumns.lat]);
             const lng = parseFloat(row[bestColumns.lng]);
+            
+            // Get description if available
             const description = bestColumns.description ? row[bestColumns.description] : null;
+            
+            // Get ignition status from column or from description
             let ignitionStatus = bestColumns.ignition ? row[bestColumns.ignition] : null;
             
+            // If ignition status is not available but description is, try to determine it
             if ((!ignitionStatus || ignitionStatus === '') && description) {
               ignitionStatus = determineIgnitionStatus(description);
             }
             
+            // Get timestamp if available
             const timestamp = bestColumns.timestamp ? row[bestColumns.timestamp] : `Record ${index + 1}`;
             
             return {
@@ -743,6 +757,7 @@ Please ensure your PDF contains GPS coordinates in one of these formats:
               rawData: row 
             };
           }).filter(item => {
+            // Filter out any rows with invalid lat/lng
             return !isNaN(item.lat) && !isNaN(item.lng);
           });
           
@@ -753,6 +768,7 @@ Please ensure your PDF contains GPS coordinates in one of these formats:
             return;
           }
           
+          // Filter only "Stopped" or "Off" or "Idle" ignition status points
           const stoppedPoints = processedData.filter(point => {
             if (!point.ignitionStatus) return false;
             
@@ -773,11 +789,13 @@ Please ensure your PDF contains GPS coordinates in one of these formats:
             return;
           }
           
+          // Set parsed data
           setParsedData({
             raw: processedData,
             stoppedPoints: stoppedPoints
           });
           
+          // Set CSV stats for display
           setCsvStats({
             totalPoints: processedData.length,
             stoppedPoints: stoppedPoints.length,
@@ -825,14 +843,18 @@ Please ensure your PDF contains GPS coordinates in one of these formats:
       locations: parsedData.stoppedPoints
     };
     
+    // Store in localStorage to share with other pages
     localStorage.setItem('trackxCaseData', JSON.stringify(caseData));
+    
+    // Navigate to annotations page
     navigate("/annotations");
   };
 
+  // For Sign Out functionality
   const handleSignOut = async () => {
     try {
       await signOut(auth);
-      navigate("/");
+      navigate("/"); // Redirect to LandingPage
     } catch (error) {
       console.error("Sign-out failed:", error.message);
     }
@@ -856,19 +878,20 @@ Please ensure your PDF contains GPS coordinates in one of these formats:
         <h1 className="text-xl font-bold text-white">New Case</h1>
 
         <div className="flex items-center space-x-4">
-          <div className="text-right">
-            <p className="text-sm text-white">{profile ? `${profile.firstName} ${profile.surname}` : "Loading..."}</p>
-            <button
-              onClick={handleSignOut}
-              className="text-red-400 hover:text-red-600 text-xs"
-            >
-              Sign Out
-            </button>
-          </div>
+        <div className="text-right">
+          <p className="text-sm text-white">{profile ? `${profile.firstName} ${profile.surname}` : "Loading..."}</p>
+          <button
+            onClick={handleSignOut}
+            className="text-red-400 hover:text-red-600 text-xs"
+          >
+            Sign Out
+          </button>
+        </div>
+
         </div>
       </div>
 
-      {/* Nav Tabs */}
+      {/* Nav Tabs - Updated with clickable links */}
       <div className="flex justify-center space-x-8 bg-gray-800 py-2 text-white text-sm">
         <span className="font-bold underline">Case Information</span>
         <Link to="/annotations" className="text-gray-400 hover:text-white">Annotations</Link>
@@ -878,8 +901,9 @@ Please ensure your PDF contains GPS coordinates in one of these formats:
       {/* Page Content */}
       <div className="max-w-4xl mx-auto px-6 py-8">
         <form onSubmit={handleNext} className="space-y-6">
-          {/* Case Details Section - unchanged */}
+          {/* Case Details Section */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {/* Case Number */}
             <div>
               <label htmlFor="caseNumber" className="block text-sm font-medium text-gray-300 mb-1">
                 Case Number *
@@ -894,6 +918,7 @@ Please ensure your PDF contains GPS coordinates in one of these formats:
               />
             </div>
 
+            {/* Case Title */}
             <div>
               <label htmlFor="caseTitle" className="block text-sm font-medium text-gray-300 mb-1">
                 Case Title *
@@ -908,6 +933,7 @@ Please ensure your PDF contains GPS coordinates in one of these formats:
               />
             </div>
 
+            {/* Date of Incident */}
             <div>
               <label htmlFor="dateOfIncident" className="block text-sm font-medium text-gray-300 mb-1">
                 Date of Incident *
@@ -922,6 +948,7 @@ Please ensure your PDF contains GPS coordinates in one of these formats:
               />
             </div>
 
+            {/* Region */}
             <div>
               <label htmlFor="region" className="block text-sm font-medium text-gray-300 mb-1">
                 Region *
@@ -946,6 +973,7 @@ Please ensure your PDF contains GPS coordinates in one of these formats:
               </select>
             </div>
 
+            {/* Between */}
             <div className="md:col-span-2">
               <label htmlFor="between" className="block text-sm font-medium text-gray-300 mb-1">
                 Between

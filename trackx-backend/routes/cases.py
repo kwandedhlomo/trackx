@@ -11,8 +11,7 @@ from services.case_service import create_case
 import json
 import csv
 import io
-from typing import Optional
-from firebase.firebase_config import db  
+from typing import Optional 
 from firebase.firebase_config import db  # at the top if needed
 
 
@@ -42,12 +41,12 @@ async def create_case_route(case_request: CaseCreateRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/cases/recent")
-async def get_recent_cases():
+async def get_recent_cases(sortBy: str = Query("dateEntered", enum=["dateEntered", "dateOfIncident"])):
     """
-    Return the 4 most recently created cases, ordered by createdAt.
+    Return the 4 most recent cases based on the selected sort key.
     """
     from services.case_service import fetch_recent_cases
-    cases = await fetch_recent_cases()
+    cases = await fetch_recent_cases(sort_by=sortBy)
     return JSONResponse(content={"cases": cases})
 
 @router.put("/cases/update")
@@ -195,3 +194,18 @@ async def get_all_cases():
 
 #     status = "done" if progress["done"] >= progress["total"] else "in_progress"
 #     return {**progress, "status": status}
+@router.get("/cases/czml/{case_number}")
+async def get_case_czml(case_number: str):
+    from services.case_service import generate_czml, fetch_all_points_by_case_number
+
+    try:
+        points = await fetch_all_points_by_case_number(case_number)
+        if not points:
+            raise HTTPException(status_code=404, detail="No allPoints found.")
+
+        czml_data = generate_czml(case_number, points)
+        return JSONResponse(content=czml_data)
+
+    except Exception as e:
+        print(f"Error generating CZML: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to generate CZML.")
