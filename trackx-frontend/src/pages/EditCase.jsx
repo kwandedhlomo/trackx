@@ -163,8 +163,9 @@ function EditCasePage() {
               required
               className="w-full p-2 bg-gray-800 border border-gray-600 rounded text-white"
             >
-              <option value="unresolved">Unresolved</option>
-              <option value="resolved">Resolved</option>
+              <option value="not started">Not Started</option>
+              <option value="in progress">In Progress</option>
+              <option value="completed">Completed</option>
             </select>
           </div>
 

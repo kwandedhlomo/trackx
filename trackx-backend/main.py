@@ -15,7 +15,6 @@ load_dotenv()
 # Create FastAPI instance
 app = FastAPI()
 
-
 #  Setup CORS to allow frontend to access backend
 raw_origins = os.getenv("ALLOWED_ORIGINS", "")
 origins = [origin.strip() for origin in raw_origins.split(",") if origin.strip()]

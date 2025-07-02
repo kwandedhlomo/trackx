@@ -32,19 +32,20 @@ function HomePage() {
     const [clearMode, setClearMode] = useState(false); 
     const [showMenu, setShowMenu] = useState(false);
     const [recentCases, setRecentCases] = useState([]);
-    const [statusStats, setStatusStats] = useState({ resolved: 0, unresolved: 0 });
+    const [statusStats, setStatusStats] = useState({ "not started": 0, "in progress": 0, completed: 0 });
     const { profile } = useAuth();
     const navigate = useNavigate(); 
     const [monthlyCaseCounts, setMonthlyCaseCounts] = useState([]);
     const [regionCounts, setRegionCounts] = useState([]);
     const [heatPoints, setHeatPoints] = useState([]);
     const [globePoints, setGlobePoints] = useState([]);
+    const [sortBy, setSortBy] = useState("dateEntered"); // default sort option
 
 
     const BLUE = "#1E40AF"; 
     const RED = "#B91C1C";  
-  
-    const COLORS = [BLUE, RED];
+    const GREEN = "#059669";
+    const COLORS = [RED, BLUE, GREEN];
 
     // For Sign Out functionality
     const handleSignOut = async () => {
@@ -70,14 +71,16 @@ function HomePage() {
     useEffect(() => {
       const fetchRecentCases = async () => {
         try {
-          const response = await axios.get("http://localhost:8000/cases/recent");
+          const response = await axios.get("http://localhost:8000/cases/recent", {
+            params: { sortBy }
+          });
           setRecentCases(response.data.cases);
         } catch (error) {
           console.error("Failed to fetch recent cases:", error);
         }
       };
       fetchRecentCases();
-    }, []);
+    }, [sortBy]);
 
     useEffect(() => {
       const fetchAllCases = async () => {
@@ -87,10 +90,16 @@ function HomePage() {
           });
   
           const allCases = response.data.cases || [];
-          const resolved = allCases.filter((c) => c.status === "resolved").length;
-          const unresolved = allCases.filter((c) => c.status === "unresolved").length;
-  
-          setStatusStats({ resolved, unresolved });
+
+          const notStarted = allCases.filter((c) => c.status === "not started").length;
+          const inProgress = allCases.filter((c) => c.status === "in progress").length;
+          const completed = allCases.filter((c) => c.status === "completed").length;
+          
+          setStatusStats({
+            "not started": notStarted,
+            "in progress": inProgress,
+            completed: completed,
+          });
         } catch (err) {
           console.error("Failed to fetch case statuses:", err);
         }
@@ -100,8 +109,9 @@ function HomePage() {
     }, []);
   
     const pieData = [
-      { name: "Resolved", value: statusStats.resolved },
-      { name: "Unresolved", value: statusStats.unresolved },
+      { name: "Not Started", value: statusStats["not started"] },
+      { name: "In Progress", value: statusStats["in progress"] },
+      { name: "Completed", value: statusStats.completed },
     ];
 
     useEffect(() => {
@@ -264,6 +274,24 @@ function HomePage() {
             {/* Recent Cases */}
             <div className="w-full max-w-4xl bg-white bg-opacity-10 border border-gray-700 rounded-lg p-6">
               <h2 className="text-xl font-semibold mb-4 text-blue-500">Recent Cases</h2>
+              <div className="flex gap-6 mb-4 text-white">
+                <label className="flex items-center space-x-2">
+                  <input
+                    type="checkbox"
+                    checked={sortBy === "dateEntered"}
+                    onChange={() => setSortBy("dateEntered")}
+                  />
+                  <span>Date Entered</span>
+                </label>
+                <label className="flex items-center space-x-2">
+                  <input
+                    type="checkbox"
+                    checked={sortBy === "dateOfIncident"}
+                    onChange={() => setSortBy("dateOfIncident")}
+                  />
+                  <span>Date of Incident</span>
+                </label>
+              </div>
               <ul className="space-y-4">
                 {recentCases.length > 0 ? (
                   recentCases.map((caseItem, index) => (

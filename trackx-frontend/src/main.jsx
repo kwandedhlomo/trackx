@@ -8,7 +8,6 @@ import "cesium/Build/Cesium/Widgets/widgets.css";
 
 
 
-
 createRoot(document.getElementById('root')).render(
   <StrictMode>
     <App />

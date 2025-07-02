@@ -79,7 +79,7 @@ async def create_case(payload: CaseCreateRequest) -> str:
             "region": payload.region,
             "between": payload.between,
             "createdAt": firestore.SERVER_TIMESTAMP,
-            "status": "unresolved"
+            "status": "in progress"
         }
 
         # Save case document
@@ -149,7 +149,7 @@ async def update_case(data: dict):
             "dateOfIncident": data.get("dateOfIncident"),
             "region": data.get("region"),
             "between": data.get("between"),
-            "status": data.get("status", "unresolved"),
+            "status": data.get("status", "in progress"),
             "updatedBy": "system",
             "updatedAt": SERVER_TIMESTAMP,
         }
@@ -181,9 +181,16 @@ async def delete_case(doc_id: str):
         print("Error deleting case:", e)
         return False, f"Delete failed: {str(e)}"
 
-async def fetch_recent_cases():
+async def fetch_recent_cases(sort_by: str = "dateEntered"):
     try:
-        query = db.collection("cases").order_by("createdAt", direction=firestore.Query.DESCENDING).limit(4)
+        # Map frontend-friendly key to Firestore field name
+        sort_field = "createdAt" if sort_by == "dateEntered" else "dateOfIncident"
+
+        query = (
+            db.collection("cases")
+            .order_by(sort_field, direction=firestore.Query.DESCENDING)
+            .limit(4)
+        )
         documents = list(query.stream())
 
         results = []
