@@ -14,6 +14,7 @@ import { Link, useNavigate } from "react-router-dom";
 import adfLogo from "../assets/image-removebg-preview.png";
 import trackxLogo from "../assets/trackx-logo-removebg-preview.png";
 import { motion } from "framer-motion";
+import emailjs from "@emailjs/browser";
 
 function PendingUsersPage() {
   const [pendingUsers, setPendingUsers] = useState([]);
@@ -52,15 +53,35 @@ function PendingUsersPage() {
     }
   };
 
-  const approveUser = async (userId) => {
-    try {
-      await updateDoc(doc(db, "users", userId), { isApproved: true });
-      alert("User approved.");
-      fetchPendingUsers();
-    } catch (err) {
-      console.error("Error approving user:", err);
-    }
-  };
+const approveUser = async (userId) => {
+  try {
+    const userRef = doc(db, "users", userId);
+    const userSnap = await getDoc(userRef);
+    const userData = userSnap.data();
+
+    if (!userData) throw new Error("User data not found");
+
+    await updateDoc(userRef, { isApproved: true });
+
+    // Send email via EmailJS
+    await emailjs.send(
+      "service_o9q5hwe",
+      "template_1x0ert9",
+      {
+        to_name: `${userData.firstName} ${userData.surname}`,
+        to_email: userData.email,
+        firstName: userData.firstName,
+      },
+      "nv9uRgDbQKDVfYOf4"
+    );
+
+    alert("User approved and notified via email.");
+    fetchPendingUsers();
+  } catch (err) {
+    console.error("Error approving user:", err);
+    alert("Error approving user or sending email.");
+  }
+};
 
   const handleSignOut = async () => {
     await signOut(auth);
