@@ -157,6 +157,29 @@ function EditCasePage() {
             <button type="submit" className="px-4 py-2 rounded text-white bg-blue-700 hover:bg-blue-600">Save Changes</button>
           </div>
         </form>
+
+          <div className="flex justify-between mt-10">
+            <div className="flex gap-4">
+              <button
+                type="button"
+                className="px-4 py-2 bg-green-600 hover:bg-green-700 rounded text-white"
+                onClick={() => {
+                  localStorage.setItem(
+                    "trackxCaseData",
+                    JSON.stringify({
+                      caseId: caseData?.doc_id || docIdFromLocation,
+                      caseNumber: caseNumber,
+                      caseTitle: caseTitle,
+                    })
+                  );
+                  window.open("/simulation", "_blank");
+                }}
+              >
+                View Simulation
+              </button>
+            </div>
+          </div>
+          
       </div>
     </motion.div>
   );

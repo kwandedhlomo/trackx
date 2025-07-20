@@ -514,25 +514,25 @@ except ImportError:
 
 def interpolate_points_with_ors(points: list) -> list:
     """
-    Pads the GPS route by calling ORS API between each pair of points and interpolating.
-    Guarantees strictly ordered and valid timestamps for Cesium playback.
+    Efficiently interpolates a GPS route by calling ORS API with multiple points at once.
+    Includes retry logic and ensures strictly ordered timestamps for Cesium playback.
     """
 
     if not points or len(points) < 2:
         print("⚠️ Not enough points to interpolate.")
         return points
 
-    # Sanitize and prepare base points
+    # --- Step 1: Sanitize points ---
     sanitized_points = []
     for pt in points:
         lat = pt.get("lat")
         lng = pt.get("lng")
         timestamp = pt.get("timestamp")
 
-        if not lat or not lng:
+        if not lat or not lng or not timestamp:
             continue
 
-        if hasattr(timestamp, 'isoformat'):
+        if hasattr(timestamp, "isoformat"):
             timestamp_str = timestamp.isoformat().replace("+00:00", "Z")
         elif isinstance(timestamp, str):
             timestamp_str = timestamp
@@ -551,71 +551,62 @@ def interpolate_points_with_ors(points: list) -> list:
         print("⚠️ Not enough valid points after sanitization.")
         return sanitized_points
 
+    # --- Step 2: Prepare ORS API request ---
+    url = "https://api.openrouteservice.org/v2/directions/driving-car/geojson"
+    headers = {
+        "Authorization": ORS_API_KEY,
+        "Content-Type": "application/json"
+    }
 
+    # ORS accepts multiple coordinates in one call
+    coordinates = [[p["lng"], p["lat"]] for p in sanitized_points]
+    body = {"coordinates": coordinates}
 
-    padded = []
-
-    for i in range(len(sanitized_points) - 1):
-        start = sanitized_points[i]
-        end = sanitized_points[i + 1]
-
-        padded.append(start)  # keep original start
-
-        # ORS API request
-        url = "https://api.openrouteservice.org/v2/directions/driving-car/geojson"
-        headers = {
-            "Authorization": ORS_API_KEY,
-            "Content-Type": "application/json"
-        }
-        body = {
-            "coordinates": [[start["lng"], start["lat"]], [end["lng"], end["lat"]]],
-        }
-
+    # --- Step 3: Call ORS with retry logic ---
+    max_retries = 3
+    route = None
+    for attempt in range(max_retries):
         try:
             res = requests.post(url, headers=headers, json=body)
+            if res.status_code == 429:
+                wait = 2 ** attempt
+                print(f"⚠️ ORS rate limit hit. Retrying in {wait}s...")
+                time.sleep(wait)
+                continue
             res.raise_for_status()
             route = res.json()["features"][0]["geometry"]["coordinates"]
-
-            #SIMULATION_PROGRESS[case_id]["done"] += 1
-
-            # Time interpolation
-            ts1 = start["timestamp"]
-            ts2 = end["timestamp"]
-
-            if ts1.endswith("Z") and "+00:00" not in ts1:
-                ts1 = ts1.replace("Z", "+00:00")
-            if ts2.endswith("Z") and "+00:00" not in ts2:
-                ts2 = ts2.replace("Z", "+00:00")
-
-            t_start = datetime.fromisoformat(ts1)
-            t_end = datetime.fromisoformat(ts2)
-
-            total_duration = (t_end - t_start).total_seconds()
-            num_steps = max(2, len(route))  # route includes start & end
-
-            for j, [lng, lat] in enumerate(route[1:-1], start=1):  # skip endpoints
-                frac = j / num_steps
-                interp_time = t_start + timedelta(seconds=total_duration * frac)
-
-                padded.append({
-                    "lat": lat,
-                    "lng": lng,
-                    "timestamp": interp_time.replace(tzinfo=timezone.utc).isoformat().replace("+00:00", "Z")
-                })
-
+            break
         except Exception as e:
-            print(f"❌ ORS failed for segment {i}: {e}")
+            print(f"❌ ORS failed (attempt {attempt + 1}): {e}")
+            if attempt == max_retries - 1:
+                print("⚠️ Returning sanitized points due to repeated failures.")
+                return sanitized_points
 
-        time.sleep(1)  # respect ORS limits
+    if not route:
+        print("❌ No route returned by ORS.")
+        return sanitized_points
 
-    padded.append(sanitized_points[-1])  # add last point
+    # --- Step 4: Interpolate timestamps across route ---
+    t_start = datetime.fromisoformat(sanitized_points[0]["timestamp"].replace("Z", "+00:00"))
+    t_end = datetime.fromisoformat(sanitized_points[-1]["timestamp"].replace("Z", "+00:00"))
+    total_duration = (t_end - t_start).total_seconds()
+    num_steps = max(2, len(route))
 
-    # Sort all points by timestamp to avoid Cesium errors
+    padded = []
+    for i, [lng, lat] in enumerate(route):
+        frac = i / (num_steps - 1)
+        interp_time = t_start + timedelta(seconds=total_duration * frac)
+
+        padded.append({
+            "lat": lat,
+            "lng": lng,
+            "timestamp": interp_time.replace(tzinfo=timezone.utc).isoformat().replace("+00:00", "Z")
+        })
+
+    # --- Step 5: Finalize ---
     padded.sort(key=lambda p: p["timestamp"])
-
     print(f"✅ Final padded point count: {len(padded)}")
     return padded
-
 
 async def fetch_all_case_points_with_case_ids(): #this is the newest function for heatmap - 2025/06/26
     """

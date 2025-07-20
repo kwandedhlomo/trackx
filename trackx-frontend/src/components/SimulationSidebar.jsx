@@ -1,13 +1,9 @@
 import { useEffect, useState } from "react";
 import { db } from "../firebase";
-import { collection, getDocs, query, where } from "firebase/firestore";
-import "../css/Sidebar.css";
-import { onSnapshot } from "firebase/firestore"; // Added this import to be able to listen for flagged points.
+import { collection, query, where, onSnapshot, doc, updateDoc, deleteDoc } from "firebase/firestore";
 import * as Cesium from "cesium";
-import { doc, updateDoc, deleteDoc } from "firebase/firestore";
 import { Pencil, Trash2 } from "lucide-react";
-
-
+import "../css/Sidebar.css";
 
 export default function SimulationSidebar({ viewerRef }) {
   const [collapsed, setCollapsed] = useState(false);
@@ -19,88 +15,59 @@ export default function SimulationSidebar({ viewerRef }) {
   const [editNote, setEditNote] = useState("");
   const [flashingIndex, setFlashingIndex] = useState(null);
 
-  // STEP 1: Load caseId from localStorage
   useEffect(() => {
     const caseDataString = localStorage.getItem("trackxCaseData");
     const caseData = caseDataString ? JSON.parse(caseDataString) : null;
-    if (caseData?.caseId) {
-      setCaseId(caseData.caseId);
-    }
+    if (caseData?.caseId) setCaseId(caseData.caseId);
   }, []);
 
-  // STEP 2: Fetch flagged points from Firestore
   useEffect(() => {
     if (!caseId) return;
 
     const ref = collection(db, `cases/${caseId}/interpolatedPoints`);
     const q = query(ref, where("isFlagged", "==", true));
 
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const points = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      }));
+    const unsubscribe = onSnapshot(
+      q,
+      (snapshot) => {
+        const points = snapshot.docs.map((doc) => ({
+          id: doc.id,
+          ...doc.data(),
+        }));
 
-      // Sort by timestamp
-      points.sort((a, b) => {
-        const aTime = a.timestamp?.toDate?.() || new Date(0);
-        const bTime = b.timestamp?.toDate?.() || new Date(0);
-        return aTime - bTime;
-      });
-      localStorage.setItem("flaggedSidebarFlash", JSON.stringify(points));
-      setFlaggedPoints(points);
-    }, (error) => {
-      console.error("❌ Real-time listener failed:", error);
-    });
+        points.sort((a, b) => {
+          const aTime = a.timestamp?.toDate?.() || new Date(0);
+          const bTime = b.timestamp?.toDate?.() || new Date(0);
+          return aTime - bTime;
+        });
 
-    // Cleanup listener on unmount
+        localStorage.setItem("flaggedSidebarFlash", JSON.stringify(points));
+        setFlaggedPoints(points);
+      },
+      (error) => console.error("❌ Real-time listener failed:", error)
+    );
+
     return () => unsubscribe();
-
   }, [caseId]);
 
-
   useEffect(() => {
-  const listener = (e) => {
-    const idx = e.detail;
-    setFlashingIndex(idx);
-    setTimeout(() => setFlashingIndex(null), 1000);
+    const listener = (e) => {
+      const idx = e.detail;
+      setFlashingIndex(idx);
+      setTimeout(() => setFlashingIndex(null), 1000);
+    };
+    window.addEventListener("flashSidebarItem", listener);
+    return () => window.removeEventListener("flashSidebarItem", listener);
+  }, []);
+
+  const handleDelete = (point) => {
+    if (window.confirm("Are you sure you want to delete this flagged point?")) {
+      const pointRef = doc(db, `cases/${caseId}/interpolatedPoints`, point.id);
+      deleteDoc(pointRef)
+        .then(() => console.log("🗑️ Point deleted"))
+        .catch((err) => console.error("❌ Error deleting point:", err));
+    }
   };
-  window.addEventListener("flashSidebarItem", listener);
-  return () => window.removeEventListener("flashSidebarItem", listener);
-}, []);
-
-
-
-  const handleEdit = (point) => {
-  const newTitle = prompt("Edit title:", point.title);
-  const newNote = prompt("Edit note:", point.note);
-  if (newTitle !== null && newNote !== null) {
-    const pointRef = doc(db, `cases/${caseId}/interpolatedPoints`, point.id);
-    updateDoc(pointRef, {
-      title: newTitle,
-      note: newNote
-    }).then(() => {
-      console.log("✅ Point updated");
-    }).catch((err) => {
-      console.error("❌ Error updating point:", err);
-    });
-  }
-};
-
-const handleDelete = (point) => {
-  if (window.confirm("Are you sure you want to delete this flagged point?")) {
-    const pointRef = doc(db, `cases/${caseId}/interpolatedPoints`, point.id);
-    deleteDoc(pointRef)
-      .then(() => {
-        console.log("🗑️ Point deleted");
-      })
-      .catch((err) => {
-        console.error("❌ Error deleting point:", err);
-      });
-  }
-};
-
-
 
   return (
     <div
@@ -153,206 +120,218 @@ const handleDelete = (point) => {
                 left: "10px",
                 width: "2px",
                 height: "100%",
-                backgroundColor: "#4b5563", // light gray
+                backgroundColor: "#4b5563",
                 zIndex: 0,
               }}
             />
 
-            {/* Point Items */}
-            <div style={{ display: "flex", flexDirection: "column", gap: "18px", zIndex: 1 }}>
-            {flaggedPoints.length === 0 ? (
-              <p style={{ color: "#94a3b8", fontSize: "0.85rem" }}>No flagged points yet.</p>
-            ) : (
-              flaggedPoints.map((point, idx) => (
-                <div
-                  key={point.id}
-                  onClick={() => {
-                    if (!viewerRef?.current?.cesiumElement || !point.timestamp) return;
-
-                    const viewer = viewerRef.current.cesiumElement;
-                    const cesiumTime = Cesium.JulianDate.fromDate(new Date(point.timestamp.seconds * 1000));
-                    viewer.clock.currentTime = cesiumTime;
-                    viewer.clock.shouldAnimate = false; // paused on jump
-                    setActiveIndex(idx);
-                    setFlashingIndex(idx);
-                    setTimeout(() => setFlashingIndex(null), 1000); // flash for 1 second
-                  }}
-                  style={{
-                    backgroundColor:
-                      flashingIndex === idx
-                        ? "#67e8f9"
-                        : activeIndex === idx
-                        ? "#ffffff"
-                        : "#111827",
-                    color: activeIndex === idx ? "#000" : "#f1f5f9",
-                    padding: "10px 14px",
-                    borderRadius: "10px",
-                    fontSize: "0.95rem",
-                    fontWeight: "500",
-                    transition: "background-color 0.3s ease",
-                    boxShadow:
-                      flashingIndex === idx
-                        ? "0 0 12px rgba(103, 232, 249, 0.8)" // glowing flash
-                        : activeIndex === idx
-                        ? "0 0 8px rgba(255,255,255,0.4)"
-                        : "inset 0 0 0 1px rgba(255,255,255,0.05)",
-                    position: "relative",
-                    cursor: "pointer"
-                  }}
-                >
-
+            {/* Scrollable Point Items */}
+            <div
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                gap: "18px",
+                zIndex: 1,
+                maxHeight: "60vh",
+                overflowY: "auto",
+                paddingRight: "6px",
+              }}
+            >
+              {flaggedPoints.length === 0 ? (
+                <p style={{ color: "#94a3b8", fontSize: "0.85rem" }}>No flagged points yet.</p>
+              ) : (
+                flaggedPoints.map((point, idx) => (
                   <div
-                    style={{
-                      position: "absolute",
-                      top: "50%",
-                      left: "-18px",
-                      transform: "translateY(-50%)",
-                      width: "10px",
-                      height: "10px",
-                      borderRadius: "999px",
-                      backgroundColor: activeIndex === idx ? "#ffffff" : "#38bdf8",
-                      border: "2px solid #1e1e1e",
+                    key={point.id}
+                    onClick={() => {
+                      if (!viewerRef?.current?.cesiumElement || !point.timestamp) return;
+                      const viewer = viewerRef.current.cesiumElement;
+                      const cesiumTime = Cesium.JulianDate.fromDate(new Date(point.timestamp.seconds * 1000));
+                      viewer.clock.currentTime = cesiumTime;
+                      viewer.clock.shouldAnimate = false;
+                      setActiveIndex(idx);
+                      setFlashingIndex(idx);
+                      setTimeout(() => setFlashingIndex(null), 1000);
                     }}
-                  />
-                  <div>
-                    <p style={{ fontWeight: "600", fontSize: "0.95rem", color: "#38bdf8" }}>{point.title || "Untitled"}</p>
-                    <p style={{ fontSize: "0.85rem", marginTop: "2px", color: "#cbd5e1" }}>{point.note || "(no note)"}</p>
-                    {point.timestamp && (
-                      <p style={{ fontSize: "0.75rem", color: "#94a3b8", marginTop: "4px" }}>
-                        {new Date(point.timestamp.seconds * 1000).toLocaleTimeString("en-GB", {
-                          hour: "2-digit",
-                          minute: "2-digit",
-                          second: "2-digit",
-                          timeZone: "UTC"
-                        })}
+                    style={{
+                      backgroundColor:
+                        flashingIndex === idx
+                          ? "#67e8f9"
+                          : activeIndex === idx
+                          ? "#ffffff"
+                          : "#111827",
+                      color: activeIndex === idx ? "#000" : "#f1f5f9",
+                      padding: "10px 14px",
+                      borderRadius: "10px",
+                      fontSize: "0.95rem",
+                      fontWeight: "500",
+                      transition: "background-color 0.3s ease",
+                      boxShadow:
+                        flashingIndex === idx
+                          ? "0 0 12px rgba(103, 232, 249, 0.8)"
+                          : activeIndex === idx
+                          ? "0 0 8px rgba(255,255,255,0.4)"
+                          : "inset 0 0 0 1px rgba(255,255,255,0.05)",
+                      position: "relative",
+                      cursor: "pointer",
+                    }}
+                  >
+                    {/* Dot Marker */}
+                    <div
+                      style={{
+                        position: "absolute",
+                        top: "50%",
+                        left: "-18px",
+                        transform: "translateY(-50%)",
+                        width: "10px",
+                        height: "10px",
+                        borderRadius: "999px",
+                        backgroundColor: activeIndex === idx ? "#ffffff" : "#38bdf8",
+                        border: "2px solid #1e1e1e",
+                      }}
+                    />
+
+                    <div>
+                      <p style={{ fontWeight: "600", fontSize: "0.95rem", color: "#38bdf8", wordWrap: "break-word", whiteSpace: "normal", maxWidth: "220px" }}>
+                        {point.title || "Untitled"}
                       </p>
-                    )}
-                    <div style={{ marginTop: "6px", display: "flex", gap: "12px" }}>
-                      <Pencil
-                        size={16}
-                        color="#9ca3af"
-                        style={{ cursor: "pointer" }}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setEditingPoint(point);
-                          setEditTitle(point.title || "");
-                          setEditNote(point.note || "");
-                        }}
-                      />
-                      <Trash2
-                        size={16}
-                        color="#9ca3af"
-                        style={{ cursor: "pointer" }}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleDelete(point);
-                        }}
-                      />
+                      <p style={{ fontSize: "0.85rem", marginTop: "2px", color: "#cbd5e1", wordWrap: "break-word", whiteSpace: "normal", maxWidth: "220px" }}>
+                        {point.note || "(no note)"}
+                      </p>
+                      {point.timestamp && (
+                        <p style={{ fontSize: "0.75rem", color: "#94a3b8", marginTop: "4px" }}>
+                          {new Date(point.timestamp.seconds * 1000).toLocaleTimeString("en-GB", {
+                            hour: "2-digit",
+                            minute: "2-digit",
+                            second: "2-digit",
+                            timeZone: "UTC",
+                          })}
+                        </p>
+                      )}
+                      <div style={{ marginTop: "6px", display: "flex", gap: "12px" }}>
+                        <Pencil
+                          size={16}
+                          color="#9ca3af"
+                          style={{ cursor: "pointer" }}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setEditingPoint(point);
+                            setEditTitle(point.title || "");
+                            setEditNote(point.note || "");
+                          }}
+                        />
+                        <Trash2
+                          size={16}
+                          color="#9ca3af"
+                          style={{ cursor: "pointer" }}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleDelete(point);
+                          }}
+                        />
+                      </div>
                     </div>
                   </div>
-                </div>
-              ))
-            )}
-          </div>
-
+                ))
+              )}
+            </div>
           </div>
         </>
       )}
-      
-        {editingPoint && (
-    <div
-      style={{
-        position: "fixed",
-        top: 0, left: 0, right: 0, bottom: 0,
-        backgroundColor: "rgba(0,0,0,0.7)",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        zIndex: 2000
-      }}
-    >
-      <div
-        style={{
-          backgroundColor: "#1e1e1e",
-          padding: "24px",
-          borderRadius: "12px",
-          width: "90%",
-          maxWidth: "400px",
-          color: "white"
-        }}
-      >
-        <h2 style={{ fontSize: "1.2rem", marginBottom: "12px" }}>✏️ Edit Flag</h2>
 
-        <input
-          type="text"
-          placeholder="Title"
-          value={editTitle}
-          onChange={(e) => setEditTitle(e.target.value)}
+      {editingPoint && (
+        <div
           style={{
-            width: "100%",
-            padding: "8px",
-            marginBottom: "12px",
-            borderRadius: "8px",
-            border: "1px solid #333",
-            backgroundColor: "#111",
-            color: "#fff"
+            position: "fixed",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: "rgba(0,0,0,0.7)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 2000,
           }}
-        />
-
-        <textarea
-          placeholder="Note"
-          value={editNote}
-          onChange={(e) => setEditNote(e.target.value)}
-          rows={4}
-          style={{
-            width: "100%",
-            padding: "8px",
-            borderRadius: "8px",
-            border: "1px solid #333",
-            backgroundColor: "#111",
-            color: "#fff",
-            marginBottom: "16px"
-          }}
-        />
-
-        <div style={{ display: "flex", justifyContent: "flex-end", gap: "12px" }}>
-          <button
-            onClick={() => setEditingPoint(null)}
+        >
+          <div
             style={{
-              padding: "8px 14px",
-              backgroundColor: "#444",
-              borderRadius: "8px",
+              backgroundColor: "#1e1e1e",
+              padding: "24px",
+              borderRadius: "12px",
+              width: "90%",
+              maxWidth: "400px",
               color: "white",
-              border: "none"
             }}
           >
-            Cancel
-          </button>
-          <button
-            onClick={async () => {
-              const ref = doc(db, `cases/${caseId}/interpolatedPoints`, editingPoint.id);
-              await updateDoc(ref, { title: editTitle, note: editNote });
-              setEditingPoint(null);
-            }}
-            style={{
-              padding: "8px 14px",
-              backgroundColor: "#38bdf8",
-              borderRadius: "8px",
-              color: "#000",
-              fontWeight: "bold",
-              border: "none"
-            }}
-          >
-            Save
-          </button>
+            <h2 style={{ fontSize: "1.2rem", marginBottom: "12px" }}>✏️ Edit Flag</h2>
+
+            <input
+              type="text"
+              placeholder="Title"
+              value={editTitle}
+              onChange={(e) => setEditTitle(e.target.value)}
+              style={{
+                width: "100%",
+                padding: "8px",
+                marginBottom: "12px",
+                borderRadius: "8px",
+                border: "1px solid #333",
+                backgroundColor: "#111",
+                color: "#fff",
+              }}
+            />
+
+            <textarea
+              placeholder="Note"
+              value={editNote}
+              onChange={(e) => setEditNote(e.target.value)}
+              rows={4}
+              style={{
+                width: "100%",
+                padding: "8px",
+                borderRadius: "8px",
+                border: "1px solid #333",
+                backgroundColor: "#111",
+                color: "#fff",
+                marginBottom: "16px",
+              }}
+            />
+
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: "12px" }}>
+              <button
+                onClick={() => setEditingPoint(null)}
+                style={{
+                  padding: "8px 14px",
+                  backgroundColor: "#444",
+                  borderRadius: "8px",
+                  color: "white",
+                  border: "none",
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={async () => {
+                  const ref = doc(db, `cases/${caseId}/interpolatedPoints`, editingPoint.id);
+                  await updateDoc(ref, { title: editTitle, note: editNote });
+                  setEditingPoint(null);
+                }}
+                style={{
+                  padding: "8px 14px",
+                  backgroundColor: "#38bdf8",
+                  borderRadius: "8px",
+                  color: "#000",
+                  fontWeight: "bold",
+                  border: "none",
+                }}
+              >
+                Save
+              </button>
+            </div>
+          </div>
         </div>
-      </div>
-    </div>
-  )}
-
-
+      )}
     </div>
   );
-  
 }
-
