@@ -6,7 +6,8 @@ import adflogo from "../assets/image-removebg-preview.png";
 import { motion } from "framer-motion";
 import axios from "axios";
 import SimulationSidebar from "../components/SimulationSidebar";
-import { db } from "../firebase";
+import { auth, db } from "../firebase";
+import { doc, getDoc } from "firebase/firestore";
 import {
   collection,
   getDocs,
@@ -15,8 +16,9 @@ import {
   query, // ← ADD THIS
   where, // ← ALSO PROBABLY USED
   onSnapshot,
-  doc,
 } from "firebase/firestore";
+
+
 
 function SimulationPage2() {
   const [czml, setCzml] = useState(null);
@@ -28,6 +30,9 @@ function SimulationPage2() {
   const [vehicleReady, setVehicleReady] = useState(false);
   const vehicleEntityRef = useRef(null); // ← holds the entity object directly
   const lastSimMillisRef = useRef(null);
+  const [userName, setUserName] = useState("");
+  const [userSurname, setUserSurname] = useState("");
+
 
 
 
@@ -159,6 +164,25 @@ useEffect(() => {
 }, []);
 
 
+useEffect(() => {
+  const fetchUserInfo = async () => {
+    const user = auth.currentUser;
+    if (user) {
+      try {
+        const userRef = doc(db, "users", user.uid);
+        const userSnap = await getDoc(userRef);
+        if (userSnap.exists()) {
+          const data = userSnap.data();
+          setUserName(data.name || "Unknown");
+          setUserSurname(data.surname || "");
+        }
+      } catch (error) {
+        console.error("Error fetching user info:", error);
+      }
+    }
+  };
+  fetchUserInfo();
+}, []);
 
 
 //For the Flagging:
@@ -226,6 +250,7 @@ const handleFlagSubmit = async () => {
 
 
     const utcDate = Cesium.JulianDate.toDate(viewer.clock.currentTime); // always in UTC
+    const currentTimeISO = utcDate.toISOString(); // ✅ define this here
     const currentMillisSinceMidnight = toMillisSinceMidnight(currentTimeISO);
     console.log(`🕰️ Cesium sim time (ISO): ${currentTimeISO}`);
     console.log(`🕰️ Cesium millis since midnight: ${currentMillisSinceMidnight}`);
@@ -239,23 +264,23 @@ const handleFlagSubmit = async () => {
       const data = docSnap.data();
 
       if (data.timestamp) {
-        const firestoreDate = data.timestamp.toDate();
+        const firestoreDate = toDateSafe(data.timestamp);
+        if (!firestoreDate) return; // skip if conversion failed
+
         const firestoreISO = firestoreDate.toISOString();
         const pointMillisSinceMidnight = toMillisSinceMidnight(firestoreISO);
 
         console.log("📄 Firestore Timestamp (full ISO):", firestoreISO);
         console.log("📄 Firestore Time (ms since midnight):", pointMillisSinceMidnight);
 
-
         const diff = Math.abs(currentMillisSinceMidnight - pointMillisSinceMidnight);
-        console.log(`🕵️ Comparing → point: ${pointMillisSinceMidnight}ms vs Cesium: ${currentMillisSinceMidnight}ms → Δ${diff}ms`);
-
         if (diff < smallestTimeDiff) {
           smallestTimeDiff = diff;
           closestDoc = { id: docSnap.id, ref: docSnap.ref };
         }
       }
     });
+
 
     console.log("✅ Closest doc:", closestDoc?.id, "Time difference:", smallestTimeDiff);
     console.log("🔍 Fetching points for caseId:", caseId);
@@ -284,6 +309,12 @@ const handleFlagSubmit = async () => {
   }
 };
 
+const toDateSafe = (ts) => {
+  if (!ts) return null;
+  if (typeof ts.toDate === "function") return ts.toDate();  // Firestore Timestamp
+  if (typeof ts === "string") return new Date(ts);          // ISO String
+  return ts instanceof Date ? ts : null;                    // Already a Date
+};
 
 
   return (
@@ -297,9 +328,9 @@ const handleFlagSubmit = async () => {
 
       <div className="flex items-center justify-between px-6 py-4 bg-black shadow-md z-10">
         <img src={adflogo} alt="Logo" className="h-12" />
-        <h1 className="text-xl font-bold">3D Route Simulation</h1>
+        <h1 className="text-xl font-bold">Route Simulation</h1>
         <div>
-          <p className="text-sm">Name Surname</p>
+          <p className="text-sm">{userName} {userSurname}</p>
           <button className="text-red-400 hover:text-red-600 text-xs">Sign Out</button>
         </div>
       </div>
