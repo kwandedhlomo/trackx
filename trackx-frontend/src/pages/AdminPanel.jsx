@@ -7,6 +7,7 @@ import trackxLogo from "../assets/trackx-logo-removebg-preview.png";
 import { signOut } from "firebase/auth";
 import { auth } from "../firebase";
 
+
 function AdminPanel() {
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);

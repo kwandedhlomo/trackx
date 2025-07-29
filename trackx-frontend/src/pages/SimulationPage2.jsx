@@ -6,7 +6,10 @@ import adflogo from "../assets/image-removebg-preview.png";
 import { motion } from "framer-motion";
 import axios from "axios";
 import SimulationSidebar from "../components/SimulationSidebar";
-import { auth, db } from "../firebase";
+import { db } from "../firebase";
+import { useAuth } from "../context/AuthContext";
+import { signOut } from "firebase/auth";
+import { auth } from "../firebase";
 import { doc, getDoc } from "firebase/firestore";
 import {
   collection,
@@ -17,6 +20,8 @@ import {
   where, // ← ALSO PROBABLY USED
   onSnapshot,
 } from "firebase/firestore";
+import { useNavigate } from "react-router-dom";
+
 
 
 
@@ -30,28 +35,29 @@ function SimulationPage2() {
   const [vehicleReady, setVehicleReady] = useState(false);
   const vehicleEntityRef = useRef(null); // ← holds the entity object directly
   const lastSimMillisRef = useRef(null);
-  const [userName, setUserName] = useState("");
-  const [userSurname, setUserSurname] = useState("");
-
-
-
-
-
   const caseDataString = localStorage.getItem("trackxCaseData");
   const caseId = caseDataString ? JSON.parse(caseDataString)?.caseId || null : null;
   const caseNumber = caseDataString ? JSON.parse(caseDataString)?.caseNumber || null : null;
+  const navigate = useNavigate();
 
   console.log("📦 Loaded caseId from localStorage:", caseId);
   console.log("🔢 Loaded caseNumber from localStorage:", caseNumber);
-
-
 
   const homePosition = Cartesian3.fromDegrees(18.4233, -33.918861, 1500); // Cape Town
   const [showFlagModal, setShowFlagModal] = useState(false); //forflagging
   const [flagTitle, setFlagTitle] = useState("");//forflagging
   const [flagNote, setFlagNote] = useState("");//forflagging
 
+const { profile } = useAuth();
 
+const handleSignOut = async () => {
+  try {
+    await signOut(auth);
+    navigate("/"); // Redirect to landing page
+  } catch (error) {
+    console.error("Sign-out failed:", error.message);
+  }
+};
 
 
   const extractFirstCoordinate = (czmlData) => {
@@ -163,26 +169,6 @@ useEffect(() => {
   return () => clearInterval(interval);
 }, []);
 
-
-useEffect(() => {
-  const fetchUserInfo = async () => {
-    const user = auth.currentUser;
-    if (user) {
-      try {
-        const userRef = doc(db, "users", user.uid);
-        const userSnap = await getDoc(userRef);
-        if (userSnap.exists()) {
-          const data = userSnap.data();
-          setUserName(data.name || "Unknown");
-          setUserSurname(data.surname || "");
-        }
-      } catch (error) {
-        console.error("Error fetching user info:", error);
-      }
-    }
-  };
-  fetchUserInfo();
-}, []);
 
 
 //For the Flagging:
@@ -330,8 +316,8 @@ const toDateSafe = (ts) => {
         <img src={adflogo} alt="Logo" className="h-12" />
         <h1 className="text-xl font-bold">Route Simulation</h1>
         <div>
-          <p className="text-sm">{userName} {userSurname}</p>
-          <button className="text-red-400 hover:text-red-600 text-xs">Sign Out</button>
+          <p className="text-sm">{profile ? `${profile.firstName} ${profile.surname}` : "Loading..."}</p>
+          <button onClick={handleSignOut} className="text-red-400 hover:text-red-600 text-xs">Sign Out</button>
         </div>
       </div>
 

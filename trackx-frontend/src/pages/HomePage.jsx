@@ -214,6 +214,12 @@ function HomePage() {
                 <Link to="/home" className="block hover:text-blue-400" onClick={() => setShowMenu(false)}>🏠 Home</Link>
                 <Link to="/new-case" className="block hover:text-blue-400" onClick={() => setShowMenu(false)}>📝 Create New Case / Report</Link>
                 <Link to="/manage-cases" className="block hover:text-blue-400" onClick={() => setShowMenu(false)}>📁 Manage Cases</Link>
+                
+                {profile?.role ==="admin" && (
+                <Link to="/admin-dashboard" className="block hover:text-blue-400" onClick={() => setShowMenu(false)}>
+                  🛠 Admin Dashboard
+                </Link>
+              )}
               </div>
             )}
   

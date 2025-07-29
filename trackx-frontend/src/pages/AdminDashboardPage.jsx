@@ -3,6 +3,9 @@ import { Link } from "react-router-dom";
 import trackxLogo from "../assets/trackx-logo-removebg-preview.png";
 import ADFLogoNoBg from "../assets/image-removebg-preview.png";
 import AnimatedMap from "../components/AnimatedMap";
+import { useNavigate } from "react-router-dom";
+
+
 
 function AdminDashboardPage() {
   return (
@@ -27,6 +30,11 @@ function AdminDashboardPage() {
           <Link to="/all-users">
             <button className="w-48 bg-gradient-to-r from-gray-500 to-gray-400 text-white py-2 rounded shadow transition-all duration-300 hover:from-blue-800 hover:to-blue-600">
               View All Users
+            </button>
+          </Link>
+          <Link to="/home">
+            <button className="w-48 bg-gradient-to-r from-gray-500 to-gray-400 text-white py-2 rounded shadow transition-all duration-300 hover:from-blue-800 hover:to-blue-600">
+              Return Home
             </button>
           </Link>
         </div>
