@@ -3,9 +3,14 @@ import { Link, useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import { ArrowLeft, ArrowRight, MapPin, AlertTriangle, Camera } from "lucide-react";
 import adflogo from "../assets/image-removebg-preview.png";
+import { useAuth } from "../context/AuthContext";
+import { signOut } from "firebase/auth";
+import { auth } from "../firebase";
 
 function AnnotationsPage() {
   const navigate = useNavigate();
+  const { profile } = useAuth();
+  
   
   // Refs for capturing snapshots
   const mapImageRef = useRef(null);
@@ -32,6 +37,15 @@ function AnnotationsPage() {
   // Google Maps API Key 
   const GOOGLE_MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
   
+  const handleSignOut = async () => {
+    try {
+      await signOut(auth);
+      navigate("/"); // Redirect to landing page
+    } catch (error) {
+      console.error("Sign-out failed:", error.message);
+    }
+  };
+
   // Load case data from localStorage when component mounts
   useEffect(() => {
     setIsLoading(true);
@@ -416,8 +430,8 @@ function AnnotationsPage() {
 
         <div className="flex items-center space-x-4">
           <div>
-            <p className="text-sm">Name Surname</p>
-            <button className="text-red-400 hover:text-red-600 text-xs">Sign Out</button>
+            <p className="text-sm">{profile ? `${profile.firstName} ${profile.surname}` : "Loading..."}</p>
+            <button onClick={handleSignOut} className="text-red-400 hover:text-red-600 text-xs">Sign Out</button>
           </div>
         </div>
       </div>

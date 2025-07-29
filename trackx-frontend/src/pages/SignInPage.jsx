@@ -51,10 +51,11 @@ const handleSignIn = async (e) => {
     }
 
     if (userData.role && userData.role.toLowerCase() === "admin") {
-      navigate("/admin-dashboard");
+      navigate("/home");
     } else {
       navigate("/home");
     }
+
   } catch (error) {
     console.error("Login failed:", error.message);
     setErrorMessage("Incorrect Email or Password.");

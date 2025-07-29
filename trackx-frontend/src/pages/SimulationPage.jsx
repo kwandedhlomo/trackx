@@ -4,6 +4,7 @@ import adflogo from "../assets/image-removebg-preview.png";
 //import profileIcon from "../assets/profile-icon.png"; 
 import { motion } from "framer-motion";
 
+
 function SimulationPage() {
   const caseName = "Example Case XYZ";
 

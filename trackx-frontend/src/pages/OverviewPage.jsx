@@ -4,12 +4,21 @@ import adflogo from "../assets/image-removebg-preview.png";
 import { motion } from "framer-motion";
 import { AlertTriangle, MapPin, FileText, Camera } from "lucide-react";
 import jsPDF from "jspdf";
+import { useAuth } from "../context/AuthContext";
+import { signOut } from "firebase/auth";
+import { auth } from "../firebase";
+import { useNavigate } from "react-router-dom";
+
+
 // Google Maps API Key for PDF report generation
 const GOOGLE_MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
 
 function OverviewPage() {
   // Create refs for PDF report generation
   const reportRef = useRef(null);
+  const { profile } = useAuth();
+  const navigate = useNavigate();
+
   
   // State to store case data and selected locations
   const [caseDetails, setCaseDetails] = useState({});
@@ -26,6 +35,17 @@ function OverviewPage() {
   const [snapshots, setSnapshots] = useState([]);
   const [snapshotsAvailable, setSnapshotsAvailable] = useState(false);
   const [locationTitles, setLocationTitles] = useState([]);
+
+
+
+  const handleSignOut = async () => {
+    try {
+      await signOut(auth);
+      navigate("/"); // Redirect to landing page
+    } catch (error) {
+      console.error("Sign-out failed:", error.message);
+    }
+  };
 
   // Load case data from localStorage when component mounts
   useEffect(() => {
@@ -475,8 +495,8 @@ function OverviewPage() {
 
         <div className="flex items-center space-x-4">
           <div>
-            <p className="text-sm">Name Surname</p>
-            <button className="text-red-400 hover:text-red-600 text-xs">Sign Out</button>
+            <p className="text-sm">{profile ? `${profile.firstName} ${profile.surname}` : "Loading..."}</p>
+            <button onClick={handleSignOut} className="text-red-400 hover:text-red-600 text-xs">Sign Out</button>
           </div>
         </div>
       </div>

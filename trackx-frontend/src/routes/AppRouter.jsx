@@ -20,7 +20,7 @@ import WaitingRoomPage from "../pages/WaitingRoomPage";
 import AdminDashboardPage from "../pages/AdminDashboardPage";
 import PendingUsersPage from "../pages/PendingUsersPage";
 import AdminPanel from '../pages/AdminPanel.jsx'; 
-
+import ForgotPassword from "../pages/ForgotPassword";
 
 
 
@@ -141,6 +141,12 @@ function AppRouter() {
             </ProtectedRoute>
           }
         />
+        <Route
+          path="/forgot-password" 
+          element=
+          {<ForgotPassword />} 
+          />
+
       </Routes>
       
     </BrowserRouter>

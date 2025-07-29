@@ -9,6 +9,7 @@ import { auth } from "../firebase";
 import { signOut } from "firebase/auth";
 import { useAuth } from "../context/AuthContext";
 
+
 // Dynamic PDF.js import to ensure version compatibility
 let pdfjsLib = null;
 

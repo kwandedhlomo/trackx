@@ -3,12 +3,22 @@ import { FaSearch, FaMapMarkerAlt, FaCalendarAlt } from "react-icons/fa";
 import adfLogo from "../assets/image-removebg-preview.png";
 import { useState, useEffect } from "react";
 import axios from "axios";
+import { useAuth } from "../context/AuthContext";
+import { signOut } from "firebase/auth";
+import { auth } from "../firebase";
+import { useNavigate } from "react-router-dom";
+
+
 
 function ManageCasesPage() {
   const [searchTerm, setSearchTerm] = useState("");
   const [region, setRegion] = useState("");
   const [date, setDate] = useState("");
   const [cases, setCases] = useState([]);
+  const { profile } = useAuth();
+  const navigate = useNavigate(); 
+
+
 
   const handleSearch = async () => {
     try {
@@ -22,6 +32,15 @@ function ManageCasesPage() {
       setCases(response.data.cases); 
     } catch (error) {
       console.error("Search failed:", error);
+    }
+  };
+
+  const handleSignOut = async () => {
+    try {
+      await signOut(auth);
+      // Optionally, navigate to login page or landing
+    } catch (error) {
+      console.error("Sign-out failed:", error.message);
     }
   };
 
@@ -56,8 +75,8 @@ function ManageCasesPage() {
         <div className="flex items-center space-x-6 text-white font-sans">
           <Link to="/home" className="hover:text-gray-300">Home</Link>
           <div className="flex flex-col text-right">
-            <span className="text-white">Username</span>
-            <button className="text-sm text-gray-300 hover:text-white">Sign Out</button>
+            <p className="text-sm">{profile ? `${profile.firstName} ${profile.surname}` : "Loading..."}</p>
+            <button onClick={handleSignOut} className="text-red-400 hover:text-red-600 text-xs">Sign Out</button>
           </div>
           <div className="text-sm text-gray-300">
             {new Date().toLocaleString()}

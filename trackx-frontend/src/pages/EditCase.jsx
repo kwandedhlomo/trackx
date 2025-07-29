@@ -3,10 +3,16 @@ import { useLocation, useNavigate, Link } from "react-router-dom";
 import { motion } from "framer-motion";
 import adflogo from "../assets/image-removebg-preview.png";
 import axios from "axios";
+import { useAuth } from "../context/AuthContext";
+import { signOut } from "firebase/auth";
+import { auth } from "../firebase";
+
+
 
 function EditCasePage() {
   const location = useLocation();
   const navigate = useNavigate();
+  const { profile } = useAuth();
   const caseDataFromLocation = location.state?.caseData || null;
   const docIdFromLocation = location.state?.docId || null;
 
@@ -19,6 +25,16 @@ function EditCasePage() {
   const [region, setRegion] = useState("");
   const [between, setBetween] = useState("");
   const [status, setStatus] = useState("unresolved");
+
+  const handleSignOut = async () => {
+    try {
+      await signOut(auth);
+      navigate("/"); // Redirect to landing page
+    } catch (error) {
+      console.error("Sign-out failed:", error.message);
+    }
+  };
+
 
   useEffect(() => {
     const fetchCase = async (id) => {
@@ -97,8 +113,8 @@ function EditCasePage() {
         <h1 className="text-xl font-bold text-white">Edit Case</h1>
         <div className="flex items-center space-x-4">
           <div>
-            <p className="text-sm">Name Surname</p>
-            <button className="text-red-400 hover:text-red-600 text-xs">Sign Out</button>
+            <p className="text-sm">{profile ? `${profile.firstName} ${profile.surname}` : "Loading..."}</p>
+            <button onClick={handleSignOut} className="text-red-400 hover:text-red-600 text-xs">Sign Out</button>
           </div>
         </div>
       </div>
@@ -153,7 +169,7 @@ function EditCasePage() {
           </div>
 
           <div className="flex justify-between mt-10">
-            <Link to="/manage-cases" className="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded text-white">Cancel</Link>
+            <Link to="/home" className="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded text-white">Cancel</Link>
             <button type="submit" className="px-4 py-2 rounded text-white bg-blue-700 hover:bg-blue-600">Save Changes</button>
           </div>
         </form>
