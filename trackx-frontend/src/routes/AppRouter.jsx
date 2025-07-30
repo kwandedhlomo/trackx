@@ -1,6 +1,8 @@
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import ProtectedRoute from "../components/ProtectedRoute";
+import { Navigate } from "react-router-dom";
+
 
 // Import pages
 import HomePage from "../pages/HomePage";
@@ -42,12 +44,14 @@ function AppRouter() {
         <Route path="/register" element={<RegisterPage />} />
         <Route path="/verify-email" element={<VerifyEmailPage />} />
         <Route path="/waiting-room" element={<WaitingRoomPage />} />
+        <Route path="/forgot-password" element={<ForgotPassword />} />
+
 
         {/* Protected routes — only accessible if logged in and verified */}
         <Route
           path="/admin-dashboard"
           element={
-            <ProtectedRoute>
+            <ProtectedRoute requiredRole="admin">
               <AdminDashboardPage />
             </ProtectedRoute>
           }
@@ -55,7 +59,7 @@ function AppRouter() {
            <Route
           path="/pending-users"
           element={
-            <ProtectedRoute>
+            <ProtectedRoute requiredRole="admin">
               <PendingUsersPage />
             </ProtectedRoute>
           }
@@ -64,7 +68,7 @@ function AppRouter() {
           <Route 
           path="/all-users" 
           element={
-            <ProtectedRoute>
+            <ProtectedRoute requiredRole="admin">
             <AdminPanel />
             </ProtectedRoute>
             } />
@@ -148,7 +152,6 @@ function AppRouter() {
           />
 
       </Routes>
-      
     </BrowserRouter>
   );
 }export default AppRouter;
