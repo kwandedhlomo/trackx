@@ -24,7 +24,9 @@ function EditCasePage() {
   const [dateOfIncident, setDateOfIncident] = useState("");
   const [region, setRegion] = useState("");
   const [between, setBetween] = useState("");
-  const [status, setStatus] = useState("unresolved");
+  const [status, setStatus] = useState("not started");
+  const [urgency, setUrgency] = useState("");
+  
 
   const handleSignOut = async () => {
     try {
@@ -64,7 +66,8 @@ function EditCasePage() {
       setDateOfIncident(caseData.dateOfIncident?.split("T")[0] || "");
       setRegion(caseData.region || "");
       setBetween(caseData.between || "");
-      setStatus(caseData.status || "unresolved");
+      setStatus(caseData.status || "not started");
+      setUrgency(caseData.urgency || "");
     }
   }, [caseData]);
 
@@ -80,6 +83,7 @@ function EditCasePage() {
         region,
         between,
         status,
+        urgency,
       });
 
       if (response.data.success) {
@@ -153,6 +157,16 @@ function EditCasePage() {
             <div className="md:col-span-2">
               <label className="block text-sm font-medium text-gray-300 mb-1">Between</label>
               <input type="text" value={between} onChange={(e) => setBetween(e.target.value)} className="w-full p-2 bg-gray-800 border border-gray-600 rounded text-white" placeholder="e.g. The State vs. John Doe" />
+            </div>
+            <div className="md:col-span-2">
+              <label className="block text-sm font-medium text-gray-300 mb-1">Urgency *</label>
+              <select value={urgency} onChange={(e) => setUrgency(e.target.value)} required className="w-full p-2 bg-gray-800 border border-gray-600 rounded text-white">
+                <option value="">Select urgency level</option>
+                <option value="Low">Low</option>
+                <option value="Medium">Medium</option>
+                <option value="High">High</option>
+                <option value="Critical">Critical</option>
+              </select>
             </div>
           </div>
           <div>

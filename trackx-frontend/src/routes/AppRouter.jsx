@@ -23,6 +23,7 @@ import AdminDashboardPage from "../pages/AdminDashboardPage";
 import PendingUsersPage from "../pages/PendingUsersPage";
 import AdminPanel from '../pages/AdminPanel.jsx'; 
 import ForgotPassword from "../pages/ForgotPassword";
+import MyCasesPage from "../pages/MyCasesPage.jsx";
 
 
 
@@ -150,7 +151,14 @@ function AppRouter() {
           element=
           {<ForgotPassword />} 
           />
-
+        <Route
+          path="/my-cases"
+          element={
+            <ProtectedRoute>
+              <MyCasesPage/>
+            </ProtectedRoute>
+          }
+        />
       </Routes>
     </BrowserRouter>
   );

@@ -19,12 +19,23 @@ router = APIRouter()
 
 @router.get("/cases/search")
 async def search_cases_route(
-    case_name: str = Query(None),
-    region: str = Query(None),
-    date: str = Query(None)
+    user_id: str,
+    case_name: str = Query("", alias="searchTerm"),
+    region: str = "",
+    date: str = "",
+    status: str = "",
+    urgency: str = "",
 ):
-    results = await search_cases(case_name=case_name, region=region, date=date)
-    return JSONResponse(content=jsonable_encoder({"cases": results}))
+    print(f"Received query parameters: user_id={user_id}, case_name={case_name}, region={region}, date={date}, status={status}, urgency={urgency}")
+    results = await search_cases(
+        case_name=case_name,
+        region=region,
+        date=date,
+        user_id=user_id,
+        status=status,
+        urgency=urgency,
+    )
+    return {"cases": results}
 
 @router.post("/cases/create")
 async def create_case_route(case_request: CaseCreateRequest):
@@ -209,3 +220,9 @@ async def get_case_czml(case_number: str):
     except Exception as e:
         print(f"Error generating CZML: {str(e)}")
         raise HTTPException(status_code=500, detail="Failed to generate CZML.")
+
+@router.get("/cases/{case_id}/all-points")
+async def get_case_all_points(case_id: str):
+    from services.case_service import fetch_all_points_for_case
+    points = await fetch_all_points_for_case(case_id)
+    return {"points": points}
