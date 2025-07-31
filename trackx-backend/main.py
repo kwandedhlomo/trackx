@@ -6,6 +6,8 @@ import os
 from routes import admin
 from routes import auth
 from routes import cases
+from routes.notifications import router as notifications_router  # Import the notifications router
+
 
 
 
@@ -29,10 +31,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Mount auth router
+# Mount routers
 app.include_router(auth.router, prefix="/auth")
 app.include_router(cases.router)
 app.include_router(admin.admin_router)
+app.include_router(notifications_router, prefix="/notifications")  # Add the notifications router
+
 
 # Routes
 @app.get("/ping")

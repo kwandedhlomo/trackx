@@ -15,6 +15,7 @@ import time
 from datetime import timedelta
 from datetime import timezone
 from datetime import datetime
+from services.notifications_service import add_notification  # Import the notifications service
 
 
 # SIMULATION_PROGRESS = {}
@@ -33,38 +34,42 @@ def sanitize_firestore_data(data):
             clean[key] = str(value)
     return clean
 
-async def search_cases(case_name: str = "", region: str = "", date: str = ""):
-    cases_ref = db.collection("cases")
-
-    filters_applied = []
-
-    if case_name:
-        filters_applied.append(("caseTitle", "==", case_name))
-    if region:
-        filters_applied.append(("region", "==", region))
-    if date:
-        filters_applied.append(("dateOfIncident", "==", date))
-
-    # If no filters provided, fetch all cases
-    if not filters_applied:
-        print("No filters provided — fetching all cases.")
-        documents = list(cases_ref.stream())
-    else:
-        # Apply filters sequentially
+async def search_cases(case_name: str = "", region: str = "", date: str = "", user_id: str = "", status: str = "", urgency: str = ""):
+    try:
+        print(f"Received filters: case_name={case_name}, region={region}, date={date}, user_id={user_id}, status={status}, urgency={urgency}")
+        
+        cases_ref = db.collection("cases")
         query = cases_ref
-        for field, op, value in filters_applied:
-            query = query.where(field, op, value)
+
+        # Always filter by user_id
+        if user_id:
+            query = query.where("userID", "==", user_id)
+
+        # Dynamically chain other filters
+        if case_name:
+            query = query.where("caseTitle", "==", case_name)
+        if region:
+            query = query.where("region", "==", region)
+        if date:
+            query = query.where("dateOfIncident", "==", date)
+        if status:
+            query = query.where("status", "==", status)
+        if urgency:
+            query = query.where("urgency", "==", urgency)
+
         documents = list(query.stream())
+        results = []
+        for doc in documents:
+            data = doc.to_dict()
+            sanitized = sanitize_firestore_data(data)
+            sanitized["doc_id"] = doc.id
+            results.append(sanitized)
 
-    results = []
-    for doc in documents:
-        data = doc.to_dict()
-        sanitized = sanitize_firestore_data(data)
-        sanitized["doc_id"] = doc.id
-        print(f"Sanitized result for document {doc.id}:\n{sanitized}")
-        results.append(sanitized)
+        return results
 
-    return results
+    except Exception as e:
+        print(f"Unhandled exception in search_cases: {e}")
+        raise
 
 async def create_case(payload: CaseCreateRequest) -> str:
     """Create a new case with optional GPS points and allPoints data."""
@@ -78,8 +83,10 @@ async def create_case(payload: CaseCreateRequest) -> str:
             "dateOfIncident": payload.date_of_incident,
             "region": payload.region,
             "between": payload.between,
+            "urgency": payload.urgency, 
             "createdAt": firestore.SERVER_TIMESTAMP,
-            "status": "in progress"
+            "status": "in progress",
+            "userID": getattr(payload, "userID", None)
         }
 
         # Save case document
@@ -133,6 +140,9 @@ async def create_case(payload: CaseCreateRequest) -> str:
         raise Exception(f"Failed to create case: {str(e)}")
 
 async def update_case(data: dict):
+    """
+    Update a case document in Firestore and trigger a detailed notification for the user.
+    """
     try:
         print("Received update payload:", data)
 
@@ -143,6 +153,12 @@ async def update_case(data: dict):
 
         doc_ref = db.collection("cases").document(doc_id)
 
+        # Fetch the current case data
+        current_data = doc_ref.get().to_dict()
+        if not current_data:
+            return False, "Case not found"
+
+        # Prepare the fields to update
         update_fields = {
             "caseNumber": data.get("caseNumber"),
             "caseTitle": data.get("caseTitle"),
@@ -150,14 +166,47 @@ async def update_case(data: dict):
             "region": data.get("region"),
             "between": data.get("between"),
             "status": data.get("status", "in progress"),
+            "urgency": data.get("urgency"),
             "updatedBy": "system",
             "updatedAt": SERVER_TIMESTAMP,
         }
 
+        # Remove fields that are not being updated
+        update_fields = {k: v for k, v in update_fields.items() if v is not None}
+
         print("Attempting to update Firestore with:", update_fields)
 
+        # Update the case in Firestore
         doc_ref.update(update_fields)
         print("Update successful")
+
+        # Compare old and new data to determine what changed
+        changes = []
+        for key, new_value in update_fields.items():
+            old_value = current_data.get(key)
+            if old_value != new_value:
+                changes.append(f"{key} changed from '{old_value}' to '{new_value}'")
+
+        # Generate a notification message
+        case_title = current_data.get("caseTitle", "Unknown Case")
+        if changes:
+            notification_message = f"The following updates were made to your case '{case_title}': " + ", ".join(changes)
+        else:
+            notification_message = f"Your case '{case_title}' has been updated."
+
+        # Fetch the user ID associated with the case
+        user_id = current_data.get("userID")
+
+        # Trigger a notification for the user
+        if user_id:
+            await add_notification(
+                user_id=user_id,
+                title="Case Updated",
+                message=notification_message,
+                notification_type="case-update"
+            )
+            print(f"Notification sent to user {user_id} for case update.")
+
         return True, "Update successful"
 
     except Exception as e:

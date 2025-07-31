@@ -18,5 +18,7 @@ class CaseCreateRequest(BaseModel):
     date_of_incident: str
     region: str
     between: Optional[str] = None
+    urgency: str  # New field added for urgency (Low, Medium, High, Critical)
     csv_data: List[GpsPoint]  
     all_points: List[GpsPoint] 
+    userID: Optional[str] = None

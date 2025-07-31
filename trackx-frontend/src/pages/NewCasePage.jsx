@@ -9,7 +9,6 @@ import { auth } from "../firebase";
 import { signOut } from "firebase/auth";
 import { useAuth } from "../context/AuthContext";
 
-
 // Dynamic PDF.js import to ensure version compatibility
 let pdfjsLib = null;
 
@@ -59,6 +58,7 @@ function NewCasePage() {
   const [dateOfIncident, setDateOfIncident] = useState("");
   const [region, setRegion] = useState("");
   const [between, setBetween] = useState("");
+  const [urgency, setUrgency] = useState("");
   const [file, setFile] = useState(null);
   const [parsedData, setParsedData] = useState(null);
   const [isDragging, setIsDragging] = useState(false);
@@ -497,6 +497,8 @@ Please ensure your PDF contains GPS coordinates in one of these formats:
         date_of_incident: dateOfIncident,
         region: region,
         between: between || "",
+        urgency: urgency,
+        userID: auth.currentUser ? auth.currentUser.uid : null,
         csv_data: parsedData.stoppedPoints.map(point => ({
           latitude: point.lat,
           longitude: point.lng,
@@ -531,6 +533,7 @@ Please ensure your PDF contains GPS coordinates in one of these formats:
           dateOfIncident,
           region,
           between,
+          urgency,
           locations: parsedData.stoppedPoints
         };
 
@@ -989,6 +992,26 @@ Please ensure your PDF contains GPS coordinates in one of these formats:
             </div>
           </div>
 
+        {/* Urgency */}
+        <div className="md:col-span-2">
+          <label htmlFor="urgency" className="block text-sm font-medium text-gray-300 mb-1">
+            Urgency Level *
+          </label>
+          <select
+            id="urgency"
+            value={urgency}
+            onChange={(e) => setUrgency(e.target.value)}
+            className="w-full p-2 bg-gray-800 border border-gray-600 rounded text-white"
+            required
+          >
+            <option value="">Select urgency level</option>
+            <option value="Low">Low</option>
+            <option value="Medium">Medium</option>
+            <option value="High">High</option>
+            <option value="Critical">Critical</option>
+          </select>
+        </div>
+        
           {/* Enhanced File Upload Section */}
           <div className="mt-8">
             <div className="flex items-center justify-between mb-2">

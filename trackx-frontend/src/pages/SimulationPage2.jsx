@@ -169,7 +169,39 @@ useEffect(() => {
   return () => clearInterval(interval);
 }, []);
 
-
+      // ✅ NEW FUNCTION: See This Moment
+      const handleSeeThisMoment = async () => {
+        try {
+          const viewer = viewerRef.current?.cesiumElement;
+          const vehicleEntity = vehicleEntityRef.current;
+    
+          if (!viewer || !vehicleEntity || !vehicleEntity.position) {
+            alert("Vehicle position not ready yet.");
+            return;
+          }
+    
+          const currentTime = viewer.clock.currentTime;
+          let position = vehicleEntity.position.getValue(currentTime);
+    
+          if (!position && lastKnownPositionRef.current) {
+            position = lastKnownPositionRef.current;
+          }
+          if (!position) {
+            alert("Position not available yet.");
+            return;
+          }
+    
+          const carto = Cesium.Cartographic.fromCartesian(position);
+          const lat = Cesium.Math.toDegrees(carto.latitude);
+          const lng = Cesium.Math.toDegrees(carto.longitude);
+    
+          // 🔥 Open Google Street View at this lat/lng
+          window.open(`https://www.google.com/maps?q=&layer=c&cbll=${lat},${lng}`, "_blank");
+        } catch (err) {
+          console.error("❌ Failed to open Street View:", err);
+          alert("Could not open Street View.");
+        }
+      };
 
 //For the Flagging:
 const handleFlagSubmit = async () => {
@@ -555,6 +587,26 @@ const toDateSafe = (ts) => {
             </div>
           </div>
         )}
+        <button
+          onClick={handleSeeThisMoment}
+            style={{
+            position: "absolute",
+            top: "160px",       // adjust vertical position as needed
+            right: "30px",      // align with your other button
+            padding: "10px 20px",
+            backgroundColor: "#34d399", // green accent
+            color: "black",
+            border: "none",
+            borderRadius: "10px",
+            fontWeight: "bold",
+            fontSize: "0.95rem",
+            boxShadow: "0 0 8px rgba(52, 211, 153, 0.5)",
+            zIndex: 1000,
+            cursor: "pointer"
+                  }}
+                >
+                  👁️ See This Moment
+                </button>
 
 
         {loading && (
