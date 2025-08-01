@@ -132,6 +132,16 @@ async def create_case(payload: CaseCreateRequest) -> str:
 
             batch.commit()
             logger.info(f"Added {len(payload.all_points)} allPoints to case {case_id}")
+        
+                # ✅ Trigger notification
+        if case_data["userID"]:
+            await add_notification(
+                user_id=case_data["userID"],
+                title="Case Created",
+                message=f"A new case titled '{case_data['caseTitle']}' has been created.",
+                notification_type="case-created"
+            )
+            logger.info(f"Notification sent to user {case_data['userID']} for case creation.")
 
         return case_id
 
@@ -183,6 +193,8 @@ async def update_case(data: dict):
         # Compare old and new data to determine what changed
         changes = []
         for key, new_value in update_fields.items():
+            if key in ["updatedBy", "updatedAt"]:  # Exclude these fields
+                continue
             old_value = current_data.get(key)
             if old_value != new_value:
                 changes.append(f"{key} changed from '{old_value}' to '{new_value}'")
@@ -222,8 +234,24 @@ async def delete_case(doc_id: str):
         if not doc.exists:
             return False, "Case not found"
 
+        case_data = doc.to_dict()
+        user_id = case_data.get("userID")
+        case_title = case_data.get("caseTitle", "Unknown Case")
+
+        # Delete the case
         doc_ref.delete()
         print(f"Deleted case with doc_id: {doc_id}")
+
+        # Trigger notification if user ID is found
+        if user_id:
+            await add_notification(
+                user_id=user_id,
+                title="Case Deleted",
+                message=f"Your case titled '{case_title}' has been deleted.",
+                notification_type="case-delete"
+            )
+            print(f"Notification sent to user {user_id} for deleted case.")
+
         return True, "Deleted successfully"
 
     except Exception as e:
@@ -696,4 +724,31 @@ async def fetch_all_case_points_with_case_ids(): #this is the newest function fo
         return all_points
     except Exception as e:
         print("❌ Error in fetch_all_case_points_with_case_ids:", e)
+        return []
+async def fetch_last_points_per_case():
+    try:
+        cases_ref = db.collection("cases")
+        case_docs = list(cases_ref.stream())
+        result = []
+
+        for case_doc in case_docs:
+            case_data = case_doc.to_dict()
+            doc_id = case_doc.id
+            case_title = case_data.get("caseTitle", "")
+            status = case_data.get("status", "")
+
+            # Pull from allPoints subcollection
+            points_ref = db.collection("cases").document(doc_id).collection("allPoints")
+            last_points = list(points_ref.order_by("timestamp", direction=firestore.Query.DESCENDING).limit(1).stream())
+
+            if last_points:
+                last_point_data = last_points[0].to_dict()
+                last_point_data["doc_id"] = doc_id
+                last_point_data["caseTitle"] = case_title
+                last_point_data["status"] = status
+                result.append(last_point_data)
+
+        return result
+    except Exception as e:
+        print(f"❌ Error in fetch_last_points_per_case: {e}")
         return []
