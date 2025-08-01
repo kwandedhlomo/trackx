@@ -25,8 +25,10 @@ function MyCasesPage() {
   const [selectedCase, setSelectedCase] = useState(null);
   const [hoveredCase, setHoveredCase] = useState(null);
   const [hoverData, setHoverData] = useState(null);
-  // ✅ heatmap points from ONLY user's cases
-  const [heatPoints, setHeatPoints] = useState([]);
+  const [notifications, setNotifications] = useState([]);
+  const [currentPage, setCurrentPage] = useState(1); // Current page for notifications
+  const [totalNotifications, setTotalNotifications] = useState(0); // Total notifications
+  const notificationsPerPage = 5; // Number of notifications per page
 
   // State for filters
   const [searchTerm, setSearchTerm] = useState("");
@@ -34,8 +36,6 @@ function MyCasesPage() {
   const [date, setDate] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   const [urgencyFilter, setUrgencyFilter] = useState("");
-
-  const [notifications, setNotifications] = useState([]); // State for notifications
 
 
   // Fetch current user's cases
@@ -175,26 +175,43 @@ function MyCasesPage() {
     }
   };
 
-    // Fetch notifications for the current user
-    const fetchNotifications = async () => {
-      try {
-        const uid = auth.currentUser?.uid; // Ensure userID is fetched
-        if (!uid) {
-          console.warn("No user ID found. Cannot fetch notifications.");
-          return;
-        }
-        const response = await axios.get(`http://localhost:8000/notifications/${uid}`);
-        console.log("Fetched notifications response:", response.data); // Debugging
-        setNotifications(response.data.notifications || []);
-      } catch (error) {
-        console.error("Failed to fetch notifications:", error);
+  // Fetch notifications for the current user with pagination
+  const fetchNotifications = async (page = 1) => {
+    try {
+      const uid = auth.currentUser?.uid; // Ensure userID is fetched
+      if (!uid) {
+        console.warn("No user ID found. Cannot fetch notifications.");
+        return;
       }
-    };
+      const response = await axios.get(`http://localhost:8000/notifications/${uid}`, {
+        params: { page, limit: notificationsPerPage },
+      });
+      setNotifications(response.data.notifications || []);
+      setTotalNotifications(response.data.total || 0); // Update total notifications
+      setCurrentPage(page); // Update current page
+    } catch (error) {
+      console.error("Failed to fetch notifications:", error);
+    }
+  };
+
   
     // Fetch notifications when the component mounts
     useEffect(() => {
       fetchNotifications();
     }, []);
+
+      // Pagination controls
+  const handlePreviousPage = () => {
+    if (currentPage > 1) {
+      fetchNotifications(currentPage - 1);
+    }
+  };
+
+  const handleNextPage = () => {
+    if (currentPage < Math.ceil(totalNotifications / notificationsPerPage)) {
+      fetchNotifications(currentPage + 1);
+    }
+  };
 
     const toggleReadStatus = async (notification) => {
       try {
@@ -299,7 +316,7 @@ function MyCasesPage() {
     <h1 className="text-2xl font-bold text-white mt-2">My Cases</h1>
 
     {/* Analytics Bar */}
-    <div className="grid grid-cols-1 md:grid-cols-4 gap-4 w-full max-w-5xl mb-4">
+    <div className="grid grid-cols-1 md:grid-cols-4 gap-4 w-full mb-4">
       <div className="bg-gray-800 rounded-lg p-4 text-center text-white shadow">
         <p className="text-sm text-gray-400">Total Cases</p>
         <p className="text-2xl font-bold">{totalCases}</p>
@@ -384,7 +401,7 @@ function MyCasesPage() {
     </div>
 
     {/* Cases List */}
-    <div className="w-full max-w-5xl bg-white bg-opacity-10 border border-gray-700 rounded-lg p-6 space-y-4">
+    <div className="w-full bg-white bg-opacity-10 border border-gray-700 rounded-lg p-6 space-y-4">
       {myCases.length > 0 ? (
         myCases.map((caseItem) => (
           <div
@@ -506,39 +523,48 @@ function MyCasesPage() {
     </div>
   </div>
 
-  {/* Right Section (Notifications Panel) */}
-  <div className="w-1/4 bg-gray-800 rounded-lg p-4 text-white shadow mt-4">
-  <h2 className="text-lg font-bold mb-4">Notifications</h2>
+{/* Right Section (Notifications Panel) */}
+<div className="w-1/4 bg-gray-800 rounded-lg p-4 text-white shadow mt-4 flex flex-col" style={{ height: "calc(100vh - 5rem)" }}>  <h2 className="text-lg font-bold mb-4">Notifications</h2>
   {notifications.length > 0 ? (
-    <ul className="space-y-4">
-      {notifications.map((notification) => {
-        console.log("Rendering notification:", notification); // Debugging
-        return (
-          <li
-            key={notification.id}
-            className={`p-3 rounded ${
-              notification.read ? "bg-gray-700" : "bg-blue-700"
-            }`}
-          >
+    <div className="flex flex-col flex-grow overflow-hidden">
+      <ul className="space-y-4 overflow-y-auto flex-grow min-h-0 pr-1">
+        {notifications.map((notification) => (
+          <li key={notification.id} className={`p-3 rounded ${notification.read ? "bg-gray-700" : "bg-blue-700"}`}>
             <h3 className="font-semibold">{notification.title}</h3>
             <p className="text-sm">{notification.message}</p>
-            <p className="text-xs text-gray-400">
-              {new Date(notification.timestamp).toLocaleString()}
-            </p>
+            <p className="text-xs text-gray-400">{new Date(notification.timestamp).toLocaleString()}</p>
             <button
               onClick={() => toggleReadStatus(notification)}
               className={`mt-2 px-3 py-1 rounded text-sm font-semibold ${
-                notification.read
-                  ? "bg-green-600 hover:bg-green-700 text-white"
-                  : "bg-gray-600 hover:bg-gray-700 text-white"
+                notification.read ? "bg-green-600 hover:bg-green-700 text-white" : "bg-gray-600 hover:bg-gray-700 text-white"
               }`}
             >
               {notification.read ? "Mark as Unread" : "Mark as Read"}
             </button>
           </li>
-        );
-      })}
-    </ul>
+        ))}
+      </ul>
+      {/* Pagination Controls */}
+      <div className="flex justify-between items-center mt-4">
+        <button
+          onClick={handlePreviousPage}
+          disabled={currentPage === 1}
+          className="px-3 py-1 bg-gray-600 hover:bg-gray-700 text-white rounded disabled:opacity-50"
+        >
+          Previous
+        </button>
+        <span className="text-sm text-gray-400">
+          Page {currentPage} of {Math.ceil(totalNotifications / notificationsPerPage)}
+        </span>
+        <button
+          onClick={handleNextPage}
+          disabled={currentPage === Math.ceil(totalNotifications / notificationsPerPage)}
+          className="px-3 py-1 bg-gray-600 hover:bg-gray-700 text-white rounded disabled:opacity-50"
+        >
+          Next
+        </button>
+      </div>
+    </div>
   ) : (
     <p className="text-sm text-gray-400">No notifications available.</p>
   )}

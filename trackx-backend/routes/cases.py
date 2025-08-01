@@ -17,9 +17,10 @@ from firebase.firebase_config import db  # at the top if needed
 
 router = APIRouter()
 
+
 @router.get("/cases/search")
 async def search_cases_route(
-    user_id: str,
+    user_id: Optional[str] = "",  # ✅ Now optional
     case_name: str = Query("", alias="searchTerm"),
     region: str = "",
     date: str = "",
@@ -27,6 +28,7 @@ async def search_cases_route(
     urgency: str = "",
 ):
     print(f"Received query parameters: user_id={user_id}, case_name={case_name}, region={region}, date={date}, status={status}, urgency={urgency}")
+    
     results = await search_cases(
         case_name=case_name,
         region=region,
@@ -144,12 +146,8 @@ async def get_case_czml(case_number: str):
         return JSONResponse(status_code=500, content={"error": str(e)})
 
 
-#old: 
-#@router.get("/cases/last-points")
-#async def get_last_case_points():
-#    from services.case_service import fetch_last_points_per_case
-#    points = await fetch_last_points_per_case()
-#    return {"points": points}
+
+
 
 # @router.get("/cases/czml/{case_number}")
 # async def get_case_czml(case_number: str):
@@ -173,6 +171,11 @@ async def get_case_czml(case_number: str):
         print(f"Error generating CZML: {str(e)}")
         raise HTTPException(status_code=500, detail="Failed to generate CZML.")
     
+@router.get("/cases/last-points")
+async def get_last_case_points():
+    from services.case_service import fetch_last_points_per_case
+    points = await fetch_last_points_per_case()
+    return {"points": points}
 
     # For the heatmap page: Added by jon
 @router.get("/cases/all-points-with-case-ids")

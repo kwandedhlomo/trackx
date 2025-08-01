@@ -161,9 +161,12 @@ function HomePage() {
       const fetchGlobePoints = async () => {
         try {
           const response = await axios.get("http://localhost:8000/cases/last-points");
-          setGlobePoints(response.data.points || []);
+          const data = response.data.points || [];
+    
+          console.log("🟢 Retrieved globePoints:", data); // ✅ ACTUAL LOG FOR DEBUGGING
+          setGlobePoints(data);
         } catch (err) {
-          console.error("Failed to fetch globe points:", err);
+          console.error("❌ Failed to fetch globe points:", err); // Already exists
         }
       };
     
