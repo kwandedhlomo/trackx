@@ -26,21 +26,30 @@ async def create_notification(user_id: str, title: str, message: str, notificati
 
 
 @router.get("/{user_id}")
-async def get_notifications(user_id: str):
+async def get_notifications(user_id: str, page: int = 1, limit: int = 10):
     """
-    API endpoint to fetch all notifications for a user.
+    API endpoint to fetch paginated notifications for a user.
 
     Args:
         user_id (str): The ID of the user whose notifications are being fetched.
+        page (int): The page number (default is 1).
+        limit (int): The number of notifications per page (default is 10).
 
     Returns:
-        dict: A dictionary containing a list of notifications.
+        dict: A dictionary containing a list of notifications and pagination metadata.
     """
     try:
         notifications = await fetch_notifications(user_id)
-        # Debugging: Log the response being returned
-        print(f"Returning notifications for user {user_id}: {notifications}")
-        return {"notifications": notifications}
+        start = (page - 1) * limit
+        end = start + limit
+        paginated_notifications = notifications[start:end]
+
+        return {
+            "notifications": paginated_notifications,
+            "total": len(notifications),
+            "page": page,
+            "limit": limit,
+        }
     except Exception as e:
         print(f"Error in get_notifications route for user {user_id}: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to fetch notifications: {str(e)}")

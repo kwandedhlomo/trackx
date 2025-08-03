@@ -7,6 +7,24 @@ function GlobeBackground({ interactive, globePoints }) {
   const globeInstanceRef = useRef(null);
   const navigate = useNavigate();
 
+  // Custom color constants
+  const BLUE = "#1E40AF";
+  const RED = "#B91C1C";
+  const GREEN = "#059669";
+
+  const statusColorMap = {
+    "not started": RED,
+    "in progress": BLUE,
+    "completed": GREEN,
+  };
+
+  // Preprocess points to assign color and size
+  const processedPoints = (globePoints || []).map((point) => ({
+    ...point,
+    color: statusColorMap[point.status?.toLowerCase()] || "white",
+    size: 0.4,
+  }));
+
   useEffect(() => {
     if (!globeInstanceRef.current) {
       globeInstanceRef.current = Globe()(globeContainerRef.current)
@@ -22,13 +40,15 @@ function GlobeBackground({ interactive, globePoints }) {
             navigate("/edit-case", { state: { docId: point.doc_id } });
           }
         });
-    } else {
-      globeInstanceRef.current.pointsData(globePoints);
+
+      globeInstanceRef.current.controls().autoRotate = true;
+      globeInstanceRef.current.controls().autoRotateSpeed = 0.1;
     }
 
-    globeInstanceRef.current.controls().autoRotate = true;
-    globeInstanceRef.current.controls().autoRotateSpeed = 0.1;
-  }, [globePoints, navigate]);
+    if (processedPoints.length > 0) {
+      globeInstanceRef.current.pointsData(processedPoints);
+    }
+  }, [processedPoints, navigate]);
 
   return (
     <div
