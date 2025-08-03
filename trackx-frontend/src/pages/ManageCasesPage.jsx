@@ -17,18 +17,27 @@ function ManageCasesPage() {
   const [cases, setCases] = useState([]);
   const { profile } = useAuth();
   const navigate = useNavigate(); 
-  
-  const { currentUser } = useAuth();
+  const [showMenu, setShowMenu] = useState(false);
+  const [currentPage, setCurrentPage] = useState(1);
+  const casesPerPage = 10; // You can change this value based on your preference
+  const indexOfLastCase = currentPage * casesPerPage;
+  const indexOfFirstCase = indexOfLastCase - casesPerPage;
+  const currentCases = cases.slice(indexOfFirstCase, indexOfLastCase);
+  const totalPages = Math.ceil(cases.length / casesPerPage);
 
+  useEffect(() => {
+    handleSearch(); // Triggers unfiltered search on first load
+  }, []);
+  
 
 
   const handleSearch = async () => {
     try {
       const response = await axios.get("http://localhost:8000/cases/search", {
         params: {
-          case_name: searchTerm,
-          region: region,
-          date: date
+          case_name: searchTerm || undefined,
+          region: region || undefined,
+          date: date || undefined,
         }
       });
       setCases(response.data.cases); 
@@ -62,18 +71,24 @@ function ManageCasesPage() {
     <div className="relative flex flex-col min-h-screen">
       {/* Background */}
       <div className="absolute inset-0 bg-gradient-to-br from-black via-gray-900 to-black -z-20" />
-
+  
       {/* Navbar */}
-      <nav className="flex justify-between items-center bg-black bg-opacity-60 backdrop-blur-md p-4 relative font-sans">
-        <div className="flex items-center space-x-4">
-          <div className="text-white text-3xl cursor-pointer">&#9776;</div>
+      <nav className="flex justify-between items-center bg-gradient-to-r from-black to-gray-900 p-4 relative font-sans shadow-md">        <div className="flex items-center space-x-4">
+          {/* Hamburger Icon */}
+          <div className="text-white text-3xl cursor-pointer" onClick={() => setShowMenu(!showMenu)}>
+            &#9776;
+          </div>
+  
           <Link to="/home">
             <img src={adfLogo} alt="ADF Logo" className="h-10 w-auto cursor-pointer hover:opacity-80 transition" />
           </Link>
         </div>
+  
+        {/* Centered Title */}
         <div className="absolute left-1/2 transform -translate-x-1/2 text-3xl font-extrabold text-white font-sans">
           Manage Cases
         </div>
+  
         <div className="flex items-center space-x-6 text-white font-sans">
           <Link to="/home" className="hover:text-gray-300">Home</Link>
           <div className="flex flex-col text-right">
@@ -85,6 +100,22 @@ function ManageCasesPage() {
           </div>
         </div>
       </nav>
+  
+      {/* Hamburger Menu Content */}
+      {showMenu && (
+        <div className="absolute top-16 left-0 bg-black bg-opacity-90 backdrop-blur-md text-white w-64 p-6 z-30 space-y-4 border-r border-gray-700 shadow-lg">
+          <Link to="/home" className="block hover:text-blue-400" onClick={() => setShowMenu(false)}>🏠 Home</Link>
+          <Link to="/new-case" className="block hover:text-blue-400" onClick={() => setShowMenu(false)}>📝 Create New Case / Report</Link>
+          <Link to="/manage-cases" className="block hover:text-blue-400" onClick={() => setShowMenu(false)}>📁 Manage Cases</Link>
+          <Link to="/my-cases" className="block hover:text-blue-400" onClick={() => setShowMenu(false)}>📁 My Cases</Link>
+  
+          {profile?.role === "admin" && (
+            <Link to="/admin-dashboard" className="block hover:text-blue-400" onClick={() => setShowMenu(false)}>
+              🛠 Admin Dashboard
+            </Link>
+          )}
+        </div>
+      )}
 
       {/* Main Content */}
       <main className="flex flex-col flex-grow p-8 space-y-6 items-center">
@@ -152,7 +183,7 @@ function ManageCasesPage() {
       <div className="w-full max-w-4xl bg-white bg-opacity-10 border border-gray-700 rounded-lg p-6">
         <h2 className="text-xl font-semibold mb-4 text-blue-500">Matching Cases</h2>
         <ul className="space-y-4">
-          {cases.map((caseItem, index) => (
+          {currentCases.map((caseItem, index) => (
             <li key={index} className="flex justify-between items-center bg-black bg-opacity-20 rounded px-4 py-3 border border-gray-600">
               <span className="text-white font-medium">{caseItem.caseTitle}</span>
               <div className="flex space-x-2">
@@ -173,6 +204,28 @@ function ManageCasesPage() {
             </li>
           ))}
         </ul>
+      </div>
+
+      <div className="flex justify-center mt-4 space-x-2">
+        <button
+          onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
+          disabled={currentPage === 1}
+          className="px-4 py-2 bg-gray-700 text-white rounded disabled:opacity-50"
+        >
+          Previous
+        </button>
+
+        <span className="text-white px-4 py-2">
+          Page {currentPage} of {totalPages}
+        </span>
+
+        <button
+          onClick={() => setCurrentPage((prev) => Math.min(prev + 1, totalPages))}
+          disabled={currentPage === totalPages}
+          className="px-4 py-2 bg-gray-700 text-white rounded disabled:opacity-50"
+        >
+          Next
+        </button>
       </div>
 
         {/* Create Button */}

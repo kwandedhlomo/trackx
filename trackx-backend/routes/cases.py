@@ -11,14 +11,15 @@ from services.case_service import create_case
 import json
 import csv
 import io
-from typing import Optional 
-from firebase.firebase_config import db  # at the top if needed
-
+from typing import Optional
+from firebase.firebase_config import db  
 
 router = APIRouter()
 
+
 @router.get("/cases/search")
 async def search_cases_route(
+    #user_id: Optional[str] = "",  # ✅ Now optional
     user_id: str = "",
     case_name: str = Query("", alias="searchTerm"),
     region: str = "",
@@ -27,6 +28,7 @@ async def search_cases_route(
     urgency: str = "",
 ):
     print(f"Received query parameters: user_id={user_id}, case_name={case_name}, region={region}, date={date}, status={status}, urgency={urgency}")
+    
     results = await search_cases(
         case_name=case_name,
         region=region,
@@ -77,7 +79,7 @@ async def delete_case_route(doc_id: str):
         return {"success": True}
     else:
         raise HTTPException(status_code=400, detail=message)
-    
+    #
 @router.get("/cases/monthly-counts")
 async def get_monthly_case_counts(user_id: str = ""):
     print(f"📥 Backend received monthly count request with user_id: {user_id}")
@@ -147,12 +149,8 @@ async def get_case_czml(case_number: str):
         return JSONResponse(status_code=500, content={"error": str(e)})
 
 
-#old: 
-#@router.get("/cases/last-points")
-#async def get_last_case_points():
-#    from services.case_service import fetch_last_points_per_case
-#    points = await fetch_last_points_per_case()
-#    return {"points": points}
+
+
 
 # @router.get("/cases/czml/{case_number}")
 # async def get_case_czml(case_number: str):
@@ -176,6 +174,11 @@ async def get_case_czml(case_number: str):
         print(f"Error generating CZML: {str(e)}")
         raise HTTPException(status_code=500, detail="Failed to generate CZML.")
     
+@router.get("/cases/last-points")
+async def get_last_case_points():
+    from services.case_service import fetch_last_points_per_case
+    points = await fetch_last_points_per_case()
+    return {"points": points}
 
     # For the heatmap page: Added by jon
 @router.get("/cases/all-points-with-case-ids")

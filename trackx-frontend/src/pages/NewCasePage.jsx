@@ -67,6 +67,7 @@ function NewCasePage() {
   const [csvStats, setCsvStats] = useState(null);
   const [showGuide, setShowGuide] = useState(false);
   const [fileType, setFileType] = useState(null);
+  const [showMenu, setShowMenu] = useState(false);
 
   /**
    * Extracts time from description and returns ISO timestamp using dateOfIncident
@@ -871,16 +872,22 @@ Please ensure your PDF contains GPS coordinates in one of these formats:
       className="relative min-h-screen text-white font-sans overflow-hidden"
     >
       <div className="absolute inset-0 bg-gradient-to-br from-black via-gray-900 to-black -z-10" />
-      
+  
       {/* Navbar */}
       <div className="flex items-center justify-between px-6 py-4 bg-gradient-to-r from-black to-gray-900 shadow-md">
-        <Link to="/home">
-          <img src={adflogo} alt="Logo" className="h-12 cursor-pointer hover:opacity-80 transition" />
-        </Link>
-
-        <h1 className="text-xl font-bold text-white">New Case</h1>
-
         <div className="flex items-center space-x-4">
+          {/* Hamburger Icon */}
+          <div className="text-3xl cursor-pointer" onClick={() => setShowMenu(!showMenu)}>
+            &#9776;
+          </div>
+  
+          <Link to="/home">
+            <img src={adflogo} alt="Logo" className="h-12 cursor-pointer hover:opacity-80 transition" />
+          </Link>
+        </div>
+  
+        <h1 className="text-xl font-bold text-white">New Case</h1>
+  
         <div className="text-right">
           <p className="text-sm text-white">{profile ? `${profile.firstName} ${profile.surname}` : "Loading..."}</p>
           <button
@@ -890,13 +897,26 @@ Please ensure your PDF contains GPS coordinates in one of these formats:
             Sign Out
           </button>
         </div>
-
-        </div>
       </div>
+  
+      {/* Hamburger Menu Content */}
+      {showMenu && (
+        <div className="absolute top-16 left-0 bg-black bg-opacity-90 backdrop-blur-md text-white w-64 p-6 z-30 space-y-4 border-r border-gray-700 shadow-lg">
+          <Link to="/home" className="block hover:text-blue-400" onClick={() => setShowMenu(false)}>🏠 Home</Link>
+          <Link to="/new-case" className="block hover:text-blue-400" onClick={() => setShowMenu(false)}>📝 Create New Case / Report</Link>
+          <Link to="/manage-cases" className="block hover:text-blue-400" onClick={() => setShowMenu(false)}>📁 Manage Cases</Link>
+          <Link to="/my-cases" className="block hover:text-blue-400" onClick={() => setShowMenu(false)}>📁 My Cases</Link>
+  
+          {profile?.role === "admin" && (
+            <Link to="/admin-dashboard" className="block hover:text-blue-400" onClick={() => setShowMenu(false)}>
+              🛠 Admin Dashboard
+            </Link>
+          )}
+        </div>
+      )}
 
       {/* Nav Tabs - Updated with clickable links */}
-      <div className="flex justify-center space-x-8 bg-gray-800 py-2 text-white text-sm">
-        <span className="font-bold underline">Case Information</span>
+      <div className="flex justify-center space-x-8 bg-gradient-to-r from-black to-gray-900 bg-opacity-80 backdrop-blur-md py-2 text-white text-sm">        <span className="font-bold underline">Case Information</span>
         <Link to="/annotations" className="text-gray-400 hover:text-white">Annotations</Link>
         <Link to="/overview" className="text-gray-400 hover:text-white">Overview</Link>
       </div>
