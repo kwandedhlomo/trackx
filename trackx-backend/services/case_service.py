@@ -230,73 +230,65 @@ async def delete_case(doc_id: str):
         print("Error deleting case:", e)
         return False, f"Delete failed: {str(e)}"
 
-async def fetch_recent_cases(sort_by: str = "dateEntered"):
-    try:
-        # Map frontend-friendly key to Firestore field name
-        sort_field = "createdAt" if sort_by == "dateEntered" else "dateOfIncident"
+async def fetch_recent_cases(sort_by: str = "dateEntered", user_id: str = ""):
+    query = db.collection("cases")
+    if user_id:
+        query = query.where("userID", "==", user_id)
 
-        query = (
-            db.collection("cases")
-            .order_by(sort_field, direction=firestore.Query.DESCENDING)
-            .limit(4)
-        )
-        documents = list(query.stream())
+    sort_field = "createdAt" if sort_by == "dateEntered" else "dateOfIncident"
+    query = query.order_by(sort_field, direction=firestore.Query.DESCENDING).limit(4)
 
-        results = []
-        for doc in documents:
-            data = doc.to_dict()
-            sanitized = sanitize_firestore_data(data)
-            sanitized["doc_id"] = doc.id
-            results.append(sanitized)
-        return results
-    except Exception as e:
-        print(f"Error fetching recent cases: {e}")
-        return []
+    documents = list(query.stream())
+    results = []
 
-async def get_case_counts_by_month():
-    try:
-        cases_ref = db.collection("cases")
-        documents = list(cases_ref.stream())
+    for doc in documents:
+        data = doc.to_dict()
+        sanitized = sanitize_firestore_data(data)
+        sanitized["doc_id"] = doc.id
+        results.append(sanitized)
 
-        month_counts = defaultdict(int)
+    return results
 
-        for doc in documents:
-            data = doc.to_dict()
-            incident_date = data.get("dateOfIncident")
-            if incident_date:
-                try:
-                    parsed_date = datetime.fromisoformat(incident_date.split("T")[0])
-                    month_key = parsed_date.strftime("%Y-%m")  
-                    month_counts[month_key] += 1
-                except Exception as e:
-                    print(f"Skipping invalid date for doc {doc.id}: {incident_date}", e)
+async def get_case_counts_by_month(user_id: str = ""):
+    print(f"🔍 get_case_counts_by_month() called with user_id: {user_id}")
+    query = db.collection("cases")
+    if user_id:
+        query = query.where("userID", "==", user_id)
 
-        # Convert to list of {month, count} dicts and sort
-        result = [
-            {"month": k, "count": v} for k, v in sorted(month_counts.items())
-        ]
+    documents = list(query.stream())
+    print(f"📦 Found {len(documents)} case documents for monthly count")
 
-        return result
-    except Exception as e:
-        print("Error aggregating case counts by month:", e)
-        return []
+    month_counts = defaultdict(int)
+    for doc in documents:
+        data = doc.to_dict()
+        incident_date = data.get("dateOfIncident")
+        if incident_date:
+            try:
+                parsed_date = datetime.fromisoformat(incident_date.split("T")[0])
+                month_key = parsed_date.strftime("%Y-%m")
+                month_counts[month_key] += 1
+            except Exception as e:
+                print(f"Skipping invalid date for doc {doc.id}: {incident_date}", e)
 
-async def get_region_case_counts():
-    try:
-        docs = db.collection("cases").stream()
-        region_counts = {}
+    return [{"month": k, "count": v} for k, v in sorted(month_counts.items())]
 
-        for doc in docs:
-            data = doc.to_dict()
-            region = data.get("region", "Unknown")
-            region_counts[region] = region_counts.get(region, 0) + 1
 
-        # Convert to list of dictionaries
-        return [{"region": region, "count": count} for region, count in region_counts.items()]
+async def get_region_case_counts(user_id: str = ""):
+    query = db.collection("cases")
+    if user_id:
+        query = query.where("userID", "==", user_id)
 
-    except Exception as e:
-        print(f"Error calculating region case counts: {e}")
-        return []
+    docs = list(query.stream())
+    print(f"📊 Found {len(docs)} cases for region count (user_id={user_id})")
+
+    region_counts = {}
+    for doc in docs:
+        data = doc.to_dict()
+        region = data.get("region", "Unknown")
+        region_counts[region] = region_counts.get(region, 0) + 1
+
+    return [{"region": r, "count": c} for r, c in region_counts.items()]
+
 
 async def fetch_all_case_points():
     try:

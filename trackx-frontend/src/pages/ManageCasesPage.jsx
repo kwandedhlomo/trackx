@@ -17,6 +17,8 @@ function ManageCasesPage() {
   const [cases, setCases] = useState([]);
   const { profile } = useAuth();
   const navigate = useNavigate(); 
+  
+  const { currentUser } = useAuth();
 
 
 
@@ -38,7 +40,7 @@ function ManageCasesPage() {
   const handleSignOut = async () => {
     try {
       await signOut(auth);
-      // Optionally, navigate to login page or landing
+      navigate("/");
     } catch (error) {
       console.error("Sign-out failed:", error.message);
     }
