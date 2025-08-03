@@ -19,7 +19,7 @@ router = APIRouter()
 
 @router.get("/cases/search")
 async def search_cases_route(
-    user_id: str,
+    user_id: str = "",
     case_name: str = Query("", alias="searchTerm"),
     region: str = "",
     date: str = "",
@@ -52,13 +52,14 @@ async def create_case_route(case_request: CaseCreateRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/cases/recent")
-async def get_recent_cases(sortBy: str = Query("dateEntered", enum=["dateEntered", "dateOfIncident"])):
-    """
-    Return the 4 most recent cases based on the selected sort key.
-    """
+async def get_recent_cases(
+    sortBy: str = Query("dateEntered", enum=["dateEntered", "dateOfIncident"]),
+    user_id: str = ""
+):
     from services.case_service import fetch_recent_cases
-    cases = await fetch_recent_cases(sort_by=sortBy)
+    cases = await fetch_recent_cases(sort_by=sortBy, user_id=user_id)
     return JSONResponse(content={"cases": cases})
+
 
 @router.put("/cases/update")
 async def update_case_route(request: Request):
@@ -78,13 +79,15 @@ async def delete_case_route(doc_id: str):
         raise HTTPException(status_code=400, detail=message)
     
 @router.get("/cases/monthly-counts")
-async def get_monthly_case_counts():
-    counts = await get_case_counts_by_month()
+async def get_monthly_case_counts(user_id: str = ""):
+    print(f"📥 Backend received monthly count request with user_id: {user_id}")
+    counts = await get_case_counts_by_month(user_id)
     return JSONResponse(content={"counts": counts})
 
 @router.get("/cases/region-counts")
-async def get_region_counts_route():
-    data = await get_region_case_counts()
+async def get_region_counts_route(user_id: str = ""):
+    print(f"🌍 /cases/region-counts called with user_id: {user_id}")
+    data = await get_region_case_counts(user_id)
     return JSONResponse(content={"counts": data})
 
 @router.get("/cases/all-points")

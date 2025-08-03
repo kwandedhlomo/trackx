@@ -69,3 +69,18 @@ async def delete_user(user_id: str):
         return {"success": True, "message": f"User {user_id} deleted successfully."}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to delete user: {str(e)}")
+
+
+
+@admin_router.post("/admin/update-approval/{user_id}")
+async def update_approval(user_id: str, payload: dict):
+    try:
+        is_approved = payload.get("is_approved")
+        if is_approved is None:
+            raise HTTPException(status_code=400, detail="Missing 'is_approved' field")
+
+        user_ref = db.collection("users").document(user_id)
+        user_ref.update({"isApproved": is_approved})
+        return {"message": "Approval status updated successfully"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

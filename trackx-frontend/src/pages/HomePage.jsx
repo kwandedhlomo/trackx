@@ -72,23 +72,32 @@ function HomePage() {
       const fetchRecentCases = async () => {
         try {
           const response = await axios.get("http://localhost:8000/cases/recent", {
-            params: { sortBy }
+            params: {
+              sortBy,
+              ...(profile?.role !== "admin" && profile?.userID ? { user_id: profile.userID } : {})
+            }
           });
+
+          console.log("🆕 Recent cases response:", response.data.cases);
           setRecentCases(response.data.cases);
         } catch (error) {
           console.error("Failed to fetch recent cases:", error);
         }
       };
-      fetchRecentCases();
-    }, [sortBy]);
+
+      if (profile) {
+        fetchRecentCases();
+      }
+    }, [sortBy, profile]);
+
 
     useEffect(() => {
       const fetchAllCases = async () => {
         try {
           const response = await axios.get("http://localhost:8000/cases/search", {
-            params: {}
+            params: profile?.role === "admin" ? {} : { user_id: profile?.userID }
           });
-  
+
           const allCases = response.data.cases || [];
 
           const notStarted = allCases.filter((c) => c.status === "not started").length;
@@ -117,28 +126,45 @@ function HomePage() {
     useEffect(() => {
       const fetchMonthlyCounts = async () => {
         try {
-          const response = await axios.get("http://localhost:8000/cases/monthly-counts");
+          const params = profile?.role === "admin" ? {} : { user_id: profile?.userID };
+          console.log("📡 Fetching monthly case counts with params:", params);
+
+          const response = await axios.get("http://localhost:8000/cases/monthly-counts", {
+            params,
+          });
+
+          console.log("✅ Received monthly counts:", response.data.counts);
           setMonthlyCaseCounts(response.data.counts);
         } catch (error) {
-          console.error("Failed to fetch monthly case counts:", error);
+          console.error("❌ Failed to fetch monthly case counts:", error);
         }
       };
-    
-      fetchMonthlyCounts();
-    }, []);
+
+      if (profile) {
+        fetchMonthlyCounts();
+      }
+    }, [profile]);
+
 
     useEffect(() => {
       const fetchRegionCounts = async () => {
         try {
-          const response = await axios.get("http://localhost:8000/cases/region-counts");
+          const response = await axios.get("http://localhost:8000/cases/region-counts", {
+            params: profile?.role === "admin" ? {} : { user_id: profile?.userID }
+          });
+
+          console.log("🗺 Region count data:", response.data.counts);
           setRegionCounts(response.data.counts || []);
         } catch (err) {
           console.error("Failed to fetch region counts:", err);
         }
       };
-    
-      fetchRegionCounts();
-    }, []);
+
+      if (profile) {
+        fetchRegionCounts();
+      }
+    }, [profile]);
+
 
     useEffect(() => {
       const fetchHeatPoints = async () => {
