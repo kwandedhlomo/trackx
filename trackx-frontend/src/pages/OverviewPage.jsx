@@ -151,7 +151,7 @@ function OverviewPage() {
     }
   };
 
- 
+  // Generate PDF with one location per page
   const generatePDF = async () => {
     if (!reportRef.current) return null;
     
@@ -188,55 +188,62 @@ function OverviewPage() {
         pdf.text(splitIntro, margin, margin + 50);
       }
       
-      // Current vertical position for next content
-      let yPosition = margin + (reportIntro ? 55 + (pdf.splitTextToSize(reportIntro, pdfWidth - (margin * 2)).length * 5) : 45);
-      
-      // Add locations section header
-      pdf.setFontSize(14);
-      pdf.setTextColor(40, 40, 40);
-      pdf.text('Selected Locations', margin, yPosition);
-      yPosition += 8;
-      
-      // Add selected locations
+      // Get filtered locations
       const filteredLocations = locations.filter((_, index) => selectedLocations.includes(index));
       
+      // Add each location on a separate page
       for (let i = 0; i < filteredLocations.length; i++) {
         const location = filteredLocations[i];
         const locationIndex = locations.indexOf(location);
         
-        // Check if we need a new page
-        if (yPosition > pdfHeight - margin * 2) {
+        // Add a new page for each location (except we already have the first page)
+        if (i > 0 || reportIntro) {
           pdf.addPage();
-          yPosition = margin + 10;
         }
         
+        // Reset Y position for each location page
+        let yPosition = margin + 10;
+        
+        // Location header
+        pdf.setFontSize(16);
+        pdf.setTextColor(40, 40, 40);
+        pdf.text(`Location ${i + 1}`, margin, yPosition);
+        yPosition += 10;
+        
         // Location title
-        pdf.setFontSize(12);
+        pdf.setFontSize(14);
         pdf.setTextColor(40, 40, 40);
         const locationTitle = locationTitles[locationIndex] || getLocationAddress(location);
-        pdf.text(locationTitle, margin, yPosition);
-        yPosition += 5;
+        const splitTitle = pdf.splitTextToSize(locationTitle, pdfWidth - (margin * 2));
+        pdf.text(splitTitle, margin, yPosition);
+        yPosition += splitTitle.length * 6 + 5;
         
         // Location coordinates
-        pdf.setFontSize(9);
+        pdf.setFontSize(10);
         pdf.setTextColor(80, 80, 80);
         pdf.text(`Coordinates: ${formatCoordinate(location.lat)}, ${formatCoordinate(location.lng)}`, margin, yPosition);
-        yPosition += 4;
+        yPosition += 6;
         
         // Location timestamp if available
         if (location.timestamp) {
           pdf.text(`Time: ${formatTimestamp(location.timestamp)}`, margin, yPosition);
-          yPosition += 4;
+          yPosition += 6;
         }
         
+        yPosition += 5; // Add some spacing before images
         
+        // Add snapshot images if available
         const snapshot = snapshots.find(s => s && s.index === locationIndex);
         if (snapshot) {
           // Add map image if available
           if (snapshot.mapImage) {
             try {
-              pdf.addImage(snapshot.mapImage, 'PNG', margin, yPosition, 80, 60);
-              yPosition += 65; // Advance position past the image height plus some margin
+              // Calculate image dimensions to fit well on page
+              const imageWidth = Math.min(80, pdfWidth - (margin * 2));
+              const imageHeight = 60;
+              
+              pdf.addImage(snapshot.mapImage, 'PNG', margin, yPosition, imageWidth, imageHeight);
+              yPosition += imageHeight + 10; // Advance position past the image height plus margin
             } catch (error) {
               console.error("Error adding map image to PDF:", error);
             }
@@ -244,15 +251,18 @@ function OverviewPage() {
           
           // Add street view image if available
           if (snapshot.streetViewImage) {
-            // Check if we need a new page
-            if (yPosition > pdfHeight - 70) {
-              pdf.addPage();
-              yPosition = margin + 10;
+            // Check if we have enough space, if not add some spacing
+            if (yPosition > pdfHeight - 80) {
+              yPosition = pdfHeight - 80; // Position near bottom if needed
             }
             
             try {
-              pdf.addImage(snapshot.streetViewImage, 'PNG', margin, yPosition, 80, 60);
-              yPosition += 65; // Advance position past the image height plus some margin
+              // Calculate image dimensions to fit well on page
+              const imageWidth = Math.min(80, pdfWidth - (margin * 2));
+              const imageHeight = 60;
+              
+              pdf.addImage(snapshot.streetViewImage, 'PNG', margin, yPosition, imageWidth, imageHeight);
+              yPosition += imageHeight + 10; // Advance position past the image height plus margin
             } catch (error) {
               console.error("Error adding street view image to PDF:", error);
             }
@@ -260,36 +270,46 @@ function OverviewPage() {
           
           // Location description if available
           if (snapshot.description) {
-            // Check if we need a new page
-            if (yPosition > pdfHeight - margin * 4) {
-              pdf.addPage();
-              yPosition = margin + 10;
+            // Check if we have enough space for text
+            if (yPosition < pdfHeight - 30) {
+              pdf.setFontSize(10);
+              pdf.setTextColor(60, 60, 60);
+              
+              // Add a small header for description
+              pdf.setFontSize(12);
+              pdf.setTextColor(40, 40, 40);
+              pdf.text('Description:', margin, yPosition);
+              yPosition += 6;
+              
+              pdf.setFontSize(10);
+              pdf.setTextColor(60, 60, 60);
+              const splitDesc = pdf.splitTextToSize(snapshot.description, pdfWidth - (margin * 2));
+              
+              // Only add description if there's enough space
+              const descriptionHeight = splitDesc.length * 5;
+              if (yPosition + descriptionHeight < pdfHeight - margin) {
+                pdf.text(splitDesc, margin, yPosition);
+                yPosition += descriptionHeight;
+              }
             }
-            
-            pdf.setFontSize(10);
-            pdf.setTextColor(60, 60, 60);
-            const splitDesc = pdf.splitTextToSize(snapshot.description, pdfWidth - (margin * 2));
-            pdf.text(splitDesc, margin, yPosition);
-            yPosition += splitDesc.length * 5;
           }
+        } else {
+          // If no snapshot available, add a note
+          pdf.setFontSize(10);
+          pdf.setTextColor(150, 150, 150);
+          pdf.text('No snapshot data available for this location', margin, yPosition);
         }
-        
-        // Add some spacing between locations
-        yPosition += 8;
       }
       
-      // Check if we need a new page for conclusion
-      if (reportConclusion && yPosition > pdfHeight - margin * 4) {
-        pdf.addPage();
-        yPosition = margin + 10;
-      }
-      
-      // Add report conclusion
+      // Add conclusion on a new page if available
       if (reportConclusion) {
-        pdf.setFontSize(14);
+        pdf.addPage();
+        let yPosition = margin + 10;
+        
+        pdf.setFontSize(16);
         pdf.setTextColor(40, 40, 40);
         pdf.text('Conclusion', margin, yPosition);
-        yPosition += 5;
+        yPosition += 10;
         
         pdf.setFontSize(10);
         pdf.setTextColor(60, 60, 60);
@@ -297,10 +317,15 @@ function OverviewPage() {
         pdf.text(splitConclusion, margin, yPosition);
       }
       
-      // Footer with date generated
-      pdf.setFontSize(8);
-      pdf.setTextColor(150, 150, 150);
-      pdf.text(`Report generated on ${new Date().toLocaleDateString()} by TrackX`, margin, pdfHeight - 5);
+      // Footer with date generated on the last page
+      const pageCount = pdf.internal.getNumberOfPages();
+      for (let i = 1; i <= pageCount; i++) {
+        pdf.setPage(i);
+        pdf.setFontSize(8);
+        pdf.setTextColor(150, 150, 150);
+        pdf.text(`Report generated on ${new Date().toLocaleDateString()} by TrackX`, margin, pdfHeight - 5);
+        pdf.text(`Page ${i} of ${pageCount}`, pdfWidth - margin - 20, pdfHeight - 5);
+      }
       
       // Return the PDF document
       return pdf;
@@ -352,7 +377,7 @@ function OverviewPage() {
         }
       }
       
-      // Handle simulation generation (mock for now)
+      // Handle simulation generation
       if (generateSimulation) {
         const simulationFilename = `Simulation_${caseDetails.caseNumber}_${timestamp}.mp4`;
         // Simulate generation delay
@@ -432,7 +457,7 @@ function OverviewPage() {
       const caseDataString = localStorage.getItem('trackxCaseData');
       if (caseDataString) {
         const caseData = JSON.parse(caseDataString);
-        localStorage.setItem('trackxSimulationCaseId', caseData.id);  // ✅ Save the case_id
+        localStorage.setItem('trackxSimulationCaseId', caseData.id); 
       }
       window.location.href = '/simulation';
     } else {
@@ -527,7 +552,8 @@ function OverviewPage() {
       )}
 
       {/* Nav Tabs */}
-      <div className="flex justify-center space-x-8 bg-gradient-to-r from-black to-gray-900 bg-opacity-80 backdrop-blur-md py-2 text-white text-sm">        <Link to="/new-case" className="text-gray-400 hover:text-white">Case Information</Link>
+      <div className="flex justify-center space-x-8 bg-gradient-to-r from-black to-gray-900 bg-opacity-80 backdrop-blur-md py-2 text-white text-sm">        
+        <Link to="/new-case" className="text-gray-400 hover:text-white">Case Information</Link>
         <Link to="/annotations" className="text-gray-400 hover:text-white">Annotations</Link>
         <span className="font-bold underline">Overview</span>
       </div>

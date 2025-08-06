@@ -523,10 +523,10 @@ Please ensure your PDF contains GPS coordinates in one of these formats:
 
       if (response.data) {
         const firestoreDocId = response.data.case_id || response.data.id || response.data.doc_id;
-        console.log("✅ Created case Firestore ID:", firestoreDocId);
+        console.log("Created case Firestore ID:", firestoreDocId);
 
         // Save full case info to localStorage including Firestore ID
-  // ⬇️ Capture caseId from response
+  //  Capture caseId from response
         const caseData = {
           caseId: response.data.caseId,
           caseNumber,
@@ -655,7 +655,7 @@ Please ensure your PDF contains GPS coordinates in one of these formats:
     }
   };
 
-  // Original CSV parsing function (unchanged)
+  // CSV parsing function 
   const parseCSV = (file) => {
     setIsProcessing(true);
     setParseError(null);
@@ -838,7 +838,7 @@ Please ensure your PDF contains GPS coordinates in one of these formats:
     const previous = JSON.parse(localStorage.getItem('trackxCaseData')) || {};
 
     const caseData = {
-      caseId: previous.caseId || null, // ✅ preserves caseId if it was set during creation
+      caseId: previous.caseId || null, 
       caseNumber,
       caseTitle,
       dateOfIncident,
@@ -915,7 +915,7 @@ Please ensure your PDF contains GPS coordinates in one of these formats:
         </div>
       )}
 
-      {/* Nav Tabs - Updated with clickable links */}
+      {/* Nav Tabs */}
       <div className="flex justify-center space-x-8 bg-gradient-to-r from-black to-gray-900 bg-opacity-80 backdrop-blur-md py-2 text-white text-sm">        <span className="font-bold underline">Case Information</span>
         <Link to="/annotations" className="text-gray-400 hover:text-white">Annotations</Link>
         <Link to="/overview" className="text-gray-400 hover:text-white">Overview</Link>

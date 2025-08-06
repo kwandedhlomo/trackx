@@ -2,7 +2,7 @@ from fastapi import APIRouter, HTTPException
 from services.notifications_service import add_notification, fetch_notifications, update_notification
 from models.notification_model import Notification, UpdateNotificationRequest
 
-# Create a router for notifications
+
 router = APIRouter()
 
 @router.post("/notifications/{user_id}")

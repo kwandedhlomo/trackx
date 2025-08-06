@@ -19,7 +19,7 @@ router = APIRouter()
 
 @router.get("/cases/search")
 async def search_cases_route(
-    #user_id: Optional[str] = "",  # ✅ Now optional
+    #user_id: Optional[str] = "", 
     user_id: str = "",
     case_name: str = Query("", alias="searchTerm"),
     region: str = "",
@@ -82,13 +82,13 @@ async def delete_case_route(doc_id: str):
     #
 @router.get("/cases/monthly-counts")
 async def get_monthly_case_counts(user_id: str = ""):
-    print(f"📥 Backend received monthly count request with user_id: {user_id}")
+    print(f"Backend received monthly count request with user_id: {user_id}")
     counts = await get_case_counts_by_month(user_id)
     return JSONResponse(content={"counts": counts})
 
 @router.get("/cases/region-counts")
 async def get_region_counts_route(user_id: str = ""):
-    print(f"🌍 /cases/region-counts called with user_id: {user_id}")
+    print(f"/cases/region-counts called with user_id: {user_id}")
     data = await get_region_case_counts(user_id)
     return JSONResponse(content={"counts": data})
 
@@ -112,7 +112,7 @@ async def get_case_czml(case_number: str):
 
     try:
         print(f"🔍 Fetching allPoints for case: {case_number}")
-        # Step 1: Get the case document by caseNumber
+        # Get the case document by caseNumber
         matching_query = db.collection("cases").where("caseNumber", "==", case_number).stream()
         case_docs = list(matching_query)
         if not case_docs:
@@ -121,30 +121,30 @@ async def get_case_czml(case_number: str):
         case_doc = case_docs[0]
         case_doc_id = case_doc.id
 
-        # Step 2: Get the actual allPoints
+        # Get the actual allPoints
         raw_points = await fetch_all_points_by_case_number(case_number)
         if not raw_points:
             raise HTTPException(status_code=404, detail="No allPoints found.")
 
-        print("🔎 Checking for saved interpolated points...")
+        print("Checking for saved interpolated points...")
         cached_points = await fetch_interpolated_points(case_doc_id)
 
         if cached_points:
-            print(f"✅ Using {len(cached_points)} cached interpolated points.")
+            print(f"Using {len(cached_points)} cached interpolated points.")
             interpolated_points = cached_points
         else:
-            print(f"⏳ Interpolating {len(raw_points)} points...")
+            print(f"Interpolating {len(raw_points)} points...")
             interpolated_points = interpolate_points_with_ors(raw_points)
             await store_interpolated_points(case_doc_id, interpolated_points)
 
-        print(f"🌀 Generating CZML from {len(interpolated_points)} points...")
+        print(f"Generating CZML from {len(interpolated_points)} points...")
         czml_data = generate_czml(case_number, interpolated_points)
 
         return JSONResponse(content=czml_data)
 
     except Exception as e:
         import traceback
-        print("❌ Exception in get_case_czml:")
+        print("Exception in get_case_czml:")
         traceback.print_exc()
         return JSONResponse(status_code=500, content={"error": str(e)})
 
@@ -162,7 +162,7 @@ async def get_case_czml(case_number: str):
 #         if not raw_points:
 #             raise HTTPException(status_code=404, detail="No allPoints found.")
 
-#         print(f"✅ Retrieved {len(raw_points)} points. Now interpolating...")
+#         print(f"Retrieved {len(raw_points)} points. Now interpolating...")
 #         interpolated_points = interpolate_points_with_ors(raw_points)
 
 #         print(f" Interpolated to {len(interpolated_points)} points. Now generating CZML...")
@@ -198,7 +198,7 @@ async def get_all_cases():
 
 #     except Exception as e:
 #         import traceback
-#         print("❌ Exception in get_case_czml:")
+#         print("Exception in get_case_czml:")
 #         traceback.print_exc()
 #         return JSONResponse(status_code=500, content={"error": str(e)})
 ######---------------- end

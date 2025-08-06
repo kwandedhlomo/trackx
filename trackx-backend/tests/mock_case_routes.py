@@ -44,3 +44,29 @@ async def get_all_case_points():
 @router.get("/cases/last-points")
 async def get_last_case_points():
     return JSONResponse(content={"points": [{"lat": -33.9, "lng": 18.4, "color": "#1E40AF"}]})
+
+@router.get("/cases/all-points-with-case-ids")
+async def all_points_with_case_ids():
+    return [
+        {"lat": 1.0, "lng": 2.0, "timestamp": "2024-01-01T00:00:00Z", "caseId": "abc123"}
+    ]
+
+@router.get("/cases/all")
+async def get_all_cases():
+    return JSONResponse(content={"cases": [
+        {"doc_id": "case-123", "caseTitle": "Sample Case", "region": "Gauteng"}
+    ]})
+
+@router.get("/cases/czml/{case_number}")
+async def get_case_czml(case_number: str):
+    if case_number == "001":
+        return JSONResponse(content={"czml": [{"id": "document", "name": "Test CZML"}]})
+    else:
+        return JSONResponse(status_code=404, content={"detail": "Case not found"})
+
+@router.get("/cases/{case_id}/all-points")
+async def get_case_all_points(case_id: str):
+    if case_id == "dummycaseid123":
+        return JSONResponse(content={"points": [{"lat": 1.0, "lng": 2.0, "timestamp": "2024-01-01T00:00:00Z"}]})
+    else:
+        return JSONResponse(status_code=404, content={"detail": "Case not found"})

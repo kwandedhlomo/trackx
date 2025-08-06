@@ -461,7 +461,7 @@ function AnnotationsPage() {
         </div>
       )}
 
-      {/* Nav Tabs - Updated with clickable links */}
+      {/* Nav Tabs */}
       <div className="flex justify-center space-x-8 bg-gradient-to-r from-black to-gray-900 bg-opacity-80 backdrop-blur-md py-2 text-white text-sm">        <Link to="/new-case" className="text-gray-400 hover:text-white">Case Information</Link>
         <span className="font-bold underline">Annotations</span>
         <Link 
@@ -563,7 +563,7 @@ function AnnotationsPage() {
                         e.target.onerror = null;
                         e.target.src = "https://placehold.co/600x300?text=Street+View+Not+Available";
                       }}
-                      crossOrigin="anonymous" // Important for capturing the image
+                      crossOrigin="anonymous" 
                     />
                   ) : (
                     <div className="text-center text-gray-500">
@@ -588,7 +588,7 @@ function AnnotationsPage() {
                         e.target.onerror = null;
                         e.target.src = "https://placehold.co/600x300?text=Street+View+Not+Available";
                       }}
-                      crossOrigin="anonymous" // Important for capturing the image
+                      crossOrigin="anonymous" 
                     />
                   ) : (
                     <div className="text-center text-gray-500">

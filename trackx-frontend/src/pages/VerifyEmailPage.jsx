@@ -53,7 +53,7 @@ function VerifyEmailPage() {
 
       if (user && !user.emailVerified) {
         await sendEmailVerification(user);
-        setMessage("✅ Verification email sent again!");
+        setMessage("Verification email sent again!");
       } else {
         setMessage("Your email is already verified.");
       }

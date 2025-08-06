@@ -115,7 +115,7 @@ async def create_case(payload: CaseCreateRequest) -> str:
             batch.commit()
             logger.info(f"Added {len(payload.csv_data)} points to case {case_id}")
 
-        # ✅ Handle `all_points` → "allPoints" subcollection
+        # Handle `all_points` → "allPoints" subcollection
         if hasattr(payload, "all_points") and payload.all_points:
             batch = db.batch()
             allpoints_ref = db.collection("cases").document(case_id).collection("allPoints")
@@ -133,7 +133,7 @@ async def create_case(payload: CaseCreateRequest) -> str:
             batch.commit()
             logger.info(f"Added {len(payload.all_points)} allPoints to case {case_id}")
         
-                # ✅ Trigger notification
+                # Trigger notification
         if case_data["userID"]:
             await add_notification(
                 user_id=case_data["userID"],
@@ -193,7 +193,7 @@ async def update_case(data: dict):
         # Compare old and new data to determine what changed
         changes = []
         for key, new_value in update_fields.items():
-            if key in ["updatedBy", "updatedAt"]:  # Exclude these fields
+            if key in ["updatedBy", "updatedAt"]:  
                 continue
             old_value = current_data.get(key)
             if old_value != new_value:
@@ -278,13 +278,13 @@ async def fetch_recent_cases(sort_by: str = "dateEntered", user_id: str = ""):
     return results
 
 async def get_case_counts_by_month(user_id: str = ""):
-    print(f"🔍 get_case_counts_by_month() called with user_id: {user_id}")
+    print(f"get_case_counts_by_month() called with user_id: {user_id}")
     query = db.collection("cases")
     if user_id:
         query = query.where("userID", "==", user_id)
 
     documents = list(query.stream())
-    print(f"📦 Found {len(documents)} case documents for monthly count")
+    print(f" Found {len(documents)} case documents for monthly count")
 
     month_counts = defaultdict(int)
     for doc in documents:
@@ -307,7 +307,7 @@ async def get_region_case_counts(user_id: str = ""):
         query = query.where("userID", "==", user_id)
 
     docs = list(query.stream())
-    print(f"📊 Found {len(docs)} cases for region count (user_id={user_id})")
+    print(f" Found {len(docs)} cases for region count (user_id={user_id})")
 
     region_counts = {}
     for doc in docs:
@@ -336,13 +336,13 @@ async def fetch_all_case_points():
                 if lat is not None and lng is not None:
                     all_points.append({"lat": lat, "lng": lng})
 
-        print(f"✅ Fetched {len(all_points)} points:")
+        print(f" Fetched {len(all_points)} points:")
         for p in all_points:
             print(f"→ lat: {p['lat']}, lng: {p['lng']}")
 
         return all_points
     except Exception as e:
-        print("❌ Error fetching case points:", e)
+        print("Error fetching case points:", e)
         return []
 
     
@@ -352,7 +352,7 @@ async def fetch_interpolated_points(case_id: str) -> list:
         docs = list(points_ref.stream())
         return [doc.to_dict() for doc in docs]
     except Exception as e:
-        print(f"❌ Failed to fetch interpolated points: {e}")
+        print(f"Failed to fetch interpolated points: {e}")
         return []
 
 async def store_interpolated_points(case_id: str, points: list):
@@ -388,9 +388,9 @@ async def store_interpolated_points(case_id: str, points: list):
             })
 
         batch.commit()
-        print(f"✅ Stored {len(points)} interpolated points for case {case_id}")
+        print(f"Stored {len(points)} interpolated points for case {case_id}")
     except Exception as e:
-        print(f"❌ Failed to store interpolated points: {e}")
+        print(f"Failed to store interpolated points: {e}")
 
 
 async def fetch_all_points_by_case_number(case_number: str):
@@ -400,7 +400,7 @@ async def fetch_all_points_by_case_number(case_number: str):
         # Find the case with this case_number
         matching_case_query = db_ref.where("caseNumber", "==", case_number)
         case_docs = matching_case_query.stream()
-        case_doc_list = list(case_docs)  # ✅ FIXED
+        case_doc_list = list(case_docs)  
 
         if not case_doc_list:
             print(f"No case found with caseNumber: {case_number}")
@@ -411,7 +411,7 @@ async def fetch_all_points_by_case_number(case_number: str):
 
         all_points_ref = case_ref.collection("allPoints").order_by("timestamp")
         all_points_docs = all_points_ref.stream()
-        all_points = [doc.to_dict() for doc in all_points_docs]  # ✅ FIXED
+        all_points = [doc.to_dict() for doc in all_points_docs]  
 
         return all_points
 
@@ -434,41 +434,41 @@ def generate_czml(case_id: str, points: list) -> list:
             print(f"\n--- Processing point {i} ---")
 
     def to_iso_zulu(ts_val):
-        print(f"🔍 Processing timestamp: {repr(ts_val)} (type: {type(ts_val)})")
+        print(f"Processing timestamp: {repr(ts_val)} (type: {type(ts_val)})")
         
         if isinstance(ts_val, list):
-            print(f"📋 Timestamp is a list with {len(ts_val)} items: {ts_val}")
+            print(f"Timestamp is a list with {len(ts_val)} items: {ts_val}")
             if len(ts_val) == 0:
-                print("❌ Empty list provided as timestamp")
+                print("Empty list provided as timestamp")
                 return None
             ts_val = ts_val[0]
-            print(f"🎯 Using first item from list: {repr(ts_val)} (type: {type(ts_val)})")
+            print(f"Using first item from list: {repr(ts_val)} (type: {type(ts_val)})")
         
         if isinstance(ts_val, list):
-            print(f"❌ Timestamp is STILL a list after extraction: {ts_val}")
+            print(f"Timestamp is STILL a list after extraction: {ts_val}")
             return None
 
         if ts_val is None or ts_val == "":
-            print("❌ Timestamp is None or empty")
+            print("Timestamp is None or empty")
             return None
 
         try:
             if not isinstance(ts_val, str):
-                print(f"🔄 Converting {type(ts_val)} to string: {ts_val}")
+                print(f"Converting {type(ts_val)} to string: {ts_val}")
                 ts_val = str(ts_val)
 
-            print(f"🔧 About to replace Z in: {repr(ts_val)}")
-            # Avoid double +00:00 issue
+            print(f"About to replace Z in: {repr(ts_val)}")
+            
             if ts_val.endswith("Z") and "+00:00" not in ts_val:
                 ts_val = ts_val.replace("Z", "+00:00")
-            print(f"🔧 After Z replacement: {repr(ts_val)}")
+            print(f"After Z replacement: {repr(ts_val)}")
 
             dt = datetime.fromisoformat(ts_val)
             result = dt.astimezone(pytz.utc).isoformat().replace("+00:00", "Z")
-            print(f"✅ Successfully converted to: {result}")
+            print(f"Successfully converted to: {result}")
             return result
         except Exception as e:
-            print(f"❌ Failed to convert timestamp {repr(ts_val)}: {e}")
+            print(f"Failed to convert timestamp {repr(ts_val)}: {e}")
             import traceback
             traceback.print_exc()
             return None
@@ -480,12 +480,12 @@ def generate_czml(case_id: str, points: list) -> list:
         print(f"Raw timestamp from point: {repr(ts)} (type: {type(ts)})")
         
         if not ts:
-            print(f"⚠️ Skipping point {i} with missing timestamp")
+            print(f"Skipping point {i} with missing timestamp")
             continue
 
         iso_ts = to_iso_zulu(ts)
         if not iso_ts:
-            print(f"⚠️ Skipping point {i} with bad timestamp: {repr(ts)}")
+            print(f"Skipping point {i} with bad timestamp: {repr(ts)}")
             continue
 
         cleaned_points.append({
@@ -493,7 +493,7 @@ def generate_czml(case_id: str, points: list) -> list:
             "lng": p["lng"],
             "timestamp": iso_ts
         })
-        print(f"✅ Added cleaned point {i}")
+        print(f"Added cleaned point {i}")
 
     cleaned_points.sort(key=lambda x: x["timestamp"])
 
@@ -504,7 +504,7 @@ def generate_czml(case_id: str, points: list) -> list:
     
     availability_start = cleaned_points[0]["timestamp"]
     availability_end = cleaned_points[-1]["timestamp"]
-    print(f"⏱ CZML Interval - Start: {availability_start}, End: {availability_end}")
+    print(f"CZML Interval - Start: {availability_start}, End: {availability_end}")
 
 
     czml = [
@@ -557,7 +557,7 @@ def generate_czml(case_id: str, points: list) -> list:
             0
         ])
 
-    print(f"✅ Generated CZML with {len(cleaned_points)} points.")
+    print(f"Generated CZML with {len(cleaned_points)} points.")
     return czml
 
 
@@ -577,7 +577,7 @@ async def fetch_all_points_for_case(case_id: str) -> list:
 
 ORS_API_KEY = "5b3ce3597851110001cf6248c3b41afd16e04795a3eaaf7b3c0cd61f"  # Replace with your actual key or use an environment variable
 
-# Fix the import - try different approaches
+
 try:
     from google.api_core.datetime_helpers import DatetimeWithNanoseconds
 except ImportError:
@@ -595,7 +595,7 @@ def interpolate_points_with_ors(points: list) -> list:
     """
 
     if not points or len(points) < 2:
-        print("⚠️ Not enough points to interpolate.")
+        print("Not enough points to interpolate.")
         return points
 
     # --- Step 1: Sanitize points ---
@@ -624,10 +624,10 @@ def interpolate_points_with_ors(points: list) -> list:
         })
 
     if len(sanitized_points) < 2:
-        print("⚠️ Not enough valid points after sanitization.")
+        print("Not enough valid points after sanitization.")
         return sanitized_points
 
-    # --- Step 2: Prepare ORS API request ---
+    # --- Prepare ORS API request ---
     url = "https://api.openrouteservice.org/v2/directions/driving-car/geojson"
     headers = {
         "Authorization": ORS_API_KEY,
@@ -638,7 +638,7 @@ def interpolate_points_with_ors(points: list) -> list:
     coordinates = [[p["lng"], p["lat"]] for p in sanitized_points]
     body = {"coordinates": coordinates}
 
-    # --- Step 3: Call ORS with retry logic ---
+    # --- Call ORS with retry logic ---
     max_retries = 3
     route = None
     for attempt in range(max_retries):
@@ -646,23 +646,23 @@ def interpolate_points_with_ors(points: list) -> list:
             res = requests.post(url, headers=headers, json=body)
             if res.status_code == 429:
                 wait = 2 ** attempt
-                print(f"⚠️ ORS rate limit hit. Retrying in {wait}s...")
+                print(f"ORS rate limit hit. Retrying in {wait}s...")
                 time.sleep(wait)
                 continue
             res.raise_for_status()
             route = res.json()["features"][0]["geometry"]["coordinates"]
             break
         except Exception as e:
-            print(f"❌ ORS failed (attempt {attempt + 1}): {e}")
+            print(f"ORS failed (attempt {attempt + 1}): {e}")
             if attempt == max_retries - 1:
-                print("⚠️ Returning sanitized points due to repeated failures.")
+                print("Returning sanitized points due to repeated failures.")
                 return sanitized_points
 
     if not route:
-        print("❌ No route returned by ORS.")
+        print("No route returned by ORS.")
         return sanitized_points
 
-    # --- Step 4: Interpolate timestamps across route ---
+    # --- Interpolate timestamps across route ---
     t_start = datetime.fromisoformat(sanitized_points[0]["timestamp"].replace("Z", "+00:00"))
     t_end = datetime.fromisoformat(sanitized_points[-1]["timestamp"].replace("Z", "+00:00"))
     total_duration = (t_end - t_start).total_seconds()
@@ -679,9 +679,9 @@ def interpolate_points_with_ors(points: list) -> list:
             "timestamp": interp_time.replace(tzinfo=timezone.utc).isoformat().replace("+00:00", "Z")
         })
 
-    # --- Step 5: Finalize ---
+    # --- Finalize ---
     padded.sort(key=lambda p: p["timestamp"])
-    print(f"✅ Final padded point count: {len(padded)}")
+    print(f"Final padded point count: {len(padded)}")
     return padded
 
 async def fetch_all_case_points_with_case_ids(): #this is the newest function for heatmap - 2025/06/26
@@ -712,10 +712,10 @@ async def fetch_all_case_points_with_case_ids(): #this is the newest function fo
                         "caseId": case_id
                     })
 
-        print(f"✅ Custom route fetched {len(all_points)} points with case IDs.")
+        print(f"Custom route fetched {len(all_points)} points with case IDs.")
         return all_points
     except Exception as e:
-        print("❌ Error in fetch_all_case_points_with_case_ids:", e)
+        print("Error in fetch_all_case_points_with_case_ids:", e)
         return []
 async def fetch_last_points_per_case():
     try:
@@ -742,5 +742,5 @@ async def fetch_last_points_per_case():
 
         return result
     except Exception as e:
-        print(f"❌ Error in fetch_last_points_per_case: {e}")
+        print(f"Error in fetch_last_points_per_case: {e}")
         return []

@@ -93,7 +93,7 @@ const handleDeleteUser = async (userId) => {
     <div className="relative flex flex-col min-h-screen">
       <div className="absolute inset-0 w-full min-h-full bg-gradient-to-br from-black via-gray-900 to-black -z-20" />
 
-      {/* 🟦 Navbar */}
+      {/* Navbar */}
       <nav className="flex justify-between items-center bg-gradient-to-r from-black to-gray-900 bg-opacity-80 backdrop-blur-md p-4 relative font-sans z-20">
         <div className="flex items-center space-x-4">
           <div

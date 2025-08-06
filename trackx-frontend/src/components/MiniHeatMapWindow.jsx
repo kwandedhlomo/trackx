@@ -8,10 +8,10 @@ const MAPBOX_TOKEN = 'pk.eyJ1Ijoiam9ubHVrZTciLCJhIjoiY21icjgzYW1lMDczazJqc2Fmbm4
 
 const MiniHeatMapWindow = ({ points = [] }) => {
   const formattedPoints = (points || []).map(p => ({
-    position: [p.lng || 0, p.lat || 0],  // ✅ Fixed from longitude/latitude to lng/lat
+    position: [p.lng || 0, p.lat || 0], 
   }));
 
-  console.log("🛰️ MiniHeatMapWindow formatted points:", formattedPoints);
+  console.log("MiniHeatMapWindow formatted points:", formattedPoints);
 
   const heatmapLayer = new HeatmapLayer({
     id: 'mini-heatmap',

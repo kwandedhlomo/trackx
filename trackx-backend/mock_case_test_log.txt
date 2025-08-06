@@ -1,0 +1,14 @@
+test_search_cases | Tests the /cases/search endpoint with no filters | Integration | PASS
+test_create_case_success | Tests successful creation at /cases/create | Integration | PASS
+test_recent_cases_route | Tests the /cases/recent endpoint | Integration | PASS
+test_update_case_missing_doc_id | Tests update failure when doc_id is missing | Integration | PASS
+test_delete_case_not_found | Tests deleting a non-existent case | Integration | PASS
+test_delete_case_found | Tests deleting an existing case | Integration | PASS
+test_monthly_case_counts | Tests the /cases/monthly-counts endpoint | Integration | PASS
+test_region_case_counts | Tests the /cases/region-counts endpoint | Integration | PASS
+test_all_case_points | Tests the /cases/all-points endpoint | Integration | PASS
+test_last_case_points | Tests the /cases/last-points endpoint | Integration | PASS
+test_all_points_with_case_ids | Tests the /cases/all-points-with-case-ids endpoint | Integration | PASS
+test_get_all_cases | Tests the /cases/all endpoint | Integration | PASS
+test_czml_for_case | Tests the /cases/czml/{case_number} endpoint | Integration | PASS
+test_all_points_for_specific_case | Tests the /cases/{case_id}/all-points endpoint | Integration | PASS
