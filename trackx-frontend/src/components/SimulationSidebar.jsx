@@ -44,7 +44,7 @@ export default function SimulationSidebar({ viewerRef }) {
         localStorage.setItem("flaggedSidebarFlash", JSON.stringify(points));
         setFlaggedPoints(points);
       },
-      (error) => console.error("❌ Real-time listener failed:", error)
+      (error) => console.error("Real-time listener failed:", error)
     );
 
     return () => unsubscribe();
@@ -64,8 +64,8 @@ export default function SimulationSidebar({ viewerRef }) {
     if (window.confirm("Are you sure you want to delete this flagged point?")) {
       const pointRef = doc(db, `cases/${caseId}/interpolatedPoints`, point.id);
       deleteDoc(pointRef)
-        .then(() => console.log("🗑️ Point deleted"))
-        .catch((err) => console.error("❌ Error deleting point:", err));
+        .then(() => console.log("Point deleted"))
+        .catch((err) => console.error("Error deleting point:", err));
     }
   };
 
@@ -264,7 +264,7 @@ export default function SimulationSidebar({ viewerRef }) {
               color: "white",
             }}
           >
-            <h2 style={{ fontSize: "1.2rem", marginBottom: "12px" }}>✏️ Edit Flag</h2>
+            <h2 style={{ fontSize: "1.2rem", marginBottom: "12px" }}>Edit Flag</h2>
 
             <input
               type="text"

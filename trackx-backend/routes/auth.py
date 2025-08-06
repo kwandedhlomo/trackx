@@ -23,7 +23,7 @@ async def register(
     authorization: str = Header(None)
 ):
     try:
-        # Get the Bearer token (e.g., "Bearer eyJ...")
+        
         if not authorization or not authorization.startswith("Bearer "):
             raise HTTPException(status_code=401, detail="Missing or invalid token")
 

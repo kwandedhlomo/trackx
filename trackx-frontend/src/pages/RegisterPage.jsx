@@ -66,7 +66,7 @@ const handleRegister = async (e) => {
     const generatedUserId = generateUserId();
 
     // Save to Firestore
-    console.log("🗃️ Adding user to Firestore...");
+    console.log("Adding user to Firestore...");
     await setDoc(doc(db, "users", user.uid), {
       firstName,
       surname,
@@ -78,7 +78,7 @@ const handleRegister = async (e) => {
       isApproved: false,
       createdAt: new Date().toISOString(),
     });
-    console.log("✅ Firestore user saved!");
+    console.log("Firestore user saved!");
 
     // Notify backend
     const response = await fetch(`${import.meta.env.VITE_API_URL}/auth/register`, {

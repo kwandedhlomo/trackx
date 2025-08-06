@@ -16,8 +16,8 @@ import {
   getDocs,
   updateDoc,
   deleteDoc,
-  query, // ← ADD THIS
-  where, // ← ALSO PROBABLY USED
+  query, 
+  where, 
   onSnapshot,
 } from "firebase/firestore";
 import { useNavigate } from "react-router-dom";
@@ -34,7 +34,7 @@ function SimulationPage2() {
   const viewerRef = useRef();
   const lastKnownPositionRef = useRef(null);
   const [vehicleReady, setVehicleReady] = useState(false);
-  const vehicleEntityRef = useRef(null); // ← holds the entity object directly
+  const vehicleEntityRef = useRef(null); 
   const lastSimMillisRef = useRef(null);
   const caseDataString = localStorage.getItem("trackxCaseData");
   const caseId = caseDataString ? JSON.parse(caseDataString)?.caseId || null : null;
@@ -166,11 +166,11 @@ useEffect(() => {
     });
 
     lastSimMillisRef.current = currentMillis;
-  }, 300); // tighter = more accurate
+  }, 300); 
   return () => clearInterval(interval);
 }, []);
 
-      // ✅ NEW FUNCTION: See This Moment
+      // See This Moment
       const handleSeeThisMoment = async () => {
         try {
           const viewer = viewerRef.current?.cesiumElement;
@@ -196,10 +196,10 @@ useEffect(() => {
           const lat = Cesium.Math.toDegrees(carto.latitude);
           const lng = Cesium.Math.toDegrees(carto.longitude);
     
-          // 🔥 Open Google Street View at this lat/lng
+          // Open Google Street View at this lat/lng
           window.open(`https://www.google.com/maps?q=&layer=c&cbll=${lat},${lng}`, "_blank");
         } catch (err) {
-          console.error("❌ Failed to open Street View:", err);
+          console.error("Failed to open Street View:", err);
           alert("Could not open Street View.");
         }
       };
@@ -209,40 +209,40 @@ const handleFlagSubmit = async () => {
   try {
     const viewer = viewerRef.current?.cesiumElement;
     const vehicleEntity = vehicleEntityRef.current;
-    console.log("🧠 Checking vehicleEntityRef:", vehicleEntity);
+    console.log("Checking vehicleEntityRef:", vehicleEntity);
 
 
     if (!viewer) {
-      console.error("❌ Viewer not available.");
+      console.error("Viewer not available.");
       alert("Viewer is not ready.");
       return;
     }
 
     if (!vehicleEntity) {
-      console.error("❌ Vehicle entity not found.");
+      console.error("Vehicle entity not found.");
       alert("Vehicle entity is not ready.");
       return;
     }
 
     if (!vehicleEntity.position) {
-      console.error("❌ Vehicle entity has no position property.");
+      console.error("Vehicle entity has no position property.");
       alert("Vehicle position data is missing.");
       return;
     }
 
     const currentTime = viewer.clock.currentTime;
-    console.log("⏰ Current simulation time:", currentTime.toString());
+    console.log("Current simulation time:", currentTime.toString());
 
     let position = vehicleEntity.position.getValue(currentTime);
     console.log("🛰️ Raw position from Cesium:", position);
 
     if (!position && lastKnownPositionRef.current) {
-      console.warn("⚠️ Falling back to last known position.");
+      console.warn("Falling back to last known position.");
       position = lastKnownPositionRef.current;
     }
 
     if (!position) {
-      console.error("❌ Position is still undefined after fallback.");
+      console.error("Position is still undefined after fallback.");
       alert("Vehicle position is not available yet.");
       return;
     }
@@ -250,7 +250,7 @@ const handleFlagSubmit = async () => {
     const carto = Cesium.Cartographic.fromCartesian(position);
     const lat = Cesium.Math.toDegrees(carto.latitude);
     const lng = Cesium.Math.toDegrees(carto.longitude);
-    console.log("📍 Final lat/lng being used:", { lat, lng });
+    console.log("Final lat/lng being used:", { lat, lng });
 
     const pointsRef = collection(db, `cases/${caseId}/interpolatedPoints`);
     const snapshot = await getDocs(pointsRef);
@@ -263,16 +263,16 @@ const handleFlagSubmit = async () => {
         d.getUTCSeconds() * 1000 +
         d.getUTCMilliseconds()
       );
-      console.log(`🕒 Converted ${dateString} → ${ms}ms since midnight`);
+      console.log(`Converted ${dateString} → ${ms}ms since midnight`);
       return ms;
     };
 
 
-    const utcDate = Cesium.JulianDate.toDate(viewer.clock.currentTime); // always in UTC
-    const currentTimeISO = utcDate.toISOString(); // ✅ define this here
+    const utcDate = Cesium.JulianDate.toDate(viewer.clock.currentTime); 
+    const currentTimeISO = utcDate.toISOString();
     const currentMillisSinceMidnight = toMillisSinceMidnight(currentTimeISO);
-    console.log(`🕰️ Cesium sim time (ISO): ${currentTimeISO}`);
-    console.log(`🕰️ Cesium millis since midnight: ${currentMillisSinceMidnight}`);
+    console.log(`Cesium sim time (ISO): ${currentTimeISO}`);
+    console.log(`Cesium millis since midnight: ${currentMillisSinceMidnight}`);
 
 
 
@@ -289,8 +289,8 @@ const handleFlagSubmit = async () => {
         const firestoreISO = firestoreDate.toISOString();
         const pointMillisSinceMidnight = toMillisSinceMidnight(firestoreISO);
 
-        console.log("📄 Firestore Timestamp (full ISO):", firestoreISO);
-        console.log("📄 Firestore Time (ms since midnight):", pointMillisSinceMidnight);
+        console.log("Firestore Timestamp (full ISO):", firestoreISO);
+        console.log("Firestore Time (ms since midnight):", pointMillisSinceMidnight);
 
         const diff = Math.abs(currentMillisSinceMidnight - pointMillisSinceMidnight);
         if (diff < smallestTimeDiff) {
@@ -301,29 +301,29 @@ const handleFlagSubmit = async () => {
     });
 
 
-    console.log("✅ Closest doc:", closestDoc?.id, "Time difference:", smallestTimeDiff);
-    console.log("🔍 Fetching points for caseId:", caseId);
+    console.log("Closest doc:", closestDoc?.id, "Time difference:", smallestTimeDiff);
+    console.log("Fetching points for caseId:", caseId);
     console.log("Fetched docs count:", snapshot.size);
 
     if (!closestDoc) {
-      console.error("❌ No matching Firestore point found.");
+      console.error("No matching Firestore point found.");
       alert("No matching point found in Firestore.");
       return;
     }
 
-    console.log("✅ Closest point doc ID:", closestDoc.id);
+    console.log("Closest point doc ID:", closestDoc.id);
     await updateDoc(closestDoc.ref, {
       isFlagged: true,
       title: flagTitle,
       note: flagNote
     });
 
-    alert("Point flagged successfully ✅");
+    alert("Point flagged successfully");
     setShowFlagModal(false);
     setFlagTitle("");
     setFlagNote("");
   } catch (err) {
-    console.error("❌ Flagging failed:", err);
+    console.error("Flagging failed:", err);
     alert("Something went wrong.");
   }
 };
@@ -383,7 +383,7 @@ const toDateSafe = (ts) => {
 
                 if (!viewer) return;
 
-                // ✅ End loading before animation starts
+                // End loading before animation starts
                 setLoading(false);
 
                 if (firstCoord) {
@@ -408,7 +408,7 @@ const toDateSafe = (ts) => {
                     const existing = viewer.entities.getById("trackingVehicle");
 
                     if (existing) {
-                      console.log("🧠 Existing trackingVehicle found");
+                      console.log("Existing trackingVehicle found");
                       vehicleEntityRef.current = existing;
                       setVehicleReady(true);
                       return; // ⬅ prevent double-add
@@ -427,7 +427,7 @@ const toDateSafe = (ts) => {
                         heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
                       },
                       billboard: {
-                        image: "https://via.placeholder.com/24", // 🔁 Use a valid fallback image for now
+                        image: "https://via.placeholder.com/24",
                         scale: 2.0,
                         pixelOffset: new Cesium.Cartesian2(0, -24),
                       },
@@ -438,7 +438,7 @@ const toDateSafe = (ts) => {
                     vehicleEntityRef.current = vehicleEntity;
                     setVehicleReady(true);
 
-                    console.log("🚗 vehicleEntityRef set from NEW:", vehicleEntityRef.current);
+                    console.log("vehicleEntityRef set from NEW:", vehicleEntityRef.current);
                   }, 2000);
 
                 } else {
@@ -592,10 +592,10 @@ const toDateSafe = (ts) => {
           onClick={handleSeeThisMoment}
             style={{
             position: "absolute",
-            top: "160px",       // adjust vertical position as needed
-            right: "30px",      // align with your other button
+            top: "160px",       
+            right: "30px",      
             padding: "10px 20px",
-            backgroundColor: "#34d399", // green accent
+            backgroundColor: "#34d399", 
             color: "black",
             border: "none",
             borderRadius: "10px",

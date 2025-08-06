@@ -41,11 +41,11 @@ function MyCasesPage() {
   // Fetch current user's cases
   const fetchCases = async () => {
     try {
-      const uid = auth.currentUser?.uid; // Ensure userID is fetched
+      const uid = auth.currentUser?.uid; 
       if (!uid) return;
       const response = await axios.get("http://localhost:8000/cases/search", {
         params: {
-          user_id: uid, // Always include userID
+          user_id: uid, 
           searchTerm,
           region,
           date,

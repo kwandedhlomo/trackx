@@ -29,7 +29,7 @@ function HeatmapPage() {
       const res = await axios.get('http://localhost:8000/cases/all-points-with-case-ids');
       const rawPoints = res.data.points;
 
-      // 1. Group by caseId
+      // Group by caseId
       const grouped = {};
       for (const point of rawPoints) {
         const caseId = point.caseId;
@@ -42,14 +42,14 @@ function HeatmapPage() {
       for (const caseId in grouped) {
         const casePoints = grouped[caseId];
 
-        // 2. Sort by record number in timestamp (e.g., "Record 1")
+        // Sort by record number in timestamp (e.g., "Record 1")
         casePoints.sort((a, b) => {
           const aNum = parseInt(a.timestamp?.replace(/\D/g, "")) || 0;
           const bNum = parseInt(b.timestamp?.replace(/\D/g, "")) || 0;
           return aNum - bNum;
         });
 
-        // 3. Label the first and last
+        // Label the first and last
         casePoints.forEach((p, index) => {
           const label =
             index === 0
@@ -66,34 +66,34 @@ function HeatmapPage() {
         });
       }
 
-      console.log("🏁 Tagged points:", finalPoints);
+      console.log("Tagged points:", finalPoints);
       setPoints(finalPoints);
 
       
       try {
         const caseRes = await axios.get("http://localhost:8000/cases/all");
-        console.log("✅ Raw case documents:", caseRes.data); // Add this
+        console.log("Raw case documents:", caseRes.data); 
 
-        const caseDocs = caseRes.data; // ✅ This is already the array!
+        const caseDocs = caseRes.data; 
 
         const caseMap = {};
         caseDocs.forEach(doc => {
-          console.log("🧾 Inspecting raw case doc:", doc); // 👈 Add this
+          console.log("Inspecting raw case doc:", doc); 
 
-          const id = doc.id; // 👈 Try using the field you expect to be unique
+          const id = doc.id; 
           if (id) {
             caseMap[id] = doc;
           } else {
-            console.warn("⚠️ Could not extract ID from case doc:", doc);
+            console.warn("Could not extract ID from case doc:", doc);
           }
         });
 
 
         setCaseDataMap(caseMap);
-        console.log("📂 Final caseDataMap keys:", Object.keys(caseMap)); // ⬅️ Add this here
+        console.log("Final caseDataMap keys:", Object.keys(caseMap)); 
 
       } catch (caseError) {
-        console.error("❌ Failed to fetch case metadata:", caseError);
+        console.error("Failed to fetch case metadata:", caseError);
       }
     } catch (error) {
       console.error("Failed to fetch processed points:", error);
@@ -107,17 +107,17 @@ function HeatmapPage() {
 useEffect(() => {
   const fetchCaseDocuments = async () => {
     try {
-      const res = await axios.get("http://localhost:8000/cases/all"); // or your deployed API URL
+      const res = await axios.get("http://localhost:8000/cases/all"); 
       const cases = res.data;
 
       const map = {};
       cases.forEach(c => {
-        map[c.id] = c; // `id` must match `caseId` from the point data
+        map[c.id] = c; // 
       });
 
       setCaseDataMap(map);
     } catch (error) {
-      console.error("❌ Failed to fetch case documents", error);
+      console.error("Failed to fetch case documents", error);
     }
   };
 
@@ -149,7 +149,7 @@ const startPointsLayer = new ScatterplotLayer({
   pickable: true,
   getTooltip: ({ object }) => {
   try {
-    if (!object || !object.caseId) return null; // ✅ Skip if object/caseId is missing
+    if (!object || !object.caseId) return null; 
 
     const caseDoc = caseDataMap[object.caseId];
     return caseDoc
@@ -157,7 +157,7 @@ const startPointsLayer = new ScatterplotLayer({
       : "Start Point";
 
   } catch (e) {
-    console.warn("⚠️ Tooltip error:", e);
+    console.warn("Tooltip error:", e);
     return null;
   }
 }
@@ -177,7 +177,7 @@ const endPointsLayer = new ScatterplotLayer({
   pickable: true,
   getTooltip: ({ object }) => {
   try {
-    if (!object || !object.caseId) return null; // ✅ Skip if object/caseId is missing
+    if (!object || !object.caseId) return null;
     console.log("🧪 Tooltip object:", object);
     const caseDoc = caseDataMap[object.caseId];
     return caseDoc
@@ -185,7 +185,7 @@ const endPointsLayer = new ScatterplotLayer({
       : "End Point";
 
   } catch (e) {
-    console.warn("⚠️ Tooltip error:", e);
+    console.warn("Tooltip error:", e);
     return null;
   }
 }
@@ -204,7 +204,7 @@ const hexagonLayer = new HexagonLayer({
   elevationAggregation: 'SUM',
   getColorWeight: () => 1,
   getElevationWeight: () => 1,
-  gpuAggregation: false, // 🔥 Required for on-hover tooltips to work
+  gpuAggregation: false, 
 
   getTooltip: ({ object }) => {
     if (!object || !object.points) return null;
@@ -214,8 +214,8 @@ const hexagonLayer = new HexagonLayer({
     const casesInfo = [...uniqueCases].map(caseId => {
       const doc = caseDataMap[caseId];
 
-      // 🔍 Logging to inspect document structure
-      console.log("📦 Tooltip doc for caseId:", caseId, doc);
+      // Logging to inspect document structure
+      console.log("Tooltip doc for caseId:", caseId, doc);
 
       const name = doc?.caseTitle || "Unknown Case";
       const date = doc?.dateOfIncident || "No date";
@@ -233,7 +233,7 @@ const hexagonLayer = new HexagonLayer({
 //   id: 'hex-layer',
 //   data: points.filter(p => p.type === 'start' || p.type === 'end'),
 //   getPosition: d => d.position,
-//   radius: 1000, // adjust this to change hex size
+//   radius: 1000, 
 //   elevationScale: 50,
 //   extruded: true,
 //   pickable: true,

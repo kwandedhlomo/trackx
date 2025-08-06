@@ -78,7 +78,7 @@ function HomePage() {
             }
           });
 
-          console.log("🆕 Recent cases response:", response.data.cases);
+          console.log("Recent cases response:", response.data.cases);
           setRecentCases(response.data.cases);
         } catch (error) {
           console.error("Failed to fetch recent cases:", error);
@@ -127,16 +127,16 @@ function HomePage() {
       const fetchMonthlyCounts = async () => {
         try {
           const params = profile?.role === "admin" ? {} : { user_id: profile?.userID };
-          console.log("📡 Fetching monthly case counts with params:", params);
+          console.log("Fetching monthly case counts with params:", params);
 
           const response = await axios.get("http://localhost:8000/cases/monthly-counts", {
             params,
           });
 
-          console.log("✅ Received monthly counts:", response.data.counts);
+          console.log("Received monthly counts:", response.data.counts);
           setMonthlyCaseCounts(response.data.counts);
         } catch (error) {
-          console.error("❌ Failed to fetch monthly case counts:", error);
+          console.error("Failed to fetch monthly case counts:", error);
         }
       };
 
@@ -153,7 +153,7 @@ function HomePage() {
             params: profile?.role === "admin" ? {} : { user_id: profile?.userID }
           });
 
-          console.log("🗺 Region count data:", response.data.counts);
+          console.log("Region count data:", response.data.counts);
           setRegionCounts(response.data.counts || []);
         } catch (err) {
           console.error("Failed to fetch region counts:", err);
@@ -172,7 +172,7 @@ function HomePage() {
           const response = await axios.get("http://localhost:8000/cases/all-points");
           const points = response.data.points || [];
     
-          console.log("🔥 Raw heatmap points from backend:", points);
+          console.log("Raw heatmap points from backend:", points);
           setHeatPoints(points);
           //console.log("HomePage fetched points:", points);
         } catch (err) {
@@ -189,10 +189,10 @@ function HomePage() {
           const response = await axios.get("http://localhost:8000/cases/last-points");
           const data = response.data.points || [];
     
-          console.log("🟢 Retrieved globePoints:", data); // ✅ ACTUAL LOG FOR DEBUGGING
+          console.log("Retrieved globePoints:", data); 
           setGlobePoints(data);
         } catch (err) {
-          console.error("❌ Failed to fetch globe points:", err); // Already exists
+          console.error("Failed to fetch globe points:", err); 
         }
       };
     
@@ -201,7 +201,7 @@ function HomePage() {
 
     return (
       <div className="relative flex flex-col min-h-screen">
-      {/* Gradient background that grows properly */}
+      {/* Gradient background */}
       <div className="absolute inset-0 w-full min-h-full bg-gradient-to-br from-black via-gray-900 to-black -z-20" />
         {/*  Globe Background */}
         <GlobeBackground interactive={clearMode} globePoints={globePoints} />
@@ -219,7 +219,7 @@ function HomePage() {
         {/* Main Content (hidden when clearMode is true) */}
         {!clearMode && (
           <div className="flex-grow flex flex-col relative z-10">
-            {/* 🟦 Navbar */}
+            {/* Navbar */}
             <nav className="flex justify-between items-center bg-gradient-to-r from-black to-gray-900 bg-opacity-80 backdrop-blur-md p-4 relative font-sans">
               <div className="flex items-center space-x-4">
               <div
@@ -252,14 +252,18 @@ function HomePage() {
               <div className="absolute top-16 left-0 bg-black bg-opacity-90 backdrop-blur-md text-white w-64 p-6 z-30 space-y-4 border-r border-gray-700 shadow-lg">
                 <Link to="/home" className="block hover:text-blue-400" onClick={() => setShowMenu(false)}>🏠 Home</Link>
                 <Link to="/new-case" className="block hover:text-blue-400" onClick={() => setShowMenu(false)}>📝 Create New Case / Report</Link>
-                <Link to="/manage-cases" className="block hover:text-blue-400" onClick={() => setShowMenu(false)}>📁 Manage Cases</Link>
+
+                {profile?.role === "admin" && (
+                  <Link to="/manage-cases" className="block hover:text-blue-400" onClick={() => setShowMenu(false)}>📁 Manage Cases</Link>
+                )}
+
                 <Link to="/my-cases" className="block hover:text-blue-400" onClick={() => setShowMenu(false)}>📁 My Cases</Link>
 
-                {profile?.role ==="admin" && (
-                <Link to="/admin-dashboard" className="block hover:text-blue-400" onClick={() => setShowMenu(false)}>
-                  🛠 Admin Dashboard
-                </Link>
-              )}
+                {profile?.role === "admin" && (
+                  <Link to="/admin-dashboard" className="block hover:text-blue-400" onClick={() => setShowMenu(false)}>
+                    🛠 Admin Dashboard
+                  </Link>
+                )}
               </div>
             )}
   

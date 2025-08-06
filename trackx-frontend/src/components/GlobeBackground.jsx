@@ -7,7 +7,7 @@ function GlobeBackground({ interactive, globePoints }) {
   const globeInstanceRef = useRef(null);
   const navigate = useNavigate();
 
-  // Custom color constants
+ 
   const BLUE = "#1E40AF";
   const RED = "#B91C1C";
   const GREEN = "#059669";

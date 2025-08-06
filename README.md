@@ -7,6 +7,7 @@ TrackX is an advanced digital forensics platform that enables the triangulation 
 - Visualize movement on a Google Map.
 - Generate formal PDF reports including maps and officer notes.
 - Access visual dashboards for aggregated case data.
+- Watch route visualisations through the simulation. 
 
 ---
 

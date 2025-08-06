@@ -26,7 +26,7 @@ function WaitingRoomPage() {
           const userData = userDoc.data();
 
           if (userData.isApproved) {
-            navigate("/home"); // or dashboard
+            navigate("/home"); 
           } else {
             setError("You’re still waiting for approval.");
           }

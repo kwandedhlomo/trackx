@@ -3,10 +3,10 @@ from typing import Optional
 from datetime import datetime
 
 class Notification(BaseModel):
-    id: Optional[str] = None  # Firestore document ID
+    id: Optional[str] = None  
     title: str
     message: str
-    type: str  # e.g., "case-update", "system"
+    type: str  
     timestamp: datetime
     read: bool
 
