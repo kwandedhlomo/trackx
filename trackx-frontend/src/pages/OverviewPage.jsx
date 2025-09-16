@@ -459,7 +459,7 @@ function OverviewPage() {
         const caseData = JSON.parse(caseDataString);
         localStorage.setItem('trackxSimulationCaseId', caseData.id); 
       }
-      window.location.href = '/simulation';
+      window.open('/simulation', '_blank', 'noopener,noreferrer');
     } else {
       // For other report types or non-generated PDFs
       alert(`Downloading ${report.name}... (This is a mock action for non-PDF content)`);
