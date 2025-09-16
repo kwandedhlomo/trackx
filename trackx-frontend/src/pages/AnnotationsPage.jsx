@@ -6,6 +6,10 @@ import adflogo from "../assets/image-removebg-preview.png";
 import { useAuth } from "../context/AuthContext";
 import { signOut } from "firebase/auth";
 import { auth } from "../firebase";
+import axios from "axios";
+const API_BASE_URL = import.meta.env.VITE_API_URL;
+
+
 
 function AnnotationsPage() {
   const navigate = useNavigate();
@@ -48,6 +52,33 @@ function AnnotationsPage() {
     }
   };
 
+const generateAIDescription = async () => {
+  if (!caseDetails.caseId) {
+    console.error("No caseId found in caseDetails");
+    return;
+  }
+
+  const currentLocation = locations[currentIndex];
+  if (!currentLocation) return;
+
+  try {
+    const res = await axios.post(
+      `${API_BASE_URL}/cases/${caseDetails.caseId}/points/generate-description`,
+      {
+        lat: currentLocation.lat,
+        lng: currentLocation.lng,
+        timestamp: currentLocation.timestamp || new Date().toISOString(),
+        status: currentLocation.ignitionStatus || "Stopped",
+      }
+    );
+
+    updateAnnotation("description", res.data.description);
+  } catch (err) {
+    console.error("AI description generation failed:", err);
+  }
+};
+
+
   // Load case data from localStorage when component mounts
   useEffect(() => {
     setIsLoading(true);
@@ -70,8 +101,12 @@ function AnnotationsPage() {
         return;
       }
       
+
       // Store case details
+      console.log("Loaded caseData from localStorage:", caseData);
+
       setCaseDetails({
+        caseId: caseData.caseId || caseData.id || caseData.doc_id,
         caseNumber: caseData.caseNumber,
         caseTitle: caseData.caseTitle,
         dateOfIncident: caseData.dateOfIncident,
@@ -624,6 +659,12 @@ function AnnotationsPage() {
                   <label htmlFor="locationDescription" className="block text-sm font-medium text-gray-300 mb-1">
                     Description
                   </label>
+                  <button
+                    onClick={generateAIDescription}
+                    className="px-3 py-2 bg-purple-700 hover:bg-purple-600 rounded text-white text-sm"
+              >
+                    Generate AI Description
+                  </button>
                   <textarea
                     id="locationDescription"
                     placeholder="Provide details about the significance of this location..."

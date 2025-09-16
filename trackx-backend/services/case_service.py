@@ -16,7 +16,48 @@ from datetime import timedelta
 from datetime import timezone
 from datetime import datetime
 from services.notifications_service import add_notification  # Import the notifications service
+import os
+from openai import OpenAI
+from dotenv import load_dotenv
 
+load_dotenv()
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+async def generate_ai_description(lat, lng, timestamp, status="", snapshot=None):
+    """
+    Generate a forensic-style description for a GPS point.
+    Optionally uses a snapshot image if provided (base64).
+    """
+
+    # Build the prompt
+    prompt = (
+        f"You are a forensic investigator. Write a single concise paragraph describing the event.\n"
+        f"Focus only on the narrative description. Do not include headings, labels, or metadata.\n\n"
+        f"Location: ({lat}, {lng})\n"
+        f"Time: {timestamp}\n"
+        f"Status: {status}\n"
+    )
+    if snapshot:
+        prompt += "The snapshot image is provided (e.g., map or CCTV)."
+
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": "You describe vehicle movement and events in a forensic report style."},
+                {"role": "user", "content": prompt}
+            ],
+            max_tokens=100
+        )
+        description = response.choices[0].message.content.strip()
+        return description
+    
+    except Exception as e:
+        import traceback
+        traceback.print_exc()  # full stack trace in logs
+
+        # return explicit error message instead of silent fallback
+        return f"AI description unavailable. Error: {str(e)}"
 
 # SIMULATION_PROGRESS = {}
 logger = logging.getLogger(__name__)
@@ -744,3 +785,22 @@ async def fetch_last_points_per_case():
     except Exception as e:
         print(f"Error in fetch_last_points_per_case: {e}")
         return []
+
+def serialize_firestore_data(data: dict) -> dict:
+    """
+    Convert Firestore DatetimeWithNanoseconds and other non-JSON types.
+    """
+    from google.cloud.firestore_v1 import _helpers
+
+    def convert_value(value):
+        if isinstance(value, datetime):
+            return value.isoformat()
+        if isinstance(value, _helpers.DatetimeWithNanoseconds):
+            return value.isoformat()
+        if isinstance(value, dict):
+            return {k: convert_value(v) for k, v in value.items()}
+        if isinstance(value, list):
+            return [convert_value(v) for v in value]
+        return value
+
+    return {k: convert_value(v) for k, v in data.items()}

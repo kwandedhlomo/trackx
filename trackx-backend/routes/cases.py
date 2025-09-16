@@ -13,6 +13,21 @@ import csv
 import io
 from typing import Optional
 from firebase.firebase_config import db  
+from services.case_service import generate_ai_description
+from datetime import datetime
+from google.cloud.firestore_v1._helpers import DatetimeWithNanoseconds
+
+def serialize_firestore_data(data: dict) -> dict:
+    """Recursively convert Firestore timestamp objects into JSON-safe types."""
+    def convert(value):
+        if isinstance(value, (datetime, DatetimeWithNanoseconds)):
+            return value.isoformat()
+        if isinstance(value, dict):
+            return {k: convert(v) for k, v in value.items()}
+        if isinstance(value, list):
+            return [convert(v) for v in value]
+        return value
+    return convert(data)
 
 router = APIRouter()
 
@@ -37,7 +52,9 @@ async def search_cases_route(
         status=status,
         urgency=urgency,
     )
-    return {"cases": results}
+    #return {"cases": results}
+    cases_with_ids = [{"id": case.get("id"), **case} for case in results]
+    return {"cases": cases_with_ids}
 
 @router.post("/cases/create")
 async def create_case_route(case_request: CaseCreateRequest):
@@ -45,9 +62,24 @@ async def create_case_route(case_request: CaseCreateRequest):
     Accepts a new case submission with case info + CSV data in JSON.
     """
     try:
-        # Call the service to create the case
         new_case_id = await create_case(case_request)
-        return JSONResponse(content={"caseId": new_case_id})
+
+        # Fetch the created document back with its data
+        new_doc = db.collection("cases").document(new_case_id).get()
+        if new_doc.exists:
+            case_data = serialize_firestore_data(new_doc.to_dict())
+            return JSONResponse(content={
+                "id": new_case_id,
+                "caseId": new_case_id,   # alias
+                "doc_id": new_case_id,   # alias for older code
+                **case_data
+            })
+        else:
+            return JSONResponse(content={
+                "id": new_case_id,
+                "caseId": new_case_id,
+                "doc_id": new_case_id
+            })
 
     except Exception as e:
         print(f"Error in create_case_route: {str(e)}")
@@ -232,3 +264,37 @@ async def get_case_all_points(case_id: str):
     from services.case_service import fetch_all_points_for_case
     points = await fetch_all_points_for_case(case_id)
     return {"points": points}
+
+from services.case_service import generate_ai_description
+
+@router.post("/cases/{case_id}/points/generate-description")
+async def generate_description_route(case_id: str, request: Request):
+    """
+    Generate an AI description for a GPS point in a case.
+    Expects JSON body with lat, lng, timestamp, status, and optional snapshot.
+    """
+    try:
+        data = await request.json()
+        lat = data.get("lat")
+        lng = data.get("lng")
+        timestamp = data.get("timestamp") or datetime.utcnow().isoformat()
+        status = data.get("status", "")
+        snapshot = data.get("snapshot")  # optional base64 image
+
+        if not lat or not lng:
+            raise HTTPException(status_code=400, detail="lat and lng.")
+
+        description = await generate_ai_description(
+            lat=lat,
+            lng=lng,
+            timestamp=timestamp,
+            status=status,
+            snapshot=snapshot
+        )
+
+        return JSONResponse(content={"description": description})
+
+    except Exception as e:
+        print(f"Error generating AI description: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to generate AI description.")
+

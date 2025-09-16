@@ -528,7 +528,7 @@ Please ensure your PDF contains GPS coordinates in one of these formats:
         // Save full case info to localStorage including Firestore ID
   //  Capture caseId from response
         const caseData = {
-          caseId: response.data.caseId,
+          caseId: firestoreDocId,
           caseNumber,
           caseTitle,
           dateOfIncident,
@@ -838,7 +838,7 @@ Please ensure your PDF contains GPS coordinates in one of these formats:
     const previous = JSON.parse(localStorage.getItem('trackxCaseData')) || {};
 
     const caseData = {
-      caseId: previous.caseId || null, 
+      caseId: previous.caseId || previous.id || null, 
       caseNumber,
       caseTitle,
       dateOfIncident,
