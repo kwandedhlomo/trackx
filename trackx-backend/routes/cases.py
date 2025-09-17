@@ -13,6 +13,9 @@ import csv
 import io
 from typing import Optional
 from firebase.firebase_config import db  
+from datetime import datetime
+from services.case_service import generate_ai_description
+
 
 router = APIRouter()
 
@@ -232,3 +235,42 @@ async def get_case_all_points(case_id: str):
     from services.case_service import fetch_all_points_for_case
     points = await fetch_all_points_for_case(case_id)
     return {"points": points}
+
+@router.post("/cases/{case_id}/points/generate-description")
+async def generate_description_route(case_id: str, request: Request):
+    """
+    Generate an AI description for a GPS point in a case.
+    Body expects:
+      {
+        "lat": <number>,
+        "lng": <number>,
+        "timestamp": <string ISO or freeform> (optional),
+        "status": <string> (optional),
+        "snapshot": <dataURL or base64 image> (optional)
+      }
+    Returns: {"description": "<AI text>"}
+    """
+    try:
+        data = await request.json()
+        lat = data.get("lat")
+        lng = data.get("lng")
+        timestamp = data.get("timestamp") or datetime.utcnow().isoformat()
+        status = data.get("status", "")
+        snapshot = data.get("snapshot")  # optional (data URL/base64)
+
+        if lat is None or lng is None:
+            raise HTTPException(status_code=400, detail="lat and lng required.")
+
+        description = await generate_ai_description(
+            lat=lat,
+            lng=lng,
+            timestamp=timestamp,
+            status=status,
+            snapshot=snapshot,
+        )
+
+        return JSONResponse(content={"description": description})
+
+    except Exception as e:
+        print(f"Error generating AI description: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to generate AI description.")
