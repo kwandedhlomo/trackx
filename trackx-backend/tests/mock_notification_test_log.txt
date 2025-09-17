@@ -1,0 +1,4 @@
+test_create_notification | Tests POST /notifications/{user_id} to create a notification | Integration | PASS
+test_get_notifications | Tests GET /{user_id} to fetch paginated notifications | Integration | PASS
+test_update_notification_status | Tests PATCH /{user_id}/{notification_id} to mark notification as read | Integration | PASS
+test_update_notification_status_not_found | Tests PATCH /{user_id}/{notification_id} with invalid ID | Edge | PASS

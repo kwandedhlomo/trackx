@@ -1,0 +1,4 @@
+"model": {
+    "gltf": "http://localhost:5173/models/CesiumTruck.glb",  # 👈 Adjust name/path
+    "scale": 1.5
+}
