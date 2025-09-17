@@ -16,6 +16,13 @@ from datetime import timedelta
 from datetime import timezone
 from datetime import datetime
 from services.notifications_service import add_notification  # Import the notifications service
+import os
+from dotenv import load_dotenv
+from openai import OpenAI
+
+load_dotenv()  # loads OPENAI_API_KEY from .env (safe in dev)
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
 
 
 # SIMULATION_PROGRESS = {}
@@ -744,3 +751,45 @@ async def fetch_last_points_per_case():
     except Exception as e:
         print(f"Error in fetch_last_points_per_case: {e}")
         return []
+
+async def generate_ai_description(lat, lng, timestamp, status: str = "", snapshot: str | None = None) -> str:
+    """
+    Generate a concise forensic-style narrative for a GPS point.
+    - lat, lng: numbers
+    - timestamp: ISO string (or any string you pass through)
+    - status: optional status like Stopped/Idle/Moving
+    - snapshot: optional base64/dataURL image (not analyzed here; kept for future)
+    Returns text. On failure, returns a user-facing error string (so UI doesn't crash).
+    """
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        return "AI description unavailable. Missing OPENAI_API_KEY on the server."
+
+    # Build a short, focused prompt
+    prompt = (
+        "You are a forensic investigator. Write one concise paragraph describing the event at the given "
+        "time and location. Keep it factual, neutral, and suitable for a formal report. "
+        "Do not include headings or labels; just the paragraph.\n\n"
+        f"Location: ({lat}, {lng})\n"
+        f"Time: {timestamp}\n"
+        f"Status: {status or 'Unknown'}\n"
+    )
+    if snapshot:
+        # Reserved for future: could hint there is visual context
+        prompt += "A snapshot image is associated with this point."
+
+    try:
+        resp = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": "You describe vehicle movement and events in a forensic report style."},
+                {"role": "user", "content": prompt},
+            ],
+            max_tokens=120,
+            temperature=0.2,
+        )
+        text = (resp.choices[0].message.content or "").strip()
+        return text or "No description generated."
+    except Exception as e:
+        # Don’t explode the route—return a friendly message the UI can show
+        return f"AI description unavailable. Error: {str(e)}"

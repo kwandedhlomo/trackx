@@ -5,7 +5,7 @@ import * as Cesium from "cesium";
 import { Pencil, Trash2 } from "lucide-react";
 import "../css/Sidebar.css";
 
-export default function SimulationSidebar({ viewerRef }) {
+export default function SimulationSidebar({ viewerRef, disabled = false }) {
   const [collapsed, setCollapsed] = useState(false);
   const [activeIndex, setActiveIndex] = useState(null);
   const [flaggedPoints, setFlaggedPoints] = useState([]);
@@ -127,6 +127,7 @@ export default function SimulationSidebar({ viewerRef }) {
 
             {/* Scrollable Point Items */}
             <div
+              aria-disabled={disabled}
               style={{
                 display: "flex",
                 flexDirection: "column",
@@ -135,18 +136,27 @@ export default function SimulationSidebar({ viewerRef }) {
                 maxHeight: "60vh",
                 overflowY: "auto",
                 paddingRight: "6px",
+                pointerEvents: disabled ? "none" : "auto",  // ← block clicks while preparing
+                opacity: disabled ? 0.5 : 1,               // ← grey it out
+                filter: disabled ? "grayscale(60%)" : "none",
               }}
             >
               {flaggedPoints.length === 0 ? (
-                <p style={{ color: "#94a3b8", fontSize: "0.85rem" }}>No flagged points yet.</p>
+                <p style={{ color: "#94a3b8", fontSize: "0.85rem" }}>
+                  No flagged points yet.
+                </p>
               ) : (
                 flaggedPoints.map((point, idx) => (
                   <div
                     key={point.id}
                     onClick={() => {
+                      if (disabled) return; // ← belt & braces guard
                       if (!viewerRef?.current?.cesiumElement || !point.timestamp) return;
+
                       const viewer = viewerRef.current.cesiumElement;
-                      const cesiumTime = Cesium.JulianDate.fromDate(new Date(point.timestamp.seconds * 1000));
+                      const cesiumTime = Cesium.JulianDate.fromDate(
+                        new Date(point.timestamp.seconds * 1000)
+                      );
                       viewer.clock.currentTime = cesiumTime;
                       viewer.clock.shouldAnimate = false;
                       setActiveIndex(idx);
@@ -173,7 +183,7 @@ export default function SimulationSidebar({ viewerRef }) {
                           ? "0 0 8px rgba(255,255,255,0.4)"
                           : "inset 0 0 0 1px rgba(255,255,255,0.05)",
                       position: "relative",
-                      cursor: "pointer",
+                      cursor: disabled ? "default" : "pointer",
                     }}
                   >
                     {/* Dot Marker */}
@@ -192,10 +202,28 @@ export default function SimulationSidebar({ viewerRef }) {
                     />
 
                     <div>
-                      <p style={{ fontWeight: "600", fontSize: "0.95rem", color: "#38bdf8", wordWrap: "break-word", whiteSpace: "normal", maxWidth: "220px" }}>
+                      <p
+                        style={{
+                          fontWeight: "600",
+                          fontSize: "0.95rem",
+                          color: "#38bdf8",
+                          wordWrap: "break-word",
+                          whiteSpace: "normal",
+                          maxWidth: "220px",
+                        }}
+                      >
                         {point.title || "Untitled"}
                       </p>
-                      <p style={{ fontSize: "0.85rem", marginTop: "2px", color: "#cbd5e1", wordWrap: "break-word", whiteSpace: "normal", maxWidth: "220px" }}>
+                      <p
+                        style={{
+                          fontSize: "0.85rem",
+                          marginTop: "2px",
+                          color: "#cbd5e1",
+                          wordWrap: "break-word",
+                          whiteSpace: "normal",
+                          maxWidth: "220px",
+                        }}
+                      >
                         {point.note || "(no note)"}
                       </p>
                       {point.timestamp && (
@@ -235,6 +263,7 @@ export default function SimulationSidebar({ viewerRef }) {
                 ))
               )}
             </div>
+
           </div>
         </>
       )}

@@ -1,1 +1,5 @@
 node_modules/
+
+# Secrets
+trackx-backend/.env
+trackx-backend/gcp-service-account.json
