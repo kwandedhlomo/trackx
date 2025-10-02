@@ -8,7 +8,7 @@ import { useAuth } from "../context/AuthContext";
 import { signOut } from "firebase/auth";
 import { auth } from "../firebase";
 import FirebaseStatus from "../components/FirebaseStatus";
-
+import axios from "axios";
 // ---- DOCX + save-as ----
 import { Document, Packer, Paragraph, TextRun, HeadingLevel, ImageRun } from "docx";
 import { saveAs } from "file-saver";
@@ -34,9 +34,6 @@ import {
 
 // Optional (not used directly for embedding but left for completeness)
 const GOOGLE_MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
-
-
-
 
 // ---------- Google OAuth script loader ----------
 let gsiScriptPromise = null;
@@ -276,6 +273,10 @@ function OverviewPage() {
   // Evidence & Technical Terms
   const [evidenceItems, setEvidenceItems] = useState([]);
   const [technicalTerms, setTechnicalTerms] = useState([]);
+
+  //Intro & Conclusions states
+  const [intro, setIntro] = useState("");
+  const [conclusion, setConclusion] = useState("");
 
   // --- helpers ---
   const formatDateForDisplay = (dateInput) => {
@@ -1091,6 +1092,44 @@ const generateDOCX = async () => {
     ...generatedReports,
   ];
 
+const[loadingIntro, setLoadingIntro] = useState(false);
+const [loadingConclusion, setLoadingConclusion] = useState(false);
+
+
+// Function to call backend for AI Intro
+const handleGenerateIntro = async () => {
+  if (!currentCaseId) return;
+  try {
+    setLoadingIntro(true);
+    const res = await axios.post(`${API_BASE}/cases/${currentCaseId}/ai-intro`, {
+      // optional context payload if you want; currently backend reads from Firestore
+    });
+    const intro = res.data.reportIntro || "";
+    setReportIntro(intro);
+    await saveData({ reportIntro: intro }); // save immediately (to Firebase/local)
+  } catch (err) {
+    console.error("Error generating intro:", err);
+  } finally {
+    setLoadingIntro(false);
+  }
+};
+
+const handleGenerateConclusion = async () => {
+  if (!currentCaseId) return;
+  try {
+    setLoadingConclusion(true);
+    const res = await axios.post(`${API_BASE}/cases/${currentCaseId}/ai-conclusion`);
+    const conclusion = res.data.reportConclusion || "";
+    setReportConclusion(conclusion);
+    await saveData({ reportConclusion: conclusion });
+  } catch (err) {
+    console.error("Error generating conclusion:", err);
+  } finally {
+    setLoadingConclusion(false);
+  }
+};
+
+
   // --- loading & error ---
   if (isLoading) {
     return (
@@ -1270,6 +1309,13 @@ const generateDOCX = async () => {
             onBlur={() => saveToLocalStorage()}
             className="w-full h-32 p-3 rounded bg-gray-900 text-white border border-gray-700 resize-none focus:border-blue-500 focus:ring focus:ring-blue-500 focus:ring-opacity-50"
           />
+            <button
+    onClick={handleGenerateIntro}
+    disabled={loadingIntro}
+    className="mt-3 px-4 py-2 bg-purple-600 hover:bg-purple-700 rounded text-white text-sm"
+  >
+    {loadingIntro ? "Generating..." : "Generate AI Intro"}
+  </button>
         </div>
 
         {/* Report Evidence */}
@@ -1337,6 +1383,13 @@ const generateDOCX = async () => {
             onBlur={() => saveToLocalStorage()}
             className="w-full h-32 p-3 rounded bg-gray-900 text-white border border-gray-700 resize-none focus:border-blue-500 focus:ring focus:ring-blue-500 focus:ring-opacity-50"
           />
+            <button
+    onClick={handleGenerateConclusion}
+    disabled={loadingConclusion}
+    className="mt-3 px-4 py-2 bg-purple-600 hover:bg-purple-700 rounded text-white text-sm"
+  >
+    {loadingConclusion ? "Generating..." : "Generate AI Conclusion"}
+  </button>
         </div>
 
         {/* Save bar */}

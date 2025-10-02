@@ -1,5 +1,5 @@
 from firebase.firebase_config import db
-from google.cloud.firestore_v1 import DocumentReference
+from google.cloud.firestore_v1 import DocumentReference, SERVER_TIMESTAMP
 from google.api_core.datetime_helpers import DatetimeWithNanoseconds
 from google.cloud.firestore_v1 import SERVER_TIMESTAMP
 from models.case_model import CaseCreateRequest
@@ -19,11 +19,15 @@ from services.notifications_service import add_notification  # Import the notifi
 import os
 from dotenv import load_dotenv
 from openai import OpenAI
+from firebase_admin import firestore
+from firebase_admin.firestore import SERVER_TIMESTAMP
+import logging
+
+logger = logging.getLogger(__name__)
 
 load_dotenv()  # loads OPENAI_API_KEY from .env (safe in dev)
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-
-
+db = firestore.client()
 
 # SIMULATION_PROGRESS = {}
 logger = logging.getLogger(__name__)
@@ -40,6 +44,176 @@ def sanitize_firestore_data(data):
         else:
             clean[key] = str(value)
     return clean
+from firebase_admin import firestore
+from firebase_admin.firestore import SERVER_TIMESTAMP
+from openai import OpenAI
+
+client = OpenAI()
+db = firestore.client()
+
+# Helper: collect annotation descriptions from likely subcollections
+async def fetch_annotation_descriptions(case_id: str) -> list:
+    """
+    Tries multiple subcollection names and pulls text-like fields.
+    Returns a list of descriptions (strings), de-duped and filtered.
+    """
+    doc_ref = db.collection("cases").document(case_id)
+    candidate_subcollections = [
+        "locations", "annotations", "locationAnnotations", "points", "allPoints", "notes"
+    ]
+    descriptions = []
+    for col in candidate_subcollections:
+        try:
+            coll_ref = doc_ref.collection(col)
+            docs = list(coll_ref.stream())
+            for d in docs:
+                data = d.to_dict() or {}
+                # common keys where human text might live
+                for k in ("description", "annotation", "notes", "note", "text", "descriptionText"):
+                    v = data.get(k)
+                    if v and isinstance(v, str) and v.strip():
+                        descriptions.append(v.strip())
+        except Exception as e:
+            logger.debug(f"Could not read subcollection {col} for case {case_id}: {e}")
+    # also check top-level fields on the case doc
+    try:
+        case_doc = doc_ref.get()
+        if case_doc.exists:
+            case_data = case_doc.to_dict() or {}
+            for k in ("reportNotes", "annotations", "locationDescriptions"):
+                v = case_data.get(k)
+                if isinstance(v, str) and v.strip():
+                    descriptions.append(v.strip())
+                # if it's a list of strings:
+                if isinstance(v, list):
+                    descriptions.extend([str(x).strip() for x in v if isinstance(x, str) and x.strip()])
+    except Exception:
+        pass
+
+    # de-dup while preserving order
+    seen = set()
+    out = []
+    for t in descriptions:
+        if t not in seen:
+            seen.add(t)
+            out.append(t)
+    return out
+
+# --- AI generation helpers (improved prompts) ---
+
+async def generate_case_intro(case_title: str, region: str, date: str) -> str:
+    """
+    Produce a single concise paragraph suitable for a forensic report introduction.
+    Explicit instructions prevent the model from producing headers or inventing details.
+    """
+    # Build a short factual context string (only include if present)
+    facts = []
+    if case_title: facts.append(f"case title: {case_title}")
+    if region: facts.append(f"region: {region}")
+    if date: facts.append(f"date: {date}")
+    facts_str = "; ".join(facts) if facts else "No case metadata provided."
+
+    prompt = (
+        "You are a forensic analyst. Write ONE concise paragraph (2–4 sentences) suitable as the "
+        "introduction to a formal forensic report. **Important**: "
+        "1) Output only the paragraph — do NOT include a title, headings, or separate lines for Date/Location/Case Title. "
+        "2) Do NOT invent facts or make definitive claims about specific forensic test results unless they are explicitly provided. "
+        "3) Be neutral and factual. "
+        f"Context: {facts_str}"
+    )
+
+    resp = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[
+            {"role": "system", "content": "You are a forensic analyst writing concise, formal introductions."},
+            {"role": "user", "content": prompt}
+        ],
+        max_tokens=250,
+        temperature=0.15,
+    )
+    return (resp.choices[0].message.content or "").strip()
+
+
+async def generate_case_conclusion(case_title: str, region: str, intro_text: str, annotation_texts: list, evidence_items: list) -> str:
+    """
+    Strict evidence-driven conclusion: summarises annotations + evidenceItems + intro.
+    Will not invent facts; will be cautious if evidence is limited.
+    """
+
+    # Prepare annotation block
+    if annotation_texts:
+        ann_lines = [f"{i+1}. {t}" for i, t in enumerate(annotation_texts)]
+        annotation_block = "\n".join(ann_lines)
+    else:
+        annotation_block = "No annotation descriptions available."
+
+    # Prepare evidence block
+    if evidence_items:
+        ev_lines = [f"{i+1}. {e}" for i, e in enumerate(evidence_items)]
+        evidence_block = "\n".join(ev_lines)
+    else:
+        evidence_block = "No explicit evidence items recorded."
+
+    prompt = (
+        "You are a forensic analyst. Compose a single concise conclusion paragraph (2–4 sentences) that "
+        "summarizes only the evidence provided below. **Do NOT invent new facts**, and do not attribute "
+        "specific laboratory results unless they appear in the evidence. If the evidence is limited or inconclusive, "
+        "explicitly say so and recommend further investigation.\n\n"
+        f"INTRODUCTION (for context):\n{intro_text or '(none)'}\n\n"
+        f"ANNOTATION DESCRIPTIONS:\n{annotation_block}\n\n"
+        f"EVIDENCE ITEMS:\n{evidence_block}\n\n"
+        "Output: one paragraph only."
+    )
+
+    resp = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[
+            {"role": "system", "content": "You are a forensic analyst writing clear, objective conclusions."},
+            {"role": "user", "content": prompt}
+        ],
+        max_tokens=300,
+        temperature=0.15,
+    )
+    return (resp.choices[0].message.content or "").strip()
+
+# --- Combined helper that creates both and stores to Firestore with aligned keys ---
+async def add_intro_conclusion(case_id: str):
+    doc_ref = db.collection("cases").document(case_id)
+    doc = doc_ref.get()
+    if not doc.exists:
+        return False, "Case not found"
+
+    case = doc.to_dict() or {}
+    # fetch annotation descriptions (robust)
+    annotation_texts = await fetch_annotation_descriptions(case_id)
+
+    # include evidenceItems array as well (if any)
+    evidence_items = case.get("evidenceItems", [])
+    combined_evidence = annotation_texts + evidence_items
+
+    # create intro
+    intro = await generate_case_intro(
+        case.get("caseTitle", "") or "",
+        case.get("region", "") or "",
+        case.get("dateOfIncident", "") or ""
+    )
+
+    # create conclusion based strictly on intro + annotations
+    conclusion = await generate_case_conclusion(
+        case.get("caseTitle", "") or "",
+        case.get("region", "") or "",
+        intro,
+        combined_evidence
+    )
+
+    # store using the keys the frontend expects
+    doc_ref.update({
+        "reportIntro": intro,
+        "reportConclusion": conclusion,
+        "updatedAt": SERVER_TIMESTAMP
+    })
+
+    return True, {"reportIntro": intro, "reportConclusion": conclusion}
 
 async def search_cases(case_name: str = "", region: str = "", date: str = "", user_id: str = "", status: str = "", urgency: str = ""):
     try:
