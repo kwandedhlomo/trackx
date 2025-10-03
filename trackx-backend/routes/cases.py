@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Query, HTTPException, Body, Form, UploadFile, File, Request
+from fastapi import APIRouter, Query, HTTPException, Body, Form, UploadFile, File, Request, FastAPI
 from services.case_service import search_cases
 from services.case_service import update_case
 from services.case_service import delete_case
@@ -15,10 +15,62 @@ from typing import Optional
 from firebase.firebase_config import db  
 from datetime import datetime
 from services.case_service import generate_ai_description
+from fastapi.middleware.cors import CORSMiddleware
+from firebase_admin import firestore
+from services.case_service import add_intro_conclusion  # Import your AI service function
+from services.case_service import generate_case_intro, generate_case_conclusion, fetch_annotation_descriptions, add_intro_conclusion
+from firebase.firebase_config import db
+from google.cloud.firestore_v1 import SERVER_TIMESTAMP
 
+db = firestore.client()
 
 router = APIRouter()
 
+@router.post("/cases/{case_id}/ai-intro")
+async def ai_intro(case_id: str):
+    doc_ref = db.collection("cases").document(case_id)
+    doc = doc_ref.get()
+    if not doc.exists:
+        raise HTTPException(status_code=404, detail="Case not found")
+
+    case = doc.to_dict() or {}
+    intro = await generate_case_intro(case.get("caseTitle", ""), case.get("region", ""), case.get("dateOfIncident", ""))
+    # update Firestore (use frontend-friendly keys)
+    doc_ref.update({"reportIntro": intro, "updatedAt": SERVER_TIMESTAMP})
+    return JSONResponse({"reportIntro": intro})
+
+@router.post("/cases/{case_id}/ai-conclusion")
+async def ai_conclusion(case_id: str):
+    doc_ref = db.collection("cases").document(case_id)
+    doc = doc_ref.get()
+    if not doc.exists:
+        raise HTTPException(status_code=404, detail="Case not found")
+
+    case = doc.to_dict() or {}
+
+    # fetch annotations and evidence
+    annotation_texts = await fetch_annotation_descriptions(case_id)
+    evidence_items = case.get("evidenceItems", [])
+
+    # intro text can come from saved intro or blank
+    intro_text = case.get("reportIntro") or case.get("intro") or ""
+
+    # pass both annotations + evidence
+    conclusion = await generate_case_conclusion(
+        case.get("caseTitle", ""),
+        case.get("region", ""),
+        intro_text,
+        annotation_texts,
+        evidence_items
+    )
+
+    # update Firestore (frontend-friendly)
+    doc_ref.update({
+        "reportConclusion": conclusion,
+        "updatedAt": SERVER_TIMESTAMP
+    })
+
+    return JSONResponse({"reportConclusion": conclusion})
 
 @router.get("/cases/search")
 async def search_cases_route(
