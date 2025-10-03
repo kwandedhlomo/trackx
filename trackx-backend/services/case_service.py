@@ -19,6 +19,7 @@ from services.notifications_service import add_notification  # Import the notifi
 import os
 from dotenv import load_dotenv
 from openai import OpenAI
+from typing import Optional
 
 load_dotenv()  # loads OPENAI_API_KEY from .env (safe in dev)
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
@@ -752,7 +753,7 @@ async def fetch_last_points_per_case():
         print(f"Error in fetch_last_points_per_case: {e}")
         return []
 
-async def generate_ai_description(lat, lng, timestamp, status: str = "", snapshot: str | None = None) -> str:
+async def generate_ai_description(lat, lng, timestamp, status: str = "", snapshot: Optional[str] = None) -> str:
     """
     Generate a concise forensic-style narrative for a GPS point.
     - lat, lng: numbers

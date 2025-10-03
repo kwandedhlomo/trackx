@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
-import { Upload, Info, CheckCircle, AlertCircle, FileText } from "lucide-react";
+import { Upload, Info, CheckCircle, AlertCircle, FileText, Shield, AlertTriangle } from "lucide-react";
 import Papa from "papaparse";
 import adflogo from "../assets/image-removebg-preview.png";
 import axios from "axios";
@@ -12,15 +12,251 @@ import { db } from "../firebase";
 import { doc, collection, writeBatch, serverTimestamp } from "firebase/firestore";
 import { clearCaseSession } from "../utils/caseSession";
 
-
-
-// Firebase services
-import { saveCaseWithAnnotations, getCurrentUserId } from "../services/firebaseServices";
-
 // Dynamic PDF.js import to ensure version compatibility
 let pdfjsLib = null;
 
-// Initialize PDF.js (resilient loader)
+// Security configuration
+const SECURITY_CONFIG = {
+  maxFileSize: 10 * 1024 * 1024, // 10MB
+  allowedMimeTypes: [
+    'text/csv',
+    'text/plain',
+    'application/vnd.ms-excel',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    'application/pdf'
+  ],
+  allowedExtensions: ['.csv', '.xls', '.xlsx', '.pdf'],
+  maliciousPatterns: [
+    /<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi,
+    /javascript:/gi,
+    /vbscript:/gi,
+    /onload\s*=/gi,
+    /onerror\s*=/gi,
+    /eval\s*\(/gi,
+    /document\.write/gi,
+    /innerHTML/gi,
+    /<\?php/gi,
+    /<%/gi,
+    /<asp:/gi,
+    /cmd\.exe/gi,
+    /powershell/gi,
+    /system\(/gi,
+    /exec\(/gi
+  ]
+};
+
+// Security Scanner Class
+class FileSecurityScanner {
+  constructor() {
+    this.config = SECURITY_CONFIG;
+  }
+
+  // Main security scan function
+  async scanFile(file) {
+    const results = {
+      safe: true,
+      threats: [],
+      warnings: [],
+      fileHash: null,
+      scanResults: {}
+    };
+
+    try {
+      // File size check
+      if (file.size > this.config.maxFileSize) {
+        results.safe = false;
+        results.threats.push(`File size ${this.formatFileSize(file.size)} exceeds limit of ${this.formatFileSize(this.config.maxFileSize)}`);
+      }
+
+      // File extension check
+      const fileExtension = file.name.toLowerCase().substring(file.name.lastIndexOf('.'));
+      if (!this.config.allowedExtensions.includes(fileExtension)) {
+        results.safe = false;
+        results.threats.push(`File extension '${fileExtension}' is not allowed`);
+      }
+
+      // MIME type check (basic - browser-provided)
+      if (!this.config.allowedMimeTypes.includes(file.type)) {
+        results.warnings.push(`MIME type '${file.type}' may not be supported`);
+      }
+
+      // Generate file hash for tracking
+      results.fileHash = await this.generateFileHash(file);
+
+      // Content-based scanning
+      const contentScan = await this.scanFileContent(file);
+      results.scanResults.contentScan = contentScan;
+      
+      if (!contentScan.safe) {
+        results.safe = false;
+        results.threats.push(...contentScan.threats);
+      }
+
+      // Additional checks for specific file types
+      if (fileExtension === '.pdf') {
+        const pdfScan = await this.scanPDFStructure(file);
+        results.scanResults.pdfScan = pdfScan;
+        if (!pdfScan.safe) {
+          results.safe = false;
+          results.threats.push(...pdfScan.threats);
+        }
+      }
+
+      // Final risk assessment
+      results.riskLevel = this.assessRiskLevel(results);
+
+    } catch (error) {
+      results.safe = false;
+      results.threats.push(`Security scan failed: ${error.message}`);
+    }
+
+    return results;
+  }
+
+  // Generate SHA-256 hash of file
+  async generateFileHash(file) {
+    try {
+      const buffer = await file.arrayBuffer();
+      const hashBuffer = await crypto.subtle.digest('SHA-256', buffer);
+      const hashArray = Array.from(new Uint8Array(hashBuffer));
+      return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+    } catch (error) {
+      console.warn('Could not generate file hash:', error);
+      return null;
+    }
+  }
+
+  // Scan file content for malicious patterns
+  async scanFileContent(file) {
+    const results = {
+      safe: true,
+      threats: [],
+      patternsFound: []
+    };
+
+    try {
+      // Read file content as text (will work for CSV, PDF metadata, etc.)
+      const fileContent = await this.readFileAsText(file);
+      
+      // Check for null bytes (indicates binary content in text files)
+      if (file.type.startsWith('text/') && fileContent.includes('\x00')) {
+        results.safe = false;
+        results.threats.push('File contains binary data but has text MIME type');
+      }
+
+      // Scan for malicious patterns
+      for (const pattern of this.config.maliciousPatterns) {
+        if (pattern.test(fileContent)) {
+          results.safe = false;
+          const patternStr = pattern.toString().slice(1, -3); // Remove regex delimiters
+          results.threats.push(`Potentially malicious pattern detected: ${patternStr}`);
+          results.patternsFound.push(patternStr);
+        }
+      }
+
+      // Check for suspicious file structure
+      if (fileContent.length > 0) {
+        // Look for embedded executables
+        if (fileContent.includes('MZ') || fileContent.includes('PK')) {
+          results.threats.push('File may contain embedded executable content');
+          results.safe = false;
+        }
+
+        // Check for unusual encoding
+        const suspiciousEncoding = /\\x[0-9a-fA-F]{2}|\\u[0-9a-fA-F]{4}|%[0-9a-fA-F]{2}/g;
+        if (suspiciousEncoding.test(fileContent)) {
+          results.threats.push('File contains suspicious encoded content');
+          results.safe = false;
+        }
+      }
+
+    } catch (error) {
+      console.warn('Content scan error:', error);
+      // Don't fail security check just because we couldn't read content
+    }
+
+    return results;
+  }
+
+  // PDF-specific security checks
+  async scanPDFStructure(file) {
+    const results = {
+      safe: true,
+      threats: [],
+      metadata: {}
+    };
+
+    try {
+      const buffer = await file.arrayBuffer();
+      const content = new TextDecoder().decode(buffer);
+
+      // Check PDF header
+      if (!content.startsWith('%PDF-')) {
+        results.safe = false;
+        results.threats.push('Invalid PDF header - file may be corrupted or malicious');
+      }
+
+      // Look for suspicious PDF features
+      const suspiciousFeatures = [
+        '/JavaScript',
+        '/JS',
+        '/Launch',
+        '/SubmitForm',
+        '/ImportData',
+        '/ExportData',
+        '/Movie',
+        '/Sound',
+        '/EmbeddedFile'
+      ];
+
+      for (const feature of suspiciousFeatures) {
+        if (content.includes(feature)) {
+          results.threats.push(`PDF contains potentially dangerous feature: ${feature}`);
+          results.safe = false;
+        }
+      }
+
+      // Check for encrypted PDFs
+      if (content.includes('/Encrypt')) {
+        results.threats.push('PDF is encrypted/password protected');
+        results.safe = false;
+      }
+
+    } catch (error) {
+      console.warn('PDF structure scan error:', error);
+    }
+
+    return results;
+  }
+
+  // Helper method to read file as text
+  async readFileAsText(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = () => reject(reader.error);
+      reader.readAsText(file.slice(0, 50000)); // Read first 50KB for pattern detection
+    });
+  }
+
+  // Assess overall risk level
+  assessRiskLevel(results) {
+    if (!results.safe) return 'HIGH';
+    if (results.warnings.length > 0) return 'MEDIUM';
+    return 'LOW';
+  }
+
+  // Format file size
+  formatFileSize(bytes) {
+    if (bytes === 0) return '0 Bytes';
+    const k = 1024;
+    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+  }
+}
+
+// Initialize PDF.js
 const initPDFJS = async () => {
   if (!pdfjsLib) {
     try {
@@ -78,13 +314,20 @@ function NewCasePage() {
   const [showGuide, setShowGuide] = useState(false);
   const [fileType, setFileType] = useState(null);
   const [showMenu, setShowMenu] = useState(false);
+  
+  // Security state
+  const [isScanning, setIsScanning] = useState(false);
+  const [securityResults, setSecurityResults] = useState(null);
+  const [showSecurityDetails, setShowSecurityDetails] = useState(false);
+
+  // Initialize security scanner
+  const securityScanner = new FileSecurityScanner();
 
   useEffect(() => {
-    clearCaseSession();   // ✅ guarantees a clean slate when user lands on /new-case
+    clearCaseSession();
   }, []);
-  
 
-    // minimal mirror writer (no cross-deps on firebaseServices.js)
+  // minimal mirror writer
   async function upsertFirebaseMirror(caseId, mirror) {
     const caseRef = doc(db, "cases", caseId);
     const batch = writeBatch(db);
@@ -101,31 +344,25 @@ function NewCasePage() {
       reportIntro: mirror.reportIntro || "",
       reportConclusion: mirror.reportConclusion || "",
       selectedForReport: mirror.selectedForReport || [],
-      // keep legacy mirrors so old readers don't break; safe to remove after migration
       title: mirror.caseTitle,
       date: mirror.dateOfIncident ? new Date(mirror.dateOfIncident) : new Date(),
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     }, { merge: true });
 
-    // also fan-out locations into a subcollection the Annotations page can read
     const locs = mirror.locations || [];
     locs.forEach((loc, idx) => {
       const locRef = doc(collection(db, "cases", caseId, "locations"), `location_${idx}`);
       batch.set(locRef, {
         locationId: `location_${idx}`,
-        // store raw numbers to avoid GeoPoint coupling (Annotations code reads lat/lng directly)
         lat: Number(loc.lat),
         lng: Number(loc.lng),
         order: idx,
-        // user-editable fields start blank
         title: mirror.locationTitles?.[idx] || "",
         description: "",
-        // metadata the UI shows
         timestamp: loc.timestamp || null,
         ignitionStatus: loc.ignitionStatus || "Unknown",
         address: loc.address || null,
-        // keep original for “View original data”
         originalData: {
           csvDescription: loc.description || null,
           rawData: loc.rawData || null,
@@ -308,12 +545,12 @@ function NewCasePage() {
   const extractTimestamps = (text) => {
     const timestamps = [];
     const patterns = [
-      /\b\d{4}[/-]\d{2}[/-]\d{2}[,\s]+\d{2}:\d{2}:\d{2}\b/g, // YYYY-MM-DD HH:MM:SS
-      /\b\d{2}[/-]\d{2}[/-]\d{4}[,\s]+\d{2}:\d{2}:\d{2}\b/g, // DD/MM/YYYY HH:MM:SS
-      /\b\d{2}:\d{2}:\d{2}\b/g, // HH:MM:SS
-      /\b\d{2}:\d{2}\b/g, // HH:MM
-      /Time[:\s]+(\d{2}:\d{2}(?::\d{2})?)/gi, // “Time: 12:34”
-      /\b\d{4}\/\d{2}\/\d{2}\b/g, // YYYY/MM/DD
+      /\b\d{4}[/-]\d{2}[/-]\d{2}[,\s]+\d{2}:\d{2}:\d{2}\b/g,
+      /\b\d{2}[/-]\d{2}[/-]\d{4}[,\s]+\d{2}:\d{2}:\d{2}\b/g,
+      /\b\d{2}:\d{2}:\d{2}\b/g,
+      /\b\d{2}:\d{2}\b/g,
+      /Time[:\s]+(\d{2}:\d{2}(?::\d{2})?)/gi,
+      /\b\d{4}\/\d{2}\/\d{2}\b/g,
     ];
 
     patterns.forEach((pattern) => {
@@ -445,14 +682,14 @@ function NewCasePage() {
 Detected text sample: "${fullText.substring(0, 200)}..."
 
 The PDF may contain:
-• Scanned images instead of text
-• Coordinates in an unsupported format
-• No GPS coordinate data
+- Scanned images instead of text
+- Coordinates in an unsupported format
+- No GPS coordinate data
 
 Please ensure your PDF contains GPS coordinates in one of these formats:
-• Decimal: -33.918861, 18.423300
-• Labeled: Latitude: -33.918861, Longitude: 18.423300
-• DMS: 33°55'07.9"S 18°25'23.9"E`
+- Decimal: -33.918861, 18.423300
+- Labeled: Latitude: -33.918861, Longitude: 18.423300
+- DMS: 33°55'07.9"S 18°25'23.9"E`
           );
           setParsedData(null);
           setCsvStats(null);
@@ -527,7 +764,7 @@ Please ensure your PDF contains GPS coordinates in one of these formats:
                 2
               )
           );
-        return distance < 100;
+          return distance < 100;
         });
 
         if (!isDuplicate) uniquePoints.push(point);
@@ -798,6 +1035,64 @@ Please ensure your PDF contains GPS coordinates in one of these formats:
     });
   };
 
+  /**
+   * Enhanced file handling with security scanning
+   */
+  const handleFile = async (selectedFile) => {
+    // Reset states
+    setFile(null);
+    setFileType(null);
+    setParsedData(null);
+    setCsvStats(null);
+    setParseError(null);
+    setSecurityResults(null);
+    setIsScanning(true);
+
+    try {
+      // Perform security scan first
+      console.log('🔒 Starting security scan for:', selectedFile.name);
+      const scanResults = await securityScanner.scanFile(selectedFile);
+      setSecurityResults(scanResults);
+
+      console.log('🔒 Security scan results:', scanResults);
+
+      // Check if file passed security scan
+      if (!scanResults.safe) {
+        setIsScanning(false);
+        setParseError(`🚫 File rejected for security reasons:\n\n${scanResults.threats.join('\n')}\n\nPlease upload a different file.`);
+        return;
+      }
+
+      // Show warnings if any
+      if (scanResults.warnings.length > 0) {
+        console.warn('⚠️ Security warnings:', scanResults.warnings);
+      }
+
+      // File passed security scan - proceed with processing
+      const fileName = selectedFile.name.toLowerCase();
+      
+      if (selectedFile.type === "text/csv" || fileName.endsWith('.csv')) {
+        setFile(selectedFile);
+        setFileType('csv');
+        setIsScanning(false);
+        parseCSV(selectedFile);
+      } else if (selectedFile.type === "application/pdf" || fileName.endsWith('.pdf')) {
+        setFile(selectedFile);
+        setFileType('pdf');
+        setIsScanning(false);
+        parsePDF(selectedFile);
+      } else {
+        setIsScanning(false);
+        setParseError("🚫 Please upload a CSV or PDF file. Other file types are not supported.");
+      }
+
+    } catch (error) {
+      setIsScanning(false);
+      setParseError(`🚫 Security scan failed: ${error.message}`);
+      console.error('Security scan error:', error);
+    }
+  };
+
   const handleCreateCase = async () => {
     try {
       if (!caseNumber || !caseTitle || !dateOfIncident || !region || !parsedData) {
@@ -806,18 +1101,16 @@ Please ensure your PDF contains GPS coordinates in one of these formats:
       }
   
       setIsProcessing(true);
-  
-      // 1) BACKEND — create the case in the original, working system
+
       const casePayload = {
         case_number: caseNumber,
-        case_title: caseTitle,                    // keep backend happy
+        case_title: caseTitle,
         date_of_incident: dateOfIncident,
         region,
         between: between || "",
         urgency,
         userID: auth.currentUser ? auth.currentUser.uid : null,
   
-        // what the backend already accepted previously:
         csv_data: parsedData.stoppedPoints.map((p) => ({
           latitude: p.lat,
           longitude: p.lng,
@@ -829,7 +1122,6 @@ Please ensure your PDF contains GPS coordinates in one of these formats:
           latitude: p.lat,
           longitude: p.lng,
           timestamp: (() => {
-            // same helper you had
             const iso = (() => {
               const m = (p.description || "").match(/\b\d{2}:\d{2}:\d{2}\b/);
               if (!m || !dateOfIncident) return null;
@@ -842,21 +1134,19 @@ Please ensure your PDF contains GPS coordinates in one of these formats:
           description: p.description || null,
         })),
       };
-  
+
       const { data: created } = await axios.post(
         (import.meta.env.VITE_API_URL || "http://localhost:8000").replace(/\/+$/,"") + "/cases/create",
         casePayload,
         { headers: { "Content-Type": "application/json" } }
       );
-  
-      // the backend should return its canonical ID; adapt the path if yours differs
+
       const backendCaseId = created?.caseId || created?.id || created?.case_id;
       if (!backendCaseId) throw new Error("Backend did not return caseId");
-  
-      // 2) FIREBASE — write a mirror that Annotations/Reports use
+
       const mirror = {
         caseNumber,
-        caseTitle,                 // canonical for UI
+        caseTitle,
         dateOfIncident,
         region,
         between: between || "",
@@ -878,13 +1168,12 @@ Please ensure your PDF contains GPS coordinates in one of these formats:
         reportConclusion: "",
         selectedForReport: parsedData.stoppedPoints.map((_, i) => i),
       };
-  
+
       await upsertFirebaseMirror(backendCaseId, mirror);
-  
-      // 3) local state for subsequent pages
+
       localStorage.setItem("trackxCurrentCaseId", backendCaseId);
       localStorage.setItem("trackxCaseData", JSON.stringify({ ...mirror, caseId: backendCaseId }));
-  
+
       alert("Case created successfully! Moving to annotations...");
       navigate("/annotations");
     } catch (err) {
@@ -914,25 +1203,6 @@ Please ensure your PDF contains GPS coordinates in one of these formats:
       handleFile(e.target.files[0]);
     }
   };
-  const handleFile = (file) => {
-    const fileName = file.name.toLowerCase();
-
-    if (file.type === "text/csv" || fileName.endsWith(".csv")) {
-      setFile(file);
-      setFileType("csv");
-      parseCSV(file);
-    } else if (file.type === "application/pdf" || fileName.endsWith(".pdf")) {
-      setFile(file);
-      setFileType("pdf");
-      parsePDF(file);
-    } else {
-      setParseError("Please upload a CSV or PDF file. Other file types are not supported.");
-      setFile(null);
-      setFileType(null);
-      setParsedData(null);
-      setCsvStats(null);
-    }
-  };
 
   // Submit: just call create
   const handleNext = async (e) => {
@@ -950,10 +1220,91 @@ Please ensure your PDF contains GPS coordinates in one of these formats:
   const handleSignOut = async () => {
     try {
       await signOut(auth);
-      navigate("/"); // Redirect to LandingPage
+      navigate("/");
     } catch (error) {
       console.error("Sign-out failed:", error.message);
     }
+  };
+
+  // Security status component
+  const SecurityStatus = () => {
+    if (!securityResults) return null;
+
+    const getRiskColor = (level) => {
+      switch (level) {
+        case 'LOW': return 'text-green-400';
+        case 'MEDIUM': return 'text-yellow-400';
+        case 'HIGH': return 'text-red-400';
+        default: return 'text-gray-400';
+      }
+    };
+
+    const getRiskIcon = (level) => {
+      switch (level) {
+        case 'LOW': return <Shield className="w-4 h-4" />;
+        case 'MEDIUM': return <AlertTriangle className="w-4 h-4" />;
+        case 'HIGH': return <AlertCircle className="w-4 h-4" />;
+        default: return <Shield className="w-4 h-4" />;
+      }
+    };
+
+    return (
+      <div className="mt-2 p-3 bg-gray-800 rounded border border-gray-600">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center space-x-2">
+            <div className={getRiskColor(securityResults.riskLevel)}>
+              {getRiskIcon(securityResults.riskLevel)}
+            </div>
+            <span className={`font-semibold ${getRiskColor(securityResults.riskLevel)}`}>
+              Security: {securityResults.riskLevel} Risk
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setShowSecurityDetails(!showSecurityDetails)}
+            className="text-blue-400 hover:text-blue-300 text-sm"
+          >
+            {showSecurityDetails ? 'Hide Details' : 'Show Details'}
+          </button>
+        </div>
+        
+        {showSecurityDetails && (
+          <div className="mt-3 space-y-2 text-sm">
+            {securityResults.fileHash && (
+              <p className="text-gray-400">
+                File Hash: <span className="font-mono text-xs">{securityResults.fileHash.substring(0, 16)}...</span>
+              </p>
+            )}
+            
+            {securityResults.threats.length > 0 && (
+              <div>
+                <p className="text-red-400 font-semibold">Threats Detected:</p>
+                <ul className="list-disc list-inside text-red-300 text-xs ml-2">
+                  {securityResults.threats.map((threat, index) => (
+                    <li key={index}>{threat}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            
+            {securityResults.warnings.length > 0 && (
+              <div>
+                <p className="text-yellow-400 font-semibold">Warnings:</p>
+                <ul className="list-disc list-inside text-yellow-300 text-xs ml-2">
+                  {securityResults.warnings.map((warning, index) => (
+                    <li key={index}>{warning}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            
+            {securityResults.safe && securityResults.threats.length === 0 && (
+              <p className="text-green-400 text-xs">✓ File passed all security checks</p>
+            )}
+          </div>
+        )}
+      </div>
+    );
   };
 
   // ---------- UI ----------
@@ -1149,11 +1500,12 @@ Please ensure your PDF contains GPS coordinates in one of these formats:
             </select>
           </div>
 
-          {/* Enhanced File Upload Section */}
+          {/* Enhanced File Upload Section with Security */}
           <div className="mt-8">
             <div className="flex items-center justify-between mb-2">
               <label className="block text-sm font-medium text-gray-300">
-                Upload GPS Coordinates (CSV or PDF) *
+                Upload GPS Coordinates (CSV or PDF) * 
+                <span className="ml-2 text-green-400 text-xs">🔒 Security Enabled</span>
               </label>
               <button
                 type="button"
@@ -1165,9 +1517,26 @@ Please ensure your PDF contains GPS coordinates in one of these formats:
               </button>
             </div>
 
-            {/* File Guide */}
+            {/* Enhanced Guide with Security Info */}
             {showGuide && (
               <div className="bg-gray-800 p-4 rounded-lg text-sm text-gray-300 mb-4">
+                {/* Security Notice */}
+                <div className="mb-4 p-3 bg-green-900 bg-opacity-20 border border-green-700 rounded">
+                  <h3 className="font-semibold mb-2 text-green-400 flex items-center">
+                    <Shield className="w-4 h-4 mr-2" />
+                    Security Protection Active
+                  </h3>
+                  <p className="text-xs text-green-300 mb-2">
+                    All uploaded files are automatically scanned for security threats including:
+                  </p>
+                  <ul className="list-disc pl-5 space-y-1 text-xs text-green-300">
+                    <li>File size and type validation</li>
+                    <li>Malicious content detection</li>
+                    <li>Suspicious pattern analysis</li>
+                    <li>PDF structure verification</li>
+                  </ul>
+                </div>
+
                 <h3 className="font-semibold mb-2">Supported File Formats:</h3>
 
                 {/* CSV Section */}
@@ -1175,10 +1544,7 @@ Please ensure your PDF contains GPS coordinates in one of these formats:
                   <h4 className="font-semibold text-blue-400 mb-1">CSV Files:</h4>
                   <p className="mb-2">Your CSV should include the following columns:</p>
                   <ul className="list-disc pl-5 space-y-1 text-xs">
-                    <li>
-                      Latitude (decimal coordinates - column name containing "lat" or
-                      "latitude")
-                    </li>
+                    <li>Latitude (decimal coordinates - column name containing "lat" or "latitude")</li>
                     <li>
                       Longitude (decimal coordinates - column name containing "lng", "lon",
                       or "longitude")
@@ -1214,6 +1580,16 @@ Please ensure your PDF contains GPS coordinates in one of these formats:
                   </p>
                 </div>
 
+                {/* File Limits */}
+                <div className="mb-4 p-2 bg-gray-700 rounded">
+                  <h4 className="font-semibold text-orange-400 mb-1">File Limits:</h4>
+                  <ul className="list-disc pl-5 space-y-1 text-xs">
+                    <li>Maximum file size: 10MB</li>
+                    <li>Supported extensions: .csv, .pdf, .xls, .xlsx</li>
+                    <li>Text-based files only (no scanned images)</li>
+                  </ul>
+                </div>
+
                 {/* Ignition Status Detection */}
                 <div className="mt-3 pt-3 border-t border-gray-700">
                   <p className="font-semibold mb-1">Intelligent Vehicle Status Detection:</p>
@@ -1223,9 +1599,7 @@ Please ensure your PDF contains GPS coordinates in one of these formats:
                   <div className="grid grid-cols-3 gap-2 text-xs mt-2">
                     <div className="p-2 bg-red-900 bg-opacity-20 rounded">
                       <p className="font-semibold text-red-400 mb-1">Stopped</p>
-                      <p className="text-gray-400">
-                        stopped, parked, ignition off, engine off, stationary
-                      </p>
+                      <p className="text-gray-400">stopped, parked, ignition off, engine off, stationary</p>
                     </div>
                     <div className="p-2 bg-yellow-900 bg-opacity-20 rounded">
                       <p className="font-semibold text-yellow-400 mb-1">Idle</p>
@@ -1253,15 +1627,23 @@ Please ensure your PDF contains GPS coordinates in one of these formats:
               <input
                 id="file-upload"
                 type="file"
-                accept=".csv,.pdf"
+                accept=".csv,.pdf,.xls,.xlsx"
                 className="hidden"
                 onChange={handleFileSelect}
               />
 
-              {isProcessing ? (
+              {isScanning ? (
                 <div className="text-center">
                   <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-blue-500 mx-auto mb-4"></div>
-                  <div className="text-blue-400 mb-2">
+                  <div className="text-blue-400 mb-2">🔒 Scanning file for security threats...</div>
+                  <div className="text-xs text-gray-400">
+                    Checking file type, size, and content for malicious patterns
+                  </div>
+                </div>
+              ) : isProcessing ? (
+                <div className="text-center">
+                  <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-green-500 mx-auto mb-4"></div>
+                  <div className="text-green-400 mb-2">
                     Processing {fileType?.toUpperCase()} file...
                   </div>
                   <div className="text-xs text-gray-400">
@@ -1336,33 +1718,8 @@ Please ensure your PDF contains GPS coordinates in one of these formats:
                 <div className="text-center">
                   <AlertCircle className="h-8 w-8 text-red-400 mx-auto mb-2" />
                   <div className="text-red-400 mb-2">Error processing file</div>
-                  <p className="text-red-300 max-w-md">{parseError}</p>
+                  <p className="text-red-300 max-w-md whitespace-pre-line">{parseError}</p>
                   <p className="text-gray-400 mt-2">Click to try another file</p>
-
-                  {fileType === "pdf" && (
-                    <div className="mt-3 text-xs text-gray-400">
-                      <p className="font-semibold text-red-400">PDF Processing Failed</p>
-                      <p className="mb-2">{parseError}</p>
-                      <div>
-                        <p className="font-semibold mb-1">Troubleshooting Tips:</p>
-                        <ul className="list-disc list-inside space-y-1">
-                          <li>Ensure PDF contains searchable text (not scanned images)</li>
-                          <li>Check that GPS coordinates are in supported formats</li>
-                          <li>Try a different PDF if this one doesn't work</li>
-                          <li>Verify the PDF isn't password-protected</li>
-                        </ul>
-                        <p className="mt-2 font-semibold">Supported coordinate formats:</p>
-                        <ul className="list-disc list-inside text-xs">
-                          <li>Decimal: -33.918861, 18.423300</li>
-                          <li>
-                            Labeled: Latitude: -33.918861, Longitude: 18.423300
-                          </li>
-                          <li>DMS: 33°55'07.9"S 18°25'23.9"E</li>
-                          <li>Tables with Time, Lat, Lng, Status columns</li>
-                        </ul>
-                      </div>
-                    </div>
-                  )}
                 </div>
               ) : (
                 <>
@@ -1378,12 +1735,19 @@ Please ensure your PDF contains GPS coordinates in one of these formats:
                     </div>
                     <div className="flex items-center">
                       <FileText className="w-3 h-3 mr-2" />
-                      PDF Files (New!)
+                      PDF Files
+                    </div>
+                    <div className="flex items-center">
+                      <Shield className="w-3 h-3 mr-2 text-green-400" />
+                      Security Protected
                     </div>
                   </div>
                 </>
               )}
             </div>
+
+            {/* Security Results Display */}
+            <SecurityStatus />
           </div>
 
           {/* Navigation Buttons */}
@@ -1394,11 +1758,11 @@ Please ensure your PDF contains GPS coordinates in one of these formats:
             <button
               type="submit"
               className={`px-4 py-2 rounded text-white ${
-                parsedData && parsedData.stoppedPoints.length > 0 && !isProcessing
+                parsedData && parsedData.stoppedPoints.length > 0 && !isProcessing && !isScanning
                   ? "bg-blue-700 hover:bg-blue-600"
                   : "bg-blue-900 cursor-not-allowed opacity-50"
               }`}
-              disabled={!parsedData || parsedData.stoppedPoints.length === 0 || isProcessing}
+              disabled={!parsedData || parsedData.stoppedPoints.length === 0 || isProcessing || isScanning}
             >
               {isProcessing ? "Creating Case..." : "Next"}
             </button>

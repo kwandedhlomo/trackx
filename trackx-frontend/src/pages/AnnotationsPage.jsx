@@ -8,7 +8,6 @@ import { signOut } from "firebase/auth";
 import { auth } from "../firebase";
 import axios from "axios";
 
-
 // Import Firebase services
 import { 
   loadCaseWithAnnotations, 
@@ -24,13 +23,16 @@ function AnnotationsPage() {
   const { profile } = useAuth();
   const [showMenu, setShowMenu] = useState(false);
 
-  // at top of AnnotationsPage.jsx
-const isNum = (v) => typeof v === "number" && !Number.isNaN(v);
-
+  const isNum = (v) => typeof v === "number" && !Number.isNaN(v);
     
   // Refs for capturing snapshots
   const mapImageRef = useRef(null);
   const streetViewImageRef = useRef(null);
+  
+  // NEW: Refs for dynamic Google Maps
+  const streetViewContainerRef = useRef(null);
+  const panoramaRef = useRef(null);
+  const [isGoogleMapsLoaded, setIsGoogleMapsLoaded] = useState(false);
   
   // State to store locations from localStorage/Firebase
   const [locations, setLocations] = useState([]);
@@ -91,15 +93,60 @@ const isNum = (v) => typeof v === "number" && !Number.isNaN(v);
       setIsGenerating(false);
     }
   };
-  
 
-  // near other constants
   const API_BASE = (import.meta.env.VITE_API_URL || "").replace(/\/+$/, "");
-
-  // Google Maps API Key 
   const GOOGLE_MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
 
-  // helper
+  // NEW: Load Google Maps JavaScript API
+  useEffect(() => {
+    if (window.google && window.google.maps) {
+      setIsGoogleMapsLoaded(true);
+      return;
+    }
+
+    const script = document.createElement('script');
+    script.src = `https://maps.googleapis.com/maps/api/js?key=${GOOGLE_MAPS_API_KEY}&libraries=places`;
+    script.async = true;
+    script.defer = true;
+    script.onload = () => setIsGoogleMapsLoaded(true);
+    script.onerror = () => console.error('Failed to load Google Maps API');
+    document.head.appendChild(script);
+  }, [GOOGLE_MAPS_API_KEY]);
+
+  // NEW: Initialize Street View Panorama when location changes
+  useEffect(() => {
+    if (!isGoogleMapsLoaded || !streetViewContainerRef.current || locations.length === 0) return;
+
+    const currentLocation = locations[currentIndex];
+    if (!currentLocation || !isNum(currentLocation.lat) || !isNum(currentLocation.lng)) return;
+
+    const position = {
+      lat: parseFloat(currentLocation.lat),
+      lng: parseFloat(currentLocation.lng)
+    };
+
+    // Initialize or update Street View Panorama
+    if (!panoramaRef.current) {
+      panoramaRef.current = new window.google.maps.StreetViewPanorama(
+        streetViewContainerRef.current,
+        {
+          position: position,
+          pov: { heading: 70, pitch: 0 },
+          zoom: 1,
+          addressControl: true,
+          linksControl: true,
+          panControl: true,
+          enableCloseButton: false,
+          fullscreenControl: true,
+          motionTracking: true,
+          motionTrackingControl: true
+        }
+      );
+    } else {
+      panoramaRef.current.setPosition(position);
+    }
+  }, [currentIndex, locations, isGoogleMapsLoaded]);
+
   async function fetchDataUrlViaProxy(rawUrl) {
     const res = await fetch(`${API_BASE}/api/proxy-image-data-url?url=${encodeURIComponent(rawUrl)}`);
     if (!res.ok) {
@@ -113,7 +160,6 @@ const isNum = (v) => typeof v === "number" && !Number.isNaN(v);
     return dataUrl;
   }
   
-  // Utility function to format dates for display
   const formatDateForDisplay = (dateInput) => {
     if (!dateInput) return "Date not available";
     
@@ -141,7 +187,6 @@ const isNum = (v) => typeof v === "number" && !Number.isNaN(v);
     }
   };
 
-  // Format timestamp display
   const formatTimestamp = (timestamp) => {
     if (!timestamp) return "Timestamp not available";
     
@@ -164,11 +209,9 @@ const isNum = (v) => typeof v === "number" && !Number.isNaN(v);
     return String(timestamp);
   };
 
-  // Extract time from location data - check multiple possible sources
   const extractTimeFromLocation = (location) => {
     if (!location) return "Timestamp not available";
     
-    // Check if there's a direct timestamp field
     if (location.timestamp) {
       const directTime = formatTimestamp(location.timestamp);
       if (directTime !== "Timestamp not available") {
@@ -176,7 +219,6 @@ const isNum = (v) => typeof v === "number" && !Number.isNaN(v);
       }
     }
     
-    // Check original data for time patterns (CSV descriptions)
     if (location.originalData?.csvDescription) {
       const timeMatch = location.originalData.csvDescription.match(/^(\d{1,2}:\d{2}(?::\d{2})?)/);
       if (timeMatch) {
@@ -184,7 +226,6 @@ const isNum = (v) => typeof v === "number" && !Number.isNaN(v);
       }
     }
     
-    // Check raw data for common time fields
     if (location.originalData?.rawData) {
       const timeFields = ['time', 'timestamp', 'Time', 'Timestamp', 'datetime'];
       for (const field of timeFields) {
@@ -209,7 +250,6 @@ const isNum = (v) => typeof v === "number" && !Number.isNaN(v);
     }
   };
 
-  // Update annotation data (FIXED: Keep descriptions separate from metadata)
   const updateAnnotation = (field, value) => {
     const newAnnotations = [...annotations];
     while (newAnnotations.length <= currentIndex) {
@@ -221,13 +261,11 @@ const isNum = (v) => typeof v === "number" && !Number.isNaN(v);
     };
     setAnnotations(newAnnotations);
     
-    // Update snapshot description only if we have snapshots
     if (field === 'description' && snapshots[currentIndex]) {
       updateSnapshotDescription(value);
     }
   };
   
-  // Update snapshot description
   const updateSnapshotDescription = (description) => {
     if (!snapshots || !snapshots[currentIndex]) return;
     
@@ -242,7 +280,6 @@ const isNum = (v) => typeof v === "number" && !Number.isNaN(v);
     sessionStorage.setItem('locationSnapshots', JSON.stringify(newSnapshots));
   };
   
-  // Delete snapshot for current location
   const deleteSnapshot = () => {
     const newSnapshots = [...snapshots];
     if (newSnapshots[currentIndex]) {
@@ -256,13 +293,26 @@ const isNum = (v) => typeof v === "number" && !Number.isNaN(v);
     }
   };
   
-  // REPLACE your captureSnapshots with this:
+  // UPDATED: Capture snapshots using both static API and dynamic panorama
   const captureSnapshots = async () => {
     const loc = locations[currentIndex];
     if (!loc) return;
 
     const mapUrl = getGoogleMapUrl(loc);
-    const svUrl  = getStreetViewUrl(loc);
+    let svUrl = getStreetViewUrl(loc);
+    
+    // NEW: If panorama is loaded, get the current view parameters
+    if (panoramaRef.current) {
+      try {
+        const pov = panoramaRef.current.getPov();
+        const position = panoramaRef.current.getPosition();
+        // Update street view URL with current heading and pitch from panorama
+        svUrl = `https://maps.googleapis.com/maps/api/streetview?size=600x300&location=${position.lat()},${position.lng()}&fov=80&heading=${Math.round(pov.heading)}&pitch=${Math.round(pov.pitch)}&key=${GOOGLE_MAPS_API_KEY}`;
+      } catch (e) {
+        console.warn('Could not get panorama POV, using default street view', e);
+      }
+    }
+
     if (!mapUrl && !svUrl) {
       alert("No map/street view available for this location.");
       return;
@@ -277,8 +327,8 @@ const isNum = (v) => typeof v === "number" && !Number.isNaN(v);
 
       const newSnapshot = {
         index: currentIndex,
-        mapImage,                // data:image/*;base64,…
-        streetViewImage,         // data:image/*;base64,…
+        mapImage,
+        streetViewImage,
         title: annotations[currentIndex]?.title || "",
         description: annotations[currentIndex]?.description || "",
       };
@@ -300,7 +350,6 @@ const isNum = (v) => typeof v === "number" && !Number.isNaN(v);
     }
   };
 
-  // Load from localStorage fallback
   const loadFromLocalStorage = async () => {
     const caseDataString = localStorage.getItem('trackxCaseData');
     if (!caseDataString) {
@@ -326,20 +375,17 @@ const isNum = (v) => typeof v === "number" && !Number.isNaN(v);
     
     setLocations(caseData.locations);
     
-    // FIXED: Initialize annotations properly - always blank descriptions
     const initialAnnotations = caseData.locations.map((location, index) => {
-      // Use existing annotation if it exists, otherwise blank
       if (location.annotation && (location.annotation.title || location.annotation.description)) {
         return {
           title: location.annotation.title || '',
           description: location.annotation.description || ''
         };
       }
-      // Use existing title from case data if available
       const existingTitle = caseData.locationTitles?.[index] || '';
       return { 
         title: existingTitle, 
-        description: '' // Always blank - user must fill in manually
+        description: ''
       };
     });
     
@@ -351,7 +397,6 @@ const isNum = (v) => typeof v === "number" && !Number.isNaN(v);
       setSelectedForReport(caseData.locations.map((_, index) => index));
     }
 
-    // Auto-save to Firebase if no existing case ID
     if (!localStorage.getItem('trackxCurrentCaseId')) {
       try {
         const userId = getCurrentUserId();
@@ -367,82 +412,120 @@ const isNum = (v) => typeof v === "number" && !Number.isNaN(v);
     }
   };
 
-// --- load data (prefer local new case, else Firebase) ---
-useEffect(() => {
-  const loadCaseData = async () => {
-    setIsLoading(true);
-    setSaveError(null);
+  useEffect(() => {
+    const loadCaseData = async () => {
+      setIsLoading(true);
+      setSaveError(null);
 
-    try {
-      const localStr = localStorage.getItem("trackxCaseData");
-      const caseId = localStorage.getItem("trackxCurrentCaseId");
+      try {
+        const localStr = localStorage.getItem("trackxCaseData");
+        const caseId = localStorage.getItem("trackxCurrentCaseId");
 
-      // 1) If we have local case data with locations, treat it as authoritative for a *new* session
-      if (localStr) {
-        const localCase = JSON.parse(localStr);
-        const hasLocs = Array.isArray(localCase.locations) && localCase.locations.length > 0;
+        if (localStr) {
+          const localCase = JSON.parse(localStr);
+          const hasLocs = Array.isArray(localCase.locations) && localCase.locations.length > 0;
 
-        if (hasLocs) {
-          // If there *is* a currentCaseId but it belongs to a different caseNumber, reset
-          if (caseId) {
-            try {
-              const fb = await loadCaseWithAnnotations(caseId);
-              if (fb.caseNumber && localCase.caseNumber && fb.caseNumber !== localCase.caseNumber) {
-                // mismatched → it’s a new case; clear old id/snapshots
+          if (hasLocs) {
+            if (caseId) {
+              try {
+                const fb = await loadCaseWithAnnotations(caseId);
+                if (fb.caseNumber && localCase.caseNumber && fb.caseNumber !== localCase.caseNumber) {
+                  localStorage.removeItem("trackxCurrentCaseId");
+                  sessionStorage.removeItem("locationSnapshots");
+                }
+              } catch (_err) {
                 localStorage.removeItem("trackxCurrentCaseId");
                 sessionStorage.removeItem("locationSnapshots");
               }
-            } catch (_err) {
-              // can't load fb → ignore, treat as new
-              localStorage.removeItem("trackxCurrentCaseId");
-              sessionStorage.removeItem("locationSnapshots");
             }
-          }
 
-          // hydrate UI from local
+            setCaseDetails({
+              caseNumber: localCase.caseNumber,
+              caseTitle: localCase.caseTitle,
+              dateOfIncident: formatDateForDisplay(localCase.dateOfIncident),
+              region: localCase.region,
+              between: localCase.between || "Not specified",
+            });
+
+            setLocations(localCase.locations);
+
+            const initialAnnotations = localCase.locations.map((_, i) => ({
+              title:
+                (localCase.locationTitles && localCase.locationTitles[i]) ||
+                (localCase.locations[i] && localCase.locations[i].annotation && localCase.locations[i].annotation.title) ||
+                "",
+              description:
+                (localCase.locations[i] && localCase.locations[i].annotation && localCase.locations[i].annotation.description) ||
+                "",
+            }));
+            setAnnotations(initialAnnotations);
+
+            setSelectedForReport(
+              Array.isArray(localCase.selectedForReport)
+                ? localCase.selectedForReport
+                : localCase.locations.map((_, i) => i)
+            );
+
+            if (!localStorage.getItem("trackxCurrentCaseId")) {
+              try {
+                const savedId = await saveCaseWithAnnotations(localCase, getCurrentUserId());
+                localStorage.setItem("trackxCurrentCaseId", savedId);
+                setCurrentCaseId(savedId);
+                setSaveError(null);
+              } catch (e) {
+                console.warn("Could not save new case to Firebase; staying local:", e);
+                setSaveError("Unable to connect to cloud database");
+              }
+            } else {
+              setCurrentCaseId(localStorage.getItem("trackxCurrentCaseId"));
+            }
+
+            const savedSnaps = sessionStorage.getItem("locationSnapshots");
+            try {
+              setSnapshots(savedSnaps ? JSON.parse(savedSnaps) : []);
+            } catch {
+              setSnapshots([]);
+            }
+
+            const storedIndex = parseInt(localStorage.getItem("trackxCurrentLocationIndex") || "0", 10);
+            setCurrentIndex(
+              Number.isFinite(storedIndex)
+                ? Math.max(0, Math.min(storedIndex, localCase.locations.length - 1))
+                : 0
+            );
+            localStorage.removeItem("trackxCurrentLocationIndex");
+
+            setIsLoading(false);
+            return;
+          }
+        }
+
+        if (caseId) {
+          const fb = await loadCaseWithAnnotations(caseId);
+
           setCaseDetails({
-            caseNumber: localCase.caseNumber,
-            caseTitle: localCase.caseTitle,
-            dateOfIncident: formatDateForDisplay(localCase.dateOfIncident),
-            region: localCase.region,
-            between: localCase.between || "Not specified",
+            caseNumber: fb.caseNumber,
+            caseTitle: fb.caseTitle,
+            dateOfIncident: formatDateForDisplay(fb.dateOfIncident),
+            region: fb.region,
+            between: fb.between || "Not specified",
           });
 
-          setLocations(localCase.locations);
+          setLocations(fb.locations || []);
 
-          const initialAnnotations = localCase.locations.map((_, i) => ({
-            title:
-              (localCase.locationTitles && localCase.locationTitles[i]) ||
-              (localCase.locations[i] && localCase.locations[i].annotation && localCase.locations[i].annotation.title) ||
-              "",
-            description:
-              (localCase.locations[i] && localCase.locations[i].annotation && localCase.locations[i].annotation.description) ||
-              "",
-          }));
-          setAnnotations(initialAnnotations);
-
-          setSelectedForReport(
-            Array.isArray(localCase.selectedForReport)
-              ? localCase.selectedForReport
-              : localCase.locations.map((_, i) => i)
+          setAnnotations(
+            (fb.locations || []).map((l, i) => ({
+              title: l.title || (fb.locationTitles && fb.locationTitles[i]) || "",
+              description: l.description || "",
+            }))
           );
 
-          // If we don't have a caseId yet, save to Firebase once and set it
-          if (!localStorage.getItem("trackxCurrentCaseId")) {
-            try {
-              const savedId = await saveCaseWithAnnotations(localCase, getCurrentUserId());
-              localStorage.setItem("trackxCurrentCaseId", savedId);
-              setCurrentCaseId(savedId);
-              setSaveError(null);
-            } catch (e) {
-              console.warn("Could not save new case to Firebase; staying local:", e);
-              setSaveError("Unable to connect to cloud database");
-            }
-          } else {
-            setCurrentCaseId(localStorage.getItem("trackxCurrentCaseId"));
-          }
+          setSelectedForReport(
+            Array.isArray(fb.selectedForReport) ? fb.selectedForReport : (fb.locations || []).map((_, i) => i)
+          );
 
-          // snapshots from session (new session should be empty)
+          setCurrentCaseId(caseId);
+
           const savedSnaps = sessionStorage.getItem("locationSnapshots");
           try {
             setSnapshots(savedSnaps ? JSON.parse(savedSnaps) : []);
@@ -450,98 +533,44 @@ useEffect(() => {
             setSnapshots([]);
           }
 
-          // optional: jump to requested index, clamp using latest length
           const storedIndex = parseInt(localStorage.getItem("trackxCurrentLocationIndex") || "0", 10);
           setCurrentIndex(
             Number.isFinite(storedIndex)
-              ? Math.max(0, Math.min(storedIndex, localCase.locations.length - 1))
+              ? Math.max(0, Math.min(storedIndex, (fb.locations || []).length - 1))
               : 0
           );
           localStorage.removeItem("trackxCurrentLocationIndex");
-
-          setIsLoading(false);
-          return; // ✅ done (don’t load Firebase to avoid override)
+        } else {
+          setError("No case data found. Please create a new case first.");
         }
+      } catch (e) {
+        console.error("Error loading case data:", e);
+        setError("Error loading case data: " + (e && e.message ? e.message : String(e)));
+      } finally {
+        setIsLoading(false);
       }
+    };
 
-      // 2) No usable local → Firebase path
-      if (caseId) {
-        const fb = await loadCaseWithAnnotations(caseId);
+    loadCaseData();
+  }, []);
 
-        setCaseDetails({
-          caseNumber: fb.caseNumber,
-          caseTitle: fb.caseTitle,
-          dateOfIncident: formatDateForDisplay(fb.dateOfIncident),
-          region: fb.region,
-          between: fb.between || "Not specified",
-        });
-
-        setLocations(fb.locations || []);
-
-        setAnnotations(
-          (fb.locations || []).map((l, i) => ({
-            title: l.title || (fb.locationTitles && fb.locationTitles[i]) || "",
-            description: l.description || "",
-          }))
-        );
-
-        setSelectedForReport(
-          Array.isArray(fb.selectedForReport) ? fb.selectedForReport : (fb.locations || []).map((_, i) => i)
-        );
-
-        setCurrentCaseId(caseId);
-
-        const savedSnaps = sessionStorage.getItem("locationSnapshots");
-        try {
-          setSnapshots(savedSnaps ? JSON.parse(savedSnaps) : []);
-        } catch {
-          setSnapshots([]);
-        }
-
-        const storedIndex = parseInt(localStorage.getItem("trackxCurrentLocationIndex") || "0", 10);
-        setCurrentIndex(
-          Number.isFinite(storedIndex)
-            ? Math.max(0, Math.min(storedIndex, (fb.locations || []).length - 1))
-            : 0
-        );
-        localStorage.removeItem("trackxCurrentLocationIndex");
-      } else {
-        // truly nothing
-        setError("No case data found. Please create a new case first.");
-      }
-    } catch (e) {
-      console.error("Error loading case data:", e);
-      setError("Error loading case data: " + (e && e.message ? e.message : String(e)));
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  loadCaseData();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-}, []);
-
-  // Check if snapshot is captured whenever the current index changes
   useEffect(() => {
     const currentSnapshot = snapshots.find(snapshot => snapshot && snapshot.index === currentIndex);
     setSnapshotCaptured(!!currentSnapshot);
   }, [currentIndex, snapshots]);
 
-  // FIXED: Auto-save functionality with proper debouncing
   useEffect(() => {
     if (!isLoading && annotations.length > 0 && !isSaving && currentCaseId) {
       const timeoutId = setTimeout(() => {
         saveAllAnnotations();
-      }, 3000); // Auto-save after 3 seconds of inactivity
+      }, 3000);
       
       return () => clearTimeout(timeoutId);
     }
   }, [annotations, selectedForReport, isLoading, currentCaseId]);
   
-  // Get current location
   const currentLocation = locations[currentIndex] || null;
   
-  // Handle navigation between locations
   const goToPrevious = () => {
     if (currentIndex > 0) {
       setCurrentIndex(currentIndex - 1);
@@ -558,9 +587,8 @@ useEffect(() => {
     }
   };
   
-  // FIXED: Save all annotations with proper Firebase integration
   const saveAllAnnotations = async () => {
-    saveToLocalStorage(); // Always save to localStorage first
+    saveToLocalStorage();
     
     if (currentCaseId) {
       setIsSaving(true);
@@ -581,7 +609,6 @@ useEffect(() => {
         setLastSaved(new Date().toLocaleTimeString());
         console.log('Successfully saved annotations to Firebase');
 
-        // Only try to save snapshots if we have any
         const hasSnapshots = snapshots.some(snapshot => snapshot && snapshot.mapImage);
         if (hasSnapshots) {
           try {
@@ -591,7 +618,6 @@ useEffect(() => {
             }
           } catch (snapshotError) {
             console.warn('Could not save snapshots to Firebase:', snapshotError.message);
-            // Don't show error for snapshots - they're optional
           }
         }
 
@@ -606,14 +632,12 @@ useEffect(() => {
     }
   };
 
-  // Save to localStorage (backup method)
   const saveToLocalStorage = () => {
     try {
       const caseDataString = localStorage.getItem('trackxCaseData');
       if (caseDataString) {
         const caseData = JSON.parse(caseDataString);
         
-        // Update locations with current annotations
         const locationsWithAnnotations = caseData.locations.map((location, index) => ({
           ...location,
           annotation: annotations[index] || { title: '', description: '' }
@@ -629,7 +653,6 @@ useEffect(() => {
         localStorage.setItem('trackxCaseData', JSON.stringify(updatedCaseData));
       }
 
-      // Save snapshots to sessionStorage
       if (snapshots && snapshots.length > 0) {
         sessionStorage.setItem('locationSnapshots', JSON.stringify(snapshots));
       }
@@ -638,7 +661,6 @@ useEffect(() => {
     }
   };
   
-  // Toggle location selection for report
   const toggleLocationSelection = () => {
     setSelectedForReport(prev => {
       if (prev.includes(currentIndex)) {
@@ -649,26 +671,20 @@ useEffect(() => {
     });
   };
   
-  // Check if the current location is selected for the report
   const isCurrentLocationSelected = selectedForReport.includes(currentIndex);
-  
-  // Calculate progress indicator
   const progressText = `Location ${currentIndex + 1} of ${locations.length}`;
   
-  // Format coordinate display
   const formatCoordinate = (coord) => {
     if (coord === undefined || coord === null) return "N/A";
     return typeof coord === 'number' ? coord.toFixed(6) : coord;
   };
   
-  // Get location address or placeholder
   const getLocationAddress = (location) => {
     if (!location) return "Unknown Location";
     if (location.address) return location.address;
     return `Location at ${formatCoordinate(location.lat)}, ${formatCoordinate(location.lng)}`;
   };
 
-  // Generate Google Maps Static URL for the current location
   const getGoogleMapUrl = (location) => {
     if (!location || !isNum(location.lat) || !isNum(location.lng)) return null;
     return `https://maps.googleapis.com/maps/api/staticmap?center=${location.lat},${location.lng}&zoom=15&size=600x300&maptype=roadmap&markers=color:red%7C${location.lat},${location.lng}&key=${GOOGLE_MAPS_API_KEY}`;
@@ -679,7 +695,6 @@ useEffect(() => {
     return `https://maps.googleapis.com/maps/api/streetview?size=600x300&location=${location.lat},${location.lng}&fov=80&heading=70&pitch=0&key=${GOOGLE_MAPS_API_KEY}`;
   };
 
-  // Show loading state
   if (isLoading) {
     return (
       <div className="min-h-screen bg-black text-white flex items-center justify-center">
@@ -691,7 +706,6 @@ useEffect(() => {
     );
   }
   
-  // Show error state
   if (error) {
     return (
       <div className="min-h-screen bg-black text-white flex flex-col items-center justify-center">
@@ -725,10 +739,8 @@ useEffect(() => {
       transition={{ duration: 1 }}
       className="relative min-h-screen text-white font-sans overflow-hidden"
     >
-      {/* Gradient Background */}
       <div className="absolute inset-0 bg-gradient-to-br from-black via-gray-900 to-black -z-10" />
   
-      {/* Navbar */}
       <div className="flex items-center justify-between px-6 py-4 bg-gradient-to-r from-black to-gray-900 shadow-md">
         <div className="flex items-center space-x-4">
           <div className="text-3xl cursor-pointer" onClick={() => setShowMenu(!showMenu)}>
@@ -759,13 +771,12 @@ useEffect(() => {
         </div>
       </div>
   
-      {/* Hamburger Menu Content */}
       {showMenu && (
         <div className="absolute top-16 left-0 bg-black bg-opacity-90 backdrop-blur-md text-white w-64 p-6 z-30 space-y-4 border-r border-gray-700 shadow-lg">
           <Link to="/home" className="block hover:text-blue-400" onClick={() => setShowMenu(false)}>🏠 Home</Link>
           <Link to="/new-case" className="block hover:text-blue-400" onClick={() => setShowMenu(false)}>📝 Create New Case / Report</Link>
-          <Link to="/manage-cases" className="block hover:text-blue-400" onClick={() => setShowMenu(false)}>📁 Manage Cases</Link>
-          <Link to="/my-cases" className="block hover:text-blue-400" onClick={() => setShowMenu(false)}>📁 My Cases</Link>
+          <Link to="/manage-cases" className="block hover:text-blue-400" onClick={() => setShowMenu(false)}>📂 Manage Cases</Link>
+          <Link to="/my-cases" className="block hover:text-blue-400" onClick={() => setShowMenu(false)}>📋 My Cases</Link>
   
           {profile?.role === "admin" && (
             <Link to="/admin-dashboard" className="block hover:text-blue-400" onClick={() => setShowMenu(false)}>
@@ -775,7 +786,6 @@ useEffect(() => {
         </div>
       )}
 
-      {/* Nav Tabs */}
       <div className="flex justify-center space-x-8 bg-gradient-to-r from-black to-gray-900 bg-opacity-80 backdrop-blur-md py-2 text-white text-sm">        
         <Link to="/new-case" className="text-gray-400 hover:text-white">Case Information</Link>
         <span className="font-bold underline">Annotations</span>
@@ -788,7 +798,6 @@ useEffect(() => {
         </Link>
       </div>
 
-      {/* Case Information Bar */}
       <div className="bg-gray-800 bg-opacity-50 py-2 px-6">
         <div className="flex flex-wrap justify-between text-sm text-gray-300">
           <div className="mr-6 mb-1">
@@ -806,10 +815,8 @@ useEffect(() => {
         </div>
       </div>
 
-      {/* Main Content */}
       {currentLocation && (
         <div className="max-w-6xl mx-auto px-6 py-8">
-          {/* Location Info and Include in Report Checkbox */}
           <div className="mb-6 flex justify-between items-center">
             <div className="flex items-center space-x-2">
               <MapPin className="text-blue-500" />
@@ -832,7 +839,6 @@ useEffect(() => {
             </div>
           </div>
 
-          {/* Auto-save Status */}
           <div className="mb-4 p-3 rounded bg-gray-800 bg-opacity-50">
             <div className="flex items-center justify-between">
               <div className="text-sm text-gray-400">
@@ -854,7 +860,6 @@ useEffect(() => {
             </div>
           </div>
 
-          {/* FIXED: Snapshot Status Indicator - Manual capture only */}
           <div className={`mb-4 p-3 rounded flex items-center ${snapshotCaptured ? 'bg-green-900 bg-opacity-30' : 'bg-gray-800 bg-opacity-50'}`}>
             <div className={`mr-3 p-1 rounded-full ${snapshotCaptured ? 'bg-green-500' : 'bg-gray-500'}`}>
               <Camera size={18} className="text-white" />
@@ -891,11 +896,8 @@ useEffect(() => {
             </div>
           </div>
 
-          {/* Map Views and Annotation Form */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-            {/* Map Images */}
             <div className="space-y-6">
-              {/* Google Maps View */}
               <div className="bg-gray-800 rounded-lg overflow-hidden">
                 <div className="bg-gray-700 py-2 px-4 text-sm font-medium">Google Maps View</div>
                 <div className="h-64 bg-gray-900 flex items-center justify-center">
@@ -920,25 +922,22 @@ useEffect(() => {
                 </div>
               </div>
               
-              {/* Street View */}
+              {/* UPDATED: Dynamic Street View Panorama */}
               <div className="bg-gray-800 rounded-lg overflow-hidden">
-                <div className="bg-gray-700 py-2 px-4 text-sm font-medium">Google Street View</div>
+                <div className="bg-gray-700 py-2 px-4 text-sm font-medium flex justify-between items-center">
+                  <span>Google Street View - Interactive 360°</span>
+                  <span className="text-xs text-gray-400">Drag to rotate • Scroll to zoom</span>
+                </div>
                 <div className="h-64 bg-gray-900 flex items-center justify-center">
-                  {getStreetViewUrl(currentLocation) ? (
-                    <img 
-                      ref={streetViewImageRef}
-                      src={getStreetViewUrl(currentLocation)} 
-                      alt="Street view of location" 
-                      className="w-full h-full object-cover"
-                      onError={(e) => {
-                        e.target.onerror = null;
-                        e.target.src = "https://placehold.co/600x300?text=Street+View+Not+Available";
-                      }}
-                      crossOrigin="anonymous" 
+                  {isGoogleMapsLoaded && isNum(currentLocation.lat) && isNum(currentLocation.lng) ? (
+                    <div 
+                      ref={streetViewContainerRef}
+                      className="w-full h-full"
+                      style={{ minHeight: '256px' }}
                     />
                   ) : (
                     <div className="text-center text-gray-500">
-                      <p className="mb-2">Street view not available for this location</p>
+                      <p className="mb-2">Loading interactive street view...</p>
                       <p className="text-xs">Street view may not be available in all areas</p>
                     </div>
                   )}
@@ -946,11 +945,9 @@ useEffect(() => {
               </div>
             </div>
             
-            {/* Annotation Form */}
             <div className="bg-gray-800 rounded-lg overflow-hidden">
               <div className="bg-gray-700 py-2 px-4 text-sm font-medium">Add Location Context</div>
               <div className="p-4 space-y-4">
-                {/* Title */}
                 <div>
                   <label htmlFor="locationTitle" className="block text-sm font-medium text-gray-300 mb-1">
                     Location Title
@@ -965,7 +962,6 @@ useEffect(() => {
                   />
                 </div>
                 
-                {/* FIXED: Description - always starts blank */}
                 <div>
                   <label htmlFor="locationDescription" className="block text-sm font-medium text-gray-300 mb-1">
                     Description
@@ -991,8 +987,6 @@ useEffect(() => {
                   />
                 </div>
 
-                
-                {/* Location Info Panel - FIXED: Show metadata separately */}
                 <div className="p-3 bg-gray-900 rounded border border-gray-700">
                   <div className="grid grid-cols-2 gap-2 text-sm">
                     <div>
@@ -1011,7 +1005,6 @@ useEffect(() => {
                       </p>
                     </div>
                     
-                    {/* Original CSV/PDF Data - kept separate from user annotations */}
                     {currentLocation.originalData && (
                       <div className="col-span-2 mt-2">
                         <details className="text-xs">
@@ -1041,7 +1034,6 @@ useEffect(() => {
             </div>
           </div>
           
-          {/* Navigation Buttons */}
           <div className="flex justify-between mt-8">
             <button
               onClick={goToPrevious}
