@@ -22,3 +22,7 @@ dist/
 # Lockfile oddballs
 package-lock *.json
 !package-lock.json
+trackx-backend/.env
+trackx-backend/gcp-service-account.json
+trackx-backend/.env
+trackx-backend/gcp-service-account.json
