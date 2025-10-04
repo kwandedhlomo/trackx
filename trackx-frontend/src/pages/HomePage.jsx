@@ -18,6 +18,7 @@ import {
 import adfLogo from "../assets/image-removebg-preview.png"; 
 import trackxLogo from "../assets/trackx-logo-removebg-preview.png";
 import BarChartComponent from "../components/BarChartComponent";
+import { Home as HomeIcon, FilePlus2, FolderOpen, Briefcase, Users, LayoutDashboard } from "lucide-react";
 // import HeatMapComponent from "../components/HeatMapComponent";
 import GlobeBackground from "../components/GlobeBackground"; 
 import { auth } from "../firebase"; 
@@ -249,19 +250,59 @@ function HomePage() {
               </div>
             </nav>
             {showMenu && (
-              <div className="absolute top-16 left-0 bg-black bg-opacity-90 backdrop-blur-md text-white w-64 p-6 z-30 space-y-4 border-r border-gray-700 shadow-lg">
-                <Link to="/home" className="block hover:text-blue-400" onClick={() => setShowMenu(false)}>🏠 Home</Link>
-                <Link to="/new-case" className="block hover:text-blue-400" onClick={() => setShowMenu(false)}>📝 Create New Case / Report</Link>
+              <div className="absolute top-16 left-0 w-64 rounded-r-3xl border border-white/10 bg-gradient-to-br from-gray-900/95 to-black/90 backdrop-blur-xl p-6 z-30 shadow-2xl space-y-2">
+                <div className="flex items-center gap-3 px-3 py-2 rounded-2xl text-sm font-medium text-white bg-white/10">
+                  <HomeIcon className="w-4 h-4" />
+                  Home
+                </div>
+                <Link
+                  to="/new-case"
+                  className="flex items-center gap-3 px-3 py-2 rounded-2xl text-sm font-medium text-gray-200 hover:text-white hover:bg-white/10 transition"
+                  onClick={() => setShowMenu(false)}
+                >
+                  <FilePlus2 className="w-4 h-4" />
+                  Create New Case
+                </Link>
 
                 {profile?.role === "admin" && (
-                  <Link to="/manage-cases" className="block hover:text-blue-400" onClick={() => setShowMenu(false)}>📁 Manage Cases</Link>
+                  <Link
+                    to="/manage-cases"
+                    className="flex items-center gap-3 px-3 py-2 rounded-2xl text-sm font-medium text-gray-200 hover:text-white hover:bg-white/10 transition"
+                    onClick={() => setShowMenu(false)}
+                  >
+                    <FolderOpen className="w-4 h-4" />
+                    Manage Cases
+                  </Link>
                 )}
 
-                <Link to="/my-cases" className="block hover:text-blue-400" onClick={() => setShowMenu(false)}>📁 My Cases</Link>
+                <Link
+                  to="/my-cases"
+                  className="flex items-center gap-3 px-3 py-2 rounded-2xl text-sm font-medium text-gray-200 hover:text-white hover:bg-white/10 transition"
+                  onClick={() => setShowMenu(false)}
+                >
+                  <Briefcase className="w-4 h-4" />
+                  My Cases
+                </Link>
 
                 {profile?.role === "admin" && (
-                  <Link to="/admin-dashboard" className="block hover:text-blue-400" onClick={() => setShowMenu(false)}>
-                    🛠 Admin Dashboard
+                  <Link
+                    to="/pending-users"
+                    className="flex items-center gap-3 px-3 py-2 rounded-2xl text-sm font-medium text-gray-200 hover:text-white hover:bg-white/10 transition"
+                    onClick={() => setShowMenu(false)}
+                  >
+                    <Users className="w-4 h-4" />
+                    Pending Users
+                  </Link>
+                )}
+
+                {profile?.role === "admin" && (
+                  <Link
+                    to="/admin-dashboard"
+                    className="flex items-center gap-3 px-3 py-2 rounded-2xl text-sm font-medium text-gray-200 hover:text-white hover:bg-white/10 transition"
+                    onClick={() => setShowMenu(false)}
+                  >
+                    <LayoutDashboard className="w-4 h-4" />
+                    Admin Dashboard
                   </Link>
                 )}
               </div>

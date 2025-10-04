@@ -1,6 +1,6 @@
 # services/ai_service.py
-import json, os, httpx
-from typing import List, Dict, Any
+import json, os, re, httpx
+from typing import List, Dict, Any, Optional
 from firebase.firebase_config import db
 
 # -------- Helpers (new/updated) --------
@@ -178,6 +178,38 @@ def _render_prompt(payload: Dict[str, Any]) -> str:
     return f"<<SYS>>\n{system}\n<</SYS>>\n{user}"
 
 
+def _normalize_summary(text: str) -> str:
+    if not text:
+        return ""
+
+    lines: List[str] = []
+    for line in text.splitlines():
+        stripped = line.strip()
+
+        # Detect unordered bullet marker before removing it
+        has_bullet = bool(re.match(r'^[\*\-\+]\s+', stripped))
+
+        # Remove markdown headings, blockquotes, and bullet markers
+        stripped = re.sub(r'^#{1,6}\s*', '', stripped)
+        stripped = re.sub(r'^[\*\-\+]\s+', '', stripped)
+        stripped = re.sub(r'^>\s*', '', stripped)
+
+        # Remove emphasis markers but keep inner text
+        stripped = re.sub(r'\*{2}(.*?)\*{2}', r'\1', stripped)
+        stripped = re.sub(r'_(.*?)_', r'\1', stripped)
+        stripped = re.sub(r'\*(.*?)\*', r'\1', stripped)
+
+        # Collapse extra whitespace
+        stripped = re.sub(r'\s{2,}', ' ', stripped).strip()
+
+        if has_bullet and stripped:
+            stripped = f"• {stripped}"
+
+        lines.append(stripped)
+
+    return "\n".join(lines).strip()
+
+
 # -------- Backends --------
 
 async def call_ollama(prompt: str, model: str = None) -> str:
@@ -218,18 +250,23 @@ async def call_openai(prompt: str, model: str = None) -> str:
         return data["choices"][0]["message"]["content"].strip()
 
 # --- in services/ai_service.py ---
-async def generate_briefing_markdown(user_id: str, user_role: str, case_ids: List[str]) -> str:
+async def generate_briefing_markdown(
+    user_id: str,
+    user_role: str,
+    case_ids: List[str],
+    backend: Optional[str] = None,
+) -> str:
     payload = build_briefing_payload(user_id, user_role, case_ids)
     if not payload["cases"]:
         return "No accessible cases were provided."
 
     prompt = _render_prompt(payload)
 
-    backend = os.getenv("AI_BACKEND", "ollama").lower()
-    if backend == "openai":
-        return await call_openai(prompt)
-    elif backend == "ollama":
-        return await call_ollama(prompt)
+    backend_choice = (backend or os.getenv("AI_BACKEND", "ollama")).lower()
+    if backend_choice == "openai":
+        raw = await call_openai(prompt)
+    elif backend_choice == "ollama":
+        raw = await call_ollama(prompt)
     else:
         # Fallback baseline (no LLM): prefer report content; else rollup
         lines = ["# Briefing (baseline, no-LLM)", ""]
@@ -280,5 +317,6 @@ async def generate_briefing_markdown(user_id: str, user_role: str, case_ids: Lis
                     lines.append(f"- Anomalies: {len(r['anomalies'])}")
 
             lines.append("")  # spacer between cases
-        return "\n".join(lines)
+        raw = "\n".join(lines)
 
+    return _normalize_summary(raw)

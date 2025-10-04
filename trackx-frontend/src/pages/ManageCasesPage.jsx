@@ -7,6 +7,10 @@ import { useAuth } from "../context/AuthContext";
 import { signOut } from "firebase/auth";
 import { auth } from "../firebase";
 import { useNavigate } from "react-router-dom";
+import NotificationModal from "../components/NotificationModal";
+import useNotificationModal from "../hooks/useNotificationModal";
+import { getFriendlyErrorMessage } from "../utils/errorMessages";
+import { Home, FilePlus2, FolderOpen, Briefcase, LayoutDashboard } from "lucide-react";
 
 
 
@@ -24,6 +28,7 @@ function ManageCasesPage() {
   const indexOfFirstCase = indexOfLastCase - casesPerPage;
   const currentCases = cases.slice(indexOfFirstCase, indexOfLastCase);
   const totalPages = Math.ceil(cases.length / casesPerPage);
+  const { modalState, openModal, closeModal } = useNotificationModal();
 
   useEffect(() => {
     handleSearch(); // Triggers unfiltered search on first load
@@ -55,16 +60,40 @@ function ManageCasesPage() {
     }
   };
 
-  const handleDelete = async (doc_id) => {
-    if (!window.confirm("Are you sure you want to delete this case?")) return;
+  const performDelete = async (caseItem) => {
+    closeModal();
     try {
-      await axios.delete(`http://localhost:8000/cases/delete/${doc_id}`);
-      alert("Case deleted successfully.");
+      await axios.delete(`http://localhost:8000/cases/delete/${caseItem.doc_id}`);
+      openModal({
+        variant: "success",
+        title: "Case deleted",
+        description: `“${caseItem.caseTitle}” has been removed successfully.`,
+      });
       handleSearch(); 
     } catch (err) {
       console.error("Delete failed:", err);
-      alert("Failed to delete case.");
+      openModal({
+        variant: "error",
+        title: "Delete failed",
+        description: getFriendlyErrorMessage(err, "Failed to delete the case. Please try again."),
+      });
     }
+  };
+
+  const confirmDelete = (caseItem) => {
+    openModal({
+      variant: "warning",
+      title: "Delete case?",
+      description: `Are you sure you want to delete “${caseItem.caseTitle}”? This action cannot be undone.`,
+      primaryAction: {
+        label: "Delete case",
+        closeOnClick: false,
+        onClick: () => performDelete(caseItem),
+      },
+      secondaryAction: {
+        label: "Cancel",
+      },
+    });
   };
 
   return (
@@ -103,15 +132,44 @@ function ManageCasesPage() {
   
       {/* Hamburger Menu Content */}
       {showMenu && (
-        <div className="absolute top-16 left-0 bg-black bg-opacity-90 backdrop-blur-md text-white w-64 p-6 z-30 space-y-4 border-r border-gray-700 shadow-lg">
-          <Link to="/home" className="block hover:text-blue-400" onClick={() => setShowMenu(false)}>🏠 Home</Link>
-          <Link to="/new-case" className="block hover:text-blue-400" onClick={() => setShowMenu(false)}>📝 Create New Case / Report</Link>
-          <Link to="/manage-cases" className="block hover:text-blue-400" onClick={() => setShowMenu(false)}>📁 Manage Cases</Link>
-          <Link to="/my-cases" className="block hover:text-blue-400" onClick={() => setShowMenu(false)}>📁 My Cases</Link>
-  
+        <div className="absolute top-16 left-0 w-64 rounded-r-3xl border border-white/10 bg-gradient-to-br from-gray-900/95 to-black/90 backdrop-blur-xl p-6 z-30 shadow-2xl space-y-2">
+          <Link
+            to="/home"
+            className="flex items-center gap-3 px-3 py-2 rounded-2xl text-sm font-medium text-gray-200 hover:text-white hover:bg-white/10 transition"
+            onClick={() => setShowMenu(false)}
+          >
+            <Home className="w-4 h-4" />
+            Home
+          </Link>
+          <Link
+            to="/new-case"
+            className="flex items-center gap-3 px-3 py-2 rounded-2xl text-sm font-medium text-gray-200 hover:text-white hover:bg-white/10 transition"
+            onClick={() => setShowMenu(false)}
+          >
+            <FilePlus2 className="w-4 h-4" />
+            Create New Case
+          </Link>
+          <div className="flex items-center gap-3 px-3 py-2 rounded-2xl text-sm font-medium text-white bg-white/10">
+            <FolderOpen className="w-4 h-4" />
+            Manage Cases
+          </div>
+          <Link
+            to="/my-cases"
+            className="flex items-center gap-3 px-3 py-2 rounded-2xl text-sm font-medium text-gray-200 hover:text-white hover:bg-white/10 transition"
+            onClick={() => setShowMenu(false)}
+          >
+            <Briefcase className="w-4 h-4" />
+            My Cases
+          </Link>
+
           {profile?.role === "admin" && (
-            <Link to="/admin-dashboard" className="block hover:text-blue-400" onClick={() => setShowMenu(false)}>
-              🛠 Admin Dashboard
+            <Link
+              to="/admin-dashboard"
+              className="flex items-center gap-3 px-3 py-2 rounded-2xl text-sm font-medium text-gray-200 hover:text-white hover:bg-white/10 transition"
+              onClick={() => setShowMenu(false)}
+            >
+              <LayoutDashboard className="w-4 h-4" />
+              Admin Dashboard
             </Link>
           )}
         </div>
@@ -195,7 +253,7 @@ function ManageCasesPage() {
                   Manage
                 </Link>
                 <button
-                  onClick={() => handleDelete(caseItem.doc_id)}
+                  onClick={() => confirmDelete(caseItem)}
                   className="bg-red-700 text-white px-4 py-2 rounded hover:bg-red-600 transition"
                 >
                   Delete
@@ -237,6 +295,16 @@ function ManageCasesPage() {
             ＋ Create
           </Link>
         </div>
+
+        <NotificationModal
+          isOpen={modalState.isOpen}
+          title={modalState.title}
+          description={modalState.description}
+          variant={modalState.variant}
+          onClose={closeModal}
+          primaryAction={modalState.primaryAction}
+          secondaryAction={modalState.secondaryAction}
+        />
       </main>
     </div>
   );

@@ -4,6 +4,9 @@ import { collection, query, where, onSnapshot, doc, updateDoc, deleteDoc } from 
 import * as Cesium from "cesium";
 import { Pencil, Trash2 } from "lucide-react";
 import "../css/Sidebar.css";
+import NotificationModal from "./NotificationModal";
+import useNotificationModal from "../hooks/useNotificationModal";
+import { getFriendlyErrorMessage } from "../utils/errorMessages";
 
 export default function SimulationSidebar({ viewerRef, disabled = false }) {
   const [collapsed, setCollapsed] = useState(false);
@@ -14,6 +17,7 @@ export default function SimulationSidebar({ viewerRef, disabled = false }) {
   const [editTitle, setEditTitle] = useState("");
   const [editNote, setEditNote] = useState("");
   const [flashingIndex, setFlashingIndex] = useState(null);
+  const { modalState, openModal, closeModal } = useNotificationModal();
 
   useEffect(() => {
     const caseDataString = localStorage.getItem("trackxCaseData");
@@ -60,17 +64,53 @@ export default function SimulationSidebar({ viewerRef, disabled = false }) {
     return () => window.removeEventListener("flashSidebarItem", listener);
   }, []);
 
-  const handleDelete = (point) => {
-    if (window.confirm("Are you sure you want to delete this flagged point?")) {
+  const deleteFlaggedPoint = async (point) => {
+    closeModal();
+    if (!caseId || !point?.id) {
+      openModal({
+        variant: "error",
+        title: "Delete failed",
+        description: "We couldn't identify which point to delete. Please try again.",
+      });
+      return;
+    }
+    try {
       const pointRef = doc(db, `cases/${caseId}/interpolatedPoints`, point.id);
-      deleteDoc(pointRef)
-        .then(() => console.log("Point deleted"))
-        .catch((err) => console.error("Error deleting point:", err));
+      await deleteDoc(pointRef);
+      openModal({
+        variant: "success",
+        title: "Flag removed",
+        description: "The flagged point has been deleted.",
+      });
+    } catch (err) {
+      console.error("Error deleting point:", err);
+      openModal({
+        variant: "error",
+        title: "Delete failed",
+        description: getFriendlyErrorMessage(err, "We couldn't delete the flagged point. Please try again."),
+      });
     }
   };
 
+  const handleDelete = (point) => {
+    openModal({
+      variant: "warning",
+      title: "Delete flagged point?",
+      description: "Are you sure you want to remove this flagged point? This action cannot be undone.",
+      primaryAction: {
+        label: "Delete point",
+        closeOnClick: false,
+        onClick: () => deleteFlaggedPoint(point),
+      },
+      secondaryAction: {
+        label: "Cancel",
+      },
+    });
+  };
+
   return (
-    <div
+    <>
+      <div
       style={{
         position: "absolute",
         top: "24px",
@@ -85,7 +125,7 @@ export default function SimulationSidebar({ viewerRef, disabled = false }) {
         transition: "all 0.4s ease",
         overflow: "hidden",
       }}
-    >
+      >
       {/* Collapse Button */}
       <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: collapsed ? "0" : "16px" }}>
         <button
@@ -361,6 +401,17 @@ export default function SimulationSidebar({ viewerRef, disabled = false }) {
           </div>
         </div>
       )}
-    </div>
+      </div>
+
+      <NotificationModal
+        isOpen={modalState.isOpen}
+        title={modalState.title}
+        description={modalState.description}
+        variant={modalState.variant}
+        onClose={closeModal}
+        primaryAction={modalState.primaryAction}
+        secondaryAction={modalState.secondaryAction}
+      />
+    </>
   );
 }

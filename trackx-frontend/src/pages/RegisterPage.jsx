@@ -3,11 +3,13 @@
 import { useState } from "react"
 import { Link, useNavigate } from "react-router-dom"
 import { Eye, EyeOff, Loader2 } from "lucide-react"
-import { createUserWithEmailAndPassword } from "firebase/auth"
+import { createUserWithEmailAndPassword, sendEmailVerification } from "firebase/auth"
 import { doc, setDoc } from "firebase/firestore"
 import { auth, db } from "../firebase"
 import "../css/register-animations.css"; 
-import { sendEmailVerification } from "firebase/auth"; 
+import NotificationModal from "../components/NotificationModal";
+import useNotificationModal from "../hooks/useNotificationModal";
+import { getFriendlyErrorMessage } from "../utils/errorMessages";
 
 
 function RegisterPage() {
@@ -23,6 +25,7 @@ function RegisterPage() {
   const [showPassword, setShowPassword] = useState(false)
   const [showConfirmPassword, setShowConfirmPassword] = useState(false)
   const [isLoading, setIsLoading] = useState(false) // Add loading state
+  const { modalState, openModal, closeModal } = useNotificationModal();
 
   const isValidSouthAfricanId = (id) => {
     const idRegex = /^\d{13}$/;
@@ -33,12 +36,20 @@ const handleRegister = async (e) => {
   e.preventDefault();
 
   if (password !== confirmPassword) {
-    alert("Passwords do not match!");
+    openModal({
+      variant: "warning",
+      title: "Passwords do not match",
+      description: "Please make sure your password and confirmation match before continuing.",
+    });
     return;
   }
 
   if (!isValidSouthAfricanId(idNumber)) {
-    alert("Please enter a valid 13-digit South African ID number.");
+    openModal({
+      variant: "warning",
+      title: "Invalid ID number",
+      description: "Enter a valid 13-digit South African ID number to continue.",
+    });
     return;
   }
   
@@ -110,7 +121,11 @@ const handleRegister = async (e) => {
     navigate("/verify-email"); // After the user logs in successfully, redirect to verify-email pagefor email verification status
   } catch (error) {
     console.error("Registration error:", error);
-    alert(error.message);
+    openModal({
+      variant: "error",
+      title: "Registration failed",
+      description: getFriendlyErrorMessage(error, "We couldn't complete your registration. Please try again."),
+    });
   } finally {
     setIsLoading(false);
   }
@@ -289,13 +304,23 @@ const handleRegister = async (e) => {
           </div>
         </form>
 
-        <div className="text-center text-sm text-gray-400">
-          Already have an account?{" "}
-          <Link to="/signin" className="text-blue-400 hover:underline">
-            Sign In
-          </Link>
-        </div>
+      <div className="text-center text-sm text-gray-400">
+        Already have an account?{" "}
+        <Link to="/signin" className="text-blue-400 hover:underline">
+          Sign In
+        </Link>
       </div>
+    </div>
+
+      <NotificationModal
+        isOpen={modalState.isOpen}
+        title={modalState.title}
+        description={modalState.description}
+        variant={modalState.variant}
+        onClose={closeModal}
+        primaryAction={modalState.primaryAction}
+        secondaryAction={modalState.secondaryAction}
+      />
     </div>
   )
 }

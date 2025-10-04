@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
-import { Upload, Info, CheckCircle, AlertCircle, FileText } from "lucide-react";
+import { Upload, Info, CheckCircle, AlertCircle, FileText, Home, FilePlus2, FolderOpen, Briefcase, LayoutDashboard, UserPlus, X } from "lucide-react";
 import Papa from "papaparse";
 import adflogo from "../assets/image-removebg-preview.png";
 import axios from "axios";
@@ -11,6 +11,9 @@ import { useAuth } from "../context/AuthContext";
 import { db } from "../firebase";
 import { doc, collection, writeBatch, serverTimestamp } from "firebase/firestore";
 import { clearCaseSession } from "../utils/caseSession";
+import NotificationModal from "../components/NotificationModal";
+import useNotificationModal from "../hooks/useNotificationModal";
+import { getFriendlyErrorMessage } from "../utils/errorMessages";
 
 
 
@@ -78,6 +81,94 @@ function NewCasePage() {
   const [showGuide, setShowGuide] = useState(false);
   const [fileType, setFileType] = useState(null);
   const [showMenu, setShowMenu] = useState(false);
+  const { modalState, openModal, closeModal } = useNotificationModal();
+  const [assignedUsers, setAssignedUsers] = useState([]);
+  const [userSearchTerm, setUserSearchTerm] = useState("");
+  const [userSearchResults, setUserSearchResults] = useState([]);
+  const [isSearchingUsers, setIsSearchingUsers] = useState(false);
+  const API_BASE = (import.meta.env.VITE_API_URL || "http://localhost:8000").replace(/\/+$/, "");
+
+  useEffect(() => {
+    const current = auth.currentUser;
+    if (!current) return;
+    setAssignedUsers((prev) => {
+      if (prev.some((u) => u.id === current.uid)) {
+        return prev;
+      }
+      const displayName = profile
+        ? `${profile.firstName || ""} ${profile.surname || ""}`.trim() || current.email || "Current user"
+        : current.email || "Current user";
+      return [
+        ...prev,
+        {
+          id: current.uid,
+          name: displayName,
+          email: current.email || "",
+        },
+      ];
+    });
+  }, [profile]);
+
+  const currentUserId = auth.currentUser?.uid;
+
+  const handleUserSearch = async () => {
+    const term = userSearchTerm.trim();
+    if (term.length < 2) {
+      openModal({
+        variant: "info",
+        title: "Keep typing",
+        description: "Enter at least two characters to search for users.",
+      });
+      return;
+    }
+
+    setIsSearchingUsers(true);
+    try {
+      const { data } = await axios.get(`${API_BASE}/admin/users`, {
+        params: {
+          search: term,
+          page_size: 10,
+        },
+      });
+      const results = data?.users || [];
+      const assignedIds = new Set(assignedUsers.map((u) => u.id));
+      setUserSearchResults(results.filter((user) => user.id && !assignedIds.has(user.id)));
+    } catch (error) {
+      console.error("User search failed:", error);
+      openModal({
+        variant: "error",
+        title: "Search failed",
+        description: getFriendlyErrorMessage(error, "We couldn't search for users right now. Please try again."),
+      });
+    } finally {
+      setIsSearchingUsers(false);
+    }
+  };
+
+  const handleAddUserToCase = (user) => {
+    if (!user?.id) return;
+    setAssignedUsers((prev) => {
+      if (prev.some((u) => u.id === user.id)) {
+        return prev;
+      }
+      return [...prev, user];
+    });
+    setUserSearchResults((prev) => prev.filter((u) => u.id !== user.id));
+  };
+
+  const handleRemoveAssignedUser = (userId) => {
+    if (userId === currentUserId) {
+      openModal({
+        variant: "warning",
+        title: "Cannot remove",
+        description: "You cannot remove yourself from the case you are creating.",
+      });
+      return;
+    }
+
+    setAssignedUsers((prev) => prev.filter((user) => user.id !== userId));
+  };
+
 
   useEffect(() => {
     clearCaseSession();   // ✅ guarantees a clean slate when user lands on /new-case
@@ -97,6 +188,7 @@ function NewCasePage() {
       between: mirror.between || "",
       urgency: mirror.urgency || "Medium",
       userId: mirror.userId || null,
+      userIds: mirror.userIds || (mirror.userId ? [mirror.userId] : []),
       locationTitles: mirror.locationTitles || [],
       reportIntro: mirror.reportIntro || "",
       reportConclusion: mirror.reportConclusion || "",
@@ -801,12 +893,28 @@ Please ensure your PDF contains GPS coordinates in one of these formats:
   const handleCreateCase = async () => {
     try {
       if (!caseNumber || !caseTitle || !dateOfIncident || !region || !parsedData) {
-        alert("Please fill all required fields and upload a valid file");
+        openModal({
+          variant: "warning",
+          title: "Missing information",
+          description:
+            "Please complete the case details and upload a valid file before creating the case.",
+        });
         return;
       }
-  
+
       setIsProcessing(true);
-  
+
+      const assignedUserIds = assignedUsers.map((user) => user.id).filter(Boolean);
+      if (!assignedUserIds.length) {
+        openModal({
+          variant: "warning",
+          title: "Add at least one user",
+          description: "Please ensure the case has at least one assigned investigator.",
+        });
+        setIsProcessing(false);
+        return;
+      }
+
       // 1) BACKEND — create the case in the original, working system
       const casePayload = {
         case_number: caseNumber,
@@ -816,7 +924,8 @@ Please ensure your PDF contains GPS coordinates in one of these formats:
         between: between || "",
         urgency,
         userID: auth.currentUser ? auth.currentUser.uid : null,
-  
+        userIds: assignedUserIds,
+
         // what the backend already accepted previously:
         csv_data: parsedData.stoppedPoints.map((p) => ({
           latitude: p.lat,
@@ -844,7 +953,7 @@ Please ensure your PDF contains GPS coordinates in one of these formats:
       };
   
       const { data: created } = await axios.post(
-        (import.meta.env.VITE_API_URL || "http://localhost:8000").replace(/\/+$/,"") + "/cases/create",
+        `${API_BASE}/cases/create`,
         casePayload,
         { headers: { "Content-Type": "application/json" } }
       );
@@ -861,8 +970,9 @@ Please ensure your PDF contains GPS coordinates in one of these formats:
         region,
         between: between || "",
         urgency,
-        userId: auth.currentUser ? auth.currentUser.uid : null,
-  
+        userId: assignedUserIds[0] || (auth.currentUser ? auth.currentUser.uid : null),
+        userIds: assignedUserIds,
+
         locations: parsedData.stoppedPoints.map((p, i) => ({
           lat: p.lat,
           lng: p.lng,
@@ -885,11 +995,23 @@ Please ensure your PDF contains GPS coordinates in one of these formats:
       localStorage.setItem("trackxCurrentCaseId", backendCaseId);
       localStorage.setItem("trackxCaseData", JSON.stringify({ ...mirror, caseId: backendCaseId }));
   
-      alert("Case created successfully! Moving to annotations...");
-      navigate("/annotations");
+      openModal({
+        variant: "success",
+        title: "Case created",
+        description:
+          "Your case was created successfully. Continue to annotations to work with the extracted data.",
+        primaryAction: {
+          label: "Continue to annotations",
+          onClick: () => navigate("/annotations"),
+        },
+      });
     } catch (err) {
       console.error("Failed to create case:", err);
-      alert(`Failed to create case: ${err.message}`);
+      openModal({
+        variant: "error",
+        title: "Case creation failed",
+        description: getFriendlyErrorMessage(err),
+      });
     } finally {
       setIsProcessing(false);
     }
@@ -939,7 +1061,12 @@ Please ensure your PDF contains GPS coordinates in one of these formats:
     e.preventDefault();
 
     if (!caseNumber || !caseTitle || !dateOfIncident || !region || !file || !parsedData) {
-      alert("Please fill all required fields and upload a valid file");
+      openModal({
+        variant: "warning",
+        title: "Missing information",
+        description:
+          "Please complete all required fields and upload a valid CSV or PDF file before continuing.",
+      });
       return;
     }
 
@@ -997,31 +1124,44 @@ Please ensure your PDF contains GPS coordinates in one of these formats:
 
       {/* Hamburger Menu Content */}
       {showMenu && (
-        <div className="absolute top-16 left-0 bg-black bg-opacity-90 backdrop-blur-md text-white w-64 p-6 z-30 space-y-4 border-r border-gray-700 shadow-lg">
-          <Link to="/home" className="block hover:text-blue-400" onClick={() => setShowMenu(false)}>
-            🏠 Home
-          </Link>
-          <Link to="/new-case" className="block hover:text-blue-400" onClick={() => setShowMenu(false)}>
-            📝 Create New Case / Report
-          </Link>
+        <div className="absolute top-16 left-0 w-64 rounded-r-3xl border border-white/10 bg-gradient-to-br from-gray-900/95 to-black/90 backdrop-blur-xl p-6 z-30 shadow-2xl space-y-2">
           <Link
-            to="/manage-cases"
-            className="block hover:text-blue-400"
+            to="/home"
+            className="flex items-center gap-3 px-3 py-2 rounded-2xl text-sm font-medium text-gray-200 hover:text-white hover:bg-white/10 transition"
             onClick={() => setShowMenu(false)}
           >
-            📁 Manage Cases
+            <Home className="w-4 h-4" />
+            Home
           </Link>
-          <Link to="/my-cases" className="block hover:text-blue-400" onClick={() => setShowMenu(false)}>
-            📁 My Cases
+          <div className="flex items-center gap-3 px-3 py-2 rounded-2xl text-sm font-medium text-white bg-white/10">
+            <FilePlus2 className="w-4 h-4" />
+            Create New Case
+          </div>
+          <Link
+            to="/manage-cases"
+            className="flex items-center gap-3 px-3 py-2 rounded-2xl text-sm font-medium text-gray-200 hover:text-white hover:bg-white/10 transition"
+            onClick={() => setShowMenu(false)}
+          >
+            <FolderOpen className="w-4 h-4" />
+            Manage Cases
+          </Link>
+          <Link
+            to="/my-cases"
+            className="flex items-center gap-3 px-3 py-2 rounded-2xl text-sm font-medium text-gray-200 hover:text-white hover:bg-white/10 transition"
+            onClick={() => setShowMenu(false)}
+          >
+            <Briefcase className="w-4 h-4" />
+            My Cases
           </Link>
 
           {profile?.role === "admin" && (
             <Link
               to="/admin-dashboard"
-              className="block hover:text-blue-400"
+              className="flex items-center gap-3 px-3 py-2 rounded-2xl text-sm font-medium text-gray-200 hover:text-white hover:bg-white/10 transition"
               onClick={() => setShowMenu(false)}
             >
-              🛠 Admin Dashboard
+              <LayoutDashboard className="w-4 h-4" />
+              Admin Dashboard
             </Link>
           )}
         </div>
@@ -1029,11 +1169,13 @@ Please ensure your PDF contains GPS coordinates in one of these formats:
 
       {/* Nav Tabs */}
       <div className="flex justify-center space-x-8 bg-gradient-to-r from-black to-gray-900 bg-opacity-80 backdrop-blur-md py-2 text-white text-sm">
-        <span className="font-bold underline">Case Information</span>
-        <Link to="/annotations" className="text-gray-400 hover:text-white">
+        <span className="inline-flex items-center rounded-full bg-white/15 px-4 py-1.5 font-semibold text-white">
+          Case Information
+        </span>
+        <Link to="/annotations" className="text-gray-300 hover:text-white">
           Annotations
         </Link>
-        <Link to="/overview" className="text-gray-400 hover:text-white">
+        <Link to="/overview" className="text-gray-300 hover:text-white">
           Overview
         </Link>
       </div>
@@ -1148,6 +1290,93 @@ Please ensure your PDF contains GPS coordinates in one of these formats:
               <option value="Critical">Critical</option>
             </select>
           </div>
+
+          {profile?.role === "admin" && (
+            <div className="md:col-span-2 bg-gray-900 bg-opacity-60 border border-gray-700 rounded-xl p-4 space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-sm font-semibold text-white">Collaborators</h3>
+                  <p className="text-xs text-gray-400">
+                    Add additional investigators who should have access to this case.
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap gap-2">
+                {assignedUsers.map((user) => (
+                  <span
+                    key={user.id}
+                    className="inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-1 text-xs text-white"
+                  >
+                    <span className="font-medium">{user.name || user.email || user.id}</span>
+                    {user.id !== currentUserId && (
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveAssignedUser(user.id)}
+                        className="text-gray-300 hover:text-red-300"
+                        aria-label={`Remove ${user.name || user.email || user.id}`}
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    )}
+                  </span>
+                ))}
+              </div>
+
+              <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+                <input
+                  type="text"
+                  value={userSearchTerm}
+                  onChange={(e) => setUserSearchTerm(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      handleUserSearch();
+                    }
+                  }}
+                  placeholder="Search by name or email"
+                  className="flex-1 rounded-lg bg-gray-800 border border-gray-700 text-white px-3 py-2 text-sm placeholder-gray-500"
+                />
+                <button
+                  type="button"
+                  onClick={handleUserSearch}
+                  className="inline-flex items-center gap-2 px-4 py-2 bg-blue-700 hover:bg-blue-600 rounded-lg text-sm text-white"
+                >
+                  <UserPlus className="w-4 h-4" />
+                  Search
+                </button>
+              </div>
+
+              <div className="space-y-2">
+                {isSearchingUsers ? (
+                  <p className="text-xs text-gray-400">Searching users...</p>
+                ) : userSearchResults.length > 0 ? (
+                  userSearchResults.map((user) => (
+                    <div
+                      key={user.id}
+                      className="flex items-center justify-between bg-gray-800 bg-opacity-60 border border-gray-700 rounded-lg px-3 py-2 text-xs"
+                    >
+                      <div>
+                        <p className="text-white font-medium">{user.name || user.email || user.id}</p>
+                        <p className="text-gray-400">{user.email}</p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleAddUserToCase(user)}
+                        className="inline-flex items-center gap-1 px-3 py-1 bg-green-600 hover:bg-green-500 rounded-full text-white"
+                      >
+                        <UserPlus className="w-3 h-3" /> Add
+                      </button>
+                    </div>
+                  ))
+                ) : userSearchTerm ? (
+                  <p className="text-xs text-gray-500">No users found.</p>
+                ) : (
+                  <p className="text-xs text-gray-500">Search to find users to add to this case.</p>
+                )}
+              </div>
+            </div>
+          )}
 
           {/* Enhanced File Upload Section */}
           <div className="mt-8">
@@ -1405,6 +1634,16 @@ Please ensure your PDF contains GPS coordinates in one of these formats:
           </div>
         </form>
       </div>
+
+      <NotificationModal
+        isOpen={modalState.isOpen}
+        title={modalState.title}
+        description={modalState.description}
+        variant={modalState.variant}
+        onClose={closeModal}
+        primaryAction={modalState.primaryAction}
+        secondaryAction={modalState.secondaryAction}
+      />
     </motion.div>
   );
 }
