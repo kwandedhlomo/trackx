@@ -15,6 +15,7 @@ import time
 from datetime import timedelta
 from datetime import timezone
 from datetime import datetime
+from typing import List, Dict, Any, Optional
 from services.notifications_service import add_notification  # Import the notifications service
 import os
 from dotenv import load_dotenv
@@ -37,40 +38,96 @@ def sanitize_firestore_data(data):
             clean[key] = value.isoformat()
         elif isinstance(value, DocumentReference):
             clean[key] = value.id
+        elif isinstance(value, list):
+            clean[key] = value
+        elif isinstance(value, dict):
+            clean[key] = value
         else:
             clean[key] = str(value)
     return clean
+
+
+def _case_accessible_to_user(case_data: dict, user_id: str) -> bool:
+    if not user_id:
+        return True
+    user_ids = case_data.get("userIds") or case_data.get("userIDs") or []
+    if isinstance(user_ids, list) and user_id in user_ids:
+        return True
+    return case_data.get("userID") == user_id
+
+
+def _get_case_documents_for_user(user_id: str):
+    cases_ref = db.collection("cases")
+    docs = {}
+    if not user_id:
+        for doc in cases_ref.stream():
+            docs[doc.id] = doc
+        return docs
+
+    try:
+        for doc in cases_ref.where("userIds", "array_contains", user_id).stream():
+            docs[doc.id] = doc
+    except Exception as e:
+        logger.debug(f"userIds array_contains query failed or returned no docs for user {user_id}: {e}")
+
+    try:
+        for doc in cases_ref.where("userIDs", "array_contains", user_id).stream():
+            docs[doc.id] = doc
+    except Exception as e:
+        logger.debug(f"userIDs array_contains query failed or returned no docs for user {user_id}: {e}")
+
+    try:
+        for doc in cases_ref.where("userID", "==", user_id).stream():
+            docs.setdefault(doc.id, doc)
+    except Exception as e:
+        logger.debug(f"legacy userID query failed or returned no docs for user {user_id}: {e}")
+
+    return docs
 
 async def search_cases(case_name: str = "", region: str = "", date: str = "", user_id: str = "", status: str = "", urgency: str = ""):
     try:
         print(f"Received filters: case_name={case_name}, region={region}, date={date}, user_id={user_id}, status={status}, urgency={urgency}")
         
-        cases_ref = db.collection("cases")
-        query = cases_ref
-
-        # Always filter by user_id
         if user_id:
-            query = query.where("userID", "==", user_id)
+            docs_map = _get_case_documents_for_user(user_id)
+            documents = list(docs_map.values())
+        else:
+            cases_ref = db.collection("cases")
+            query_ref = cases_ref
+            if case_name:
+                query_ref = query_ref.where("caseTitle", "==", case_name)
+            if region:
+                query_ref = query_ref.where("region", "==", region)
+            if date:
+                query_ref = query_ref.where("dateOfIncident", "==", date)
+            if status:
+                query_ref = query_ref.where("status", "==", status)
+            if urgency:
+                query_ref = query_ref.where("urgency", "==", urgency)
+            documents = list(query_ref.stream())
 
-        # Dynamically chain other filters
-        if case_name:
-            query = query.where("caseTitle", "==", case_name)
-        if region:
-            query = query.where("region", "==", region)
-        if date:
-            query = query.where("dateOfIncident", "==", date)
-        if status:
-            query = query.where("status", "==", status)
-        if urgency:
-            query = query.where("urgency", "==", urgency)
-
-        documents = list(query.stream())
         results = []
+        seen_ids = set()
         for doc in documents:
+            if doc.id in seen_ids:
+                continue
             data = doc.to_dict()
+            if not _case_accessible_to_user(data, user_id):
+                continue
+            if case_name and data.get("caseTitle") != case_name:
+                continue
+            if region and data.get("region") != region:
+                continue
+            if date and data.get("dateOfIncident") != date:
+                continue
+            if status and data.get("status") != status:
+                continue
+            if urgency and data.get("urgency") != urgency:
+                continue
             sanitized = sanitize_firestore_data(data)
             sanitized["doc_id"] = doc.id
             results.append(sanitized)
+            seen_ids.add(doc.id)
 
         return results
 
@@ -83,6 +140,16 @@ async def create_case(payload: CaseCreateRequest) -> str:
     try:
         case_id = str(uuid.uuid4())
 
+        raw_user_ids = list(getattr(payload, "userIDs", []) or getattr(payload, "userIds", []) or [])
+        legacy_user_id = getattr(payload, "userID", None)
+        if legacy_user_id:
+            raw_user_ids.append(legacy_user_id)
+        # ensure creator present at least once
+        user_ids = []
+        for uid in raw_user_ids:
+            if uid and uid not in user_ids:
+                user_ids.append(uid)
+
         # Main case metadata
         case_data = {
             "caseNumber": payload.case_number,
@@ -93,7 +160,8 @@ async def create_case(payload: CaseCreateRequest) -> str:
             "urgency": payload.urgency, 
             "createdAt": firestore.SERVER_TIMESTAMP,
             "status": "in progress",
-            "userID": getattr(payload, "userID", None)
+            "userID": user_ids[0] if user_ids else legacy_user_id,
+            "userIds": user_ids,
         }
 
         # Save case document
@@ -141,14 +209,17 @@ async def create_case(payload: CaseCreateRequest) -> str:
             logger.info(f"Added {len(payload.all_points)} allPoints to case {case_id}")
         
                 # Trigger notification
-        if case_data["userID"]:
-            await add_notification(
-                user_id=case_data["userID"],
-                title="Case Created",
-                message=f"A new case titled '{case_data['caseTitle']}' has been created.",
-                notification_type="case-created"
-            )
-            logger.info(f"Notification sent to user {case_data['userID']} for case creation.")
+        notified = set()
+        for uid in user_ids:
+            if uid and uid not in notified:
+                await add_notification(
+                    user_id=uid,
+                    title="Case Created",
+                    message=f"A new case titled '{case_data['caseTitle']}' has been created.",
+                    notification_type="case-created"
+                )
+                notified.add(uid)
+                logger.info(f"Notification sent to user {uid} for case creation.")
 
         return case_id
 
@@ -188,6 +259,20 @@ async def update_case(data: dict):
             "updatedAt": SERVER_TIMESTAMP,
         }
 
+        if "userIDs" in data or "userIds" in data:
+            incoming_user_ids = data.get("userIDs") or data.get("userIds") or []
+            if not isinstance(incoming_user_ids, list):
+                raise ValueError("userIds must be a list")
+            normalized_ids = []
+            for uid in incoming_user_ids:
+                if uid and uid not in normalized_ids:
+                    normalized_ids.append(uid)
+            update_fields["userIds"] = normalized_ids
+            if normalized_ids:
+                update_fields["userID"] = normalized_ids[0]
+        elif "userID" in data:
+            update_fields["userID"] = data.get("userID")
+
         # Remove fields that are not being updated
         update_fields = {k: v for k, v in update_fields.items() if v is not None}
 
@@ -214,17 +299,25 @@ async def update_case(data: dict):
             notification_message = f"Your case '{case_title}' has been updated."
 
         # Fetch the user ID associated with the case
-        user_id = current_data.get("userID")
+        target_user_ids = (
+            update_fields.get("userIds")
+            or current_data.get("userIds")
+            or []
+        )
+        if not target_user_ids and current_data.get("userID"):
+            target_user_ids = [current_data.get("userID")]
 
-        # Trigger a notification for the user
-        if user_id:
-            await add_notification(
-                user_id=user_id,
-                title="Case Updated",
-                message=notification_message,
-                notification_type="case-update"
-            )
-            print(f"Notification sent to user {user_id} for case update.")
+        notified = set()
+        for uid in target_user_ids:
+            if uid and uid not in notified:
+                await add_notification(
+                    user_id=uid,
+                    title="Case Updated",
+                    message=notification_message,
+                    notification_type="case-update"
+                )
+                notified.add(uid)
+                print(f"Notification sent to user {uid} for case update.")
 
         return True, "Update successful"
 
@@ -242,7 +335,9 @@ async def delete_case(doc_id: str):
             return False, "Case not found"
 
         case_data = doc.to_dict()
-        user_id = case_data.get("userID")
+        user_ids = case_data.get("userIds") or []
+        if not user_ids and case_data.get("userID"):
+            user_ids = [case_data.get("userID")]
         case_title = case_data.get("caseTitle", "Unknown Case")
 
         # Delete the case
@@ -250,14 +345,17 @@ async def delete_case(doc_id: str):
         print(f"Deleted case with doc_id: {doc_id}")
 
         # Trigger notification if user ID is found
-        if user_id:
-            await add_notification(
-                user_id=user_id,
-                title="Case Deleted",
-                message=f"Your case titled '{case_title}' has been deleted.",
-                notification_type="case-delete"
-            )
-            print(f"Notification sent to user {user_id} for deleted case.")
+        notified = set()
+        for uid in user_ids:
+            if uid and uid not in notified:
+                await add_notification(
+                    user_id=uid,
+                    title="Case Deleted",
+                    message=f"Your case titled '{case_title}' has been deleted.",
+                    notification_type="case-delete"
+                )
+                notified.add(uid)
+                print(f"Notification sent to user {uid} for deleted case.")
 
         return True, "Deleted successfully"
 
@@ -266,18 +364,27 @@ async def delete_case(doc_id: str):
         return False, f"Delete failed: {str(e)}"
 
 async def fetch_recent_cases(sort_by: str = "dateEntered", user_id: str = ""):
-    query = db.collection("cases")
-    if user_id:
-        query = query.where("userID", "==", user_id)
-
+    docs_map = _get_case_documents_for_user(user_id)
     sort_field = "createdAt" if sort_by == "dateEntered" else "dateOfIncident"
-    query = query.order_by(sort_field, direction=firestore.Query.DESCENDING).limit(4)
 
-    documents = list(query.stream())
+    def _sort_key(doc_snapshot):
+        data = doc_snapshot.to_dict() or {}
+        value = data.get(sort_field)
+        if isinstance(value, DatetimeWithNanoseconds):
+            return value
+        if isinstance(value, datetime):
+            return value
+        if isinstance(value, str):
+            try:
+                return datetime.fromisoformat(value.split("Z")[0])
+            except Exception:
+                return datetime.min
+        return datetime.min
+
+    sorted_docs = sorted(docs_map.values(), key=_sort_key, reverse=True)
     results = []
-
-    for doc in documents:
-        data = doc.to_dict()
+    for doc in sorted_docs[:4]:
+        data = doc.to_dict() or {}
         sanitized = sanitize_firestore_data(data)
         sanitized["doc_id"] = doc.id
         results.append(sanitized)
@@ -286,11 +393,8 @@ async def fetch_recent_cases(sort_by: str = "dateEntered", user_id: str = ""):
 
 async def get_case_counts_by_month(user_id: str = ""):
     print(f"get_case_counts_by_month() called with user_id: {user_id}")
-    query = db.collection("cases")
-    if user_id:
-        query = query.where("userID", "==", user_id)
-
-    documents = list(query.stream())
+    docs_map = _get_case_documents_for_user(user_id)
+    documents = list(docs_map.values())
     print(f" Found {len(documents)} case documents for monthly count")
 
     month_counts = defaultdict(int)
@@ -309,11 +413,8 @@ async def get_case_counts_by_month(user_id: str = ""):
 
 
 async def get_region_case_counts(user_id: str = ""):
-    query = db.collection("cases")
-    if user_id:
-        query = query.where("userID", "==", user_id)
-
-    docs = list(query.stream())
+    docs_map = _get_case_documents_for_user(user_id)
+    docs = list(docs_map.values())
     print(f" Found {len(docs)} cases for region count (user_id={user_id})")
 
     region_counts = {}
@@ -751,6 +852,58 @@ async def fetch_last_points_per_case():
     except Exception as e:
         print(f"Error in fetch_last_points_per_case: {e}")
         return []
+
+
+async def assign_case_users(case_id: str, user_ids: List[str]):
+    if not isinstance(user_ids, list) or not user_ids:
+        raise ValueError("user_ids must be a non-empty list")
+
+    normalized_ids: list[str] = []
+    for uid in user_ids:
+        if uid and uid not in normalized_ids:
+            normalized_ids.append(uid)
+
+    if not normalized_ids:
+        raise ValueError("No valid user IDs provided")
+
+    case_ref = db.collection("cases").document(case_id)
+    snapshot = case_ref.get()
+    if not snapshot.exists:
+        raise ValueError("Case not found")
+
+    existing = snapshot.to_dict() or {}
+    previous_ids = set(existing.get("userIds") or [])
+    if not previous_ids and existing.get("userID"):
+        previous_ids.add(existing.get("userID"))
+
+    case_ref.update({
+        "userIds": normalized_ids,
+        "userID": normalized_ids[0],
+        "updatedAt": firestore.SERVER_TIMESTAMP,
+    })
+
+    case_title = existing.get("caseTitle", "Unknown Case")
+
+    newly_added = [uid for uid in normalized_ids if uid not in previous_ids]
+    removed = [uid for uid in previous_ids if uid not in normalized_ids]
+
+    for uid in newly_added:
+        await add_notification(
+            user_id=uid,
+            title="Case Assignment",
+            message=f"You have been added to the case '{case_title}'.",
+            notification_type="case-assignment"
+        )
+
+    for uid in removed:
+        await add_notification(
+            user_id=uid,
+            title="Case Access Updated",
+            message=f"You have been removed from the case '{case_title}'.",
+            notification_type="case-assignment"
+        )
+
+    return True
 
 async def generate_ai_description(lat, lng, timestamp, status: str = "", snapshot: str | None = None) -> str:
     """

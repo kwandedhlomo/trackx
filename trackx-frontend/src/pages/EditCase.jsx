@@ -6,8 +6,11 @@ import axios from "axios";
 import { useAuth } from "../context/AuthContext";
 import { signOut } from "firebase/auth";
 import { auth } from "../firebase";
-import { MapPin, FileText, Camera, Eye } from "lucide-react";
+import { MapPin, FileText, Camera, Eye, Home, FilePlus2, FolderOpen, Briefcase, LayoutDashboard } from "lucide-react";
 import { clearCaseSession } from "../utils/caseSession";
+import NotificationModal from "../components/NotificationModal";
+import useNotificationModal from "../hooks/useNotificationModal";
+import { getFriendlyErrorMessage } from "../utils/errorMessages";
 
 // Firebase services (teammate’s)
 import {
@@ -23,6 +26,22 @@ function EditCasePage() {
   const location = useLocation();
   const navigate = useNavigate();
   const { profile } = useAuth();
+  const { modalState, openModal, closeModal } = useNotificationModal();
+
+  const showError = (title, error, fallback) =>
+    openModal({
+      variant: "error",
+      title,
+      description: getFriendlyErrorMessage(error, fallback),
+    });
+
+  const showSuccess = (title, description, primaryAction) =>
+    openModal({
+      variant: "success",
+      title,
+      description,
+      ...(primaryAction ? { primaryAction: { closeOnClick: true, ...primaryAction } } : {}),
+    });
 
   // Possible sources
   const caseDataFromLocation = location.state?.caseData || null;
@@ -281,11 +300,17 @@ function EditCasePage() {
         }
       }
 
-      alert("Case updated successfully!");
-      navigate("/home");
+      showSuccess(
+        "Case updated",
+        "Your changes have been saved successfully.",
+        {
+          label: "Return to dashboard",
+          onClick: () => navigate("/home"),
+        }
+      );
     } catch (error) {
       console.error("Error updating case:", error);
-      alert("An error occurred during update.");
+      showError("Update failed", error, "An error occurred while updating the case.");
     }
   };
 
@@ -336,7 +361,11 @@ function EditCasePage() {
           { state: { caseId: firebaseCase?.caseId || null } } );
     } catch (err) {
       console.error("Error loading case into annotation system:", err);
-      alert("Error loading case for annotations. Please try again.");
+      showError(
+        "Unable to load case",
+        err,
+        "We couldn't load this case for annotations. Please try again."
+      );
     }
   };
 
@@ -361,7 +390,11 @@ function EditCasePage() {
       navigate("/new-case");
     } catch (err) {
       console.error("Error creating annotation session:", err);
-      alert("Error creating annotation session. Please try again.");
+      showError(
+        "Unable to start session",
+        err,
+        "We couldn't create a new annotation session. Please try again."
+      );
     }
   };
 
@@ -409,22 +442,47 @@ function EditCasePage() {
 
       {/* Hamburger Menu */}
       {showMenu && (
-        <div className="absolute top-16 left-0 bg-black bg-opacity-90 backdrop-blur-md text-white w-64 p-6 z-30 space-y-4 border-r border-gray-700 shadow-lg">
-          <Link to="/home" className="block hover:text-blue-400" onClick={() => setShowMenu(false)}>
-            🏠 Home
+        <div className="absolute top-16 left-0 w-64 rounded-r-3xl border border-white/10 bg-gradient-to-br from-gray-900/95 to-black/90 backdrop-blur-xl p-6 z-30 shadow-2xl space-y-2">
+          <Link
+            to="/home"
+            className="flex items-center gap-3 px-3 py-2 rounded-2xl text-sm font-medium text-gray-200 hover:text-white hover:bg-white/10 transition"
+            onClick={() => setShowMenu(false)}
+          >
+            <Home className="w-4 h-4" />
+            Home
           </Link>
-          <Link to="/new-case" className="block hover:text-blue-400" onClick={() => setShowMenu(false)}>
-            📝 Create New Case / Report
+          <Link
+            to="/new-case"
+            className="flex items-center gap-3 px-3 py-2 rounded-2xl text-sm font-medium text-gray-200 hover:text-white hover:bg-white/10 transition"
+            onClick={() => setShowMenu(false)}
+          >
+            <FilePlus2 className="w-4 h-4" />
+            Create New Case
           </Link>
-          <Link to="/manage-cases" className="block hover:text-blue-400" onClick={() => setShowMenu(false)}>
-            📁 Manage Cases
+          <Link
+            to="/manage-cases"
+            className="flex items-center gap-3 px-3 py-2 rounded-2xl text-sm font-medium text-gray-200 hover:text-white hover:bg-white/10 transition"
+            onClick={() => setShowMenu(false)}
+          >
+            <FolderOpen className="w-4 h-4" />
+            Manage Cases
           </Link>
-          <Link to="/my-cases" className="block hover:text-blue-400" onClick={() => setShowMenu(false)}>
-            📁 My Cases
+          <Link
+            to="/my-cases"
+            className="flex items-center gap-3 px-3 py-2 rounded-2xl text-sm font-medium text-gray-200 hover:text-white hover:bg-white/10 transition"
+            onClick={() => setShowMenu(false)}
+          >
+            <Briefcase className="w-4 h-4" />
+            My Cases
           </Link>
           {profile?.role === "admin" && (
-            <Link to="/admin-dashboard" className="block hover:text-blue-400" onClick={() => setShowMenu(false)}>
-              🛠 Admin Dashboard
+            <Link
+              to="/admin-dashboard"
+              className="flex items-center gap-3 px-3 py-2 rounded-2xl text-sm font-medium text-gray-200 hover:text-white hover:bg-white/10 transition"
+              onClick={() => setShowMenu(false)}
+            >
+              <LayoutDashboard className="w-4 h-4" />
+              Admin Dashboard
             </Link>
           )}
         </div>
@@ -706,6 +764,16 @@ function EditCasePage() {
           </div>
         )}
       </div>
+
+      <NotificationModal
+        isOpen={modalState.isOpen}
+        title={modalState.title}
+        description={modalState.description}
+        variant={modalState.variant}
+        onClose={closeModal}
+        primaryAction={modalState.primaryAction}
+        secondaryAction={modalState.secondaryAction}
+      />
     </motion.div>
   );
 }

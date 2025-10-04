@@ -1,5 +1,5 @@
 import React from "react";
-//import { Link } from "react-router-dom";
+import { Link } from "react-router-dom";
 import adflogo from "../assets/image-removebg-preview.png";
 //import profileIcon from "../assets/profile-icon.png"; 
 import { motion } from "framer-motion";
@@ -18,8 +18,10 @@ function SimulationPage() {
        {/* Gradient Background */}
        <div className="absolute inset-0 bg-gradient-to-br from-black via-gray-900 to-black -z-10" />
       {/* Navbar */}
-      <div className="flex items-center justify-between px-6 py-4 bg-black shadow-md">
-        <img src={adflogo} alt="Logo" className="h-12" />
+      <nav className="flex items-center justify-between px-6 py-4 bg-gradient-to-r from-black to-gray-900 bg-opacity-80 backdrop-blur-md shadow-md">
+        <Link to="/home" className="inline-flex">
+          <img src={adflogo} alt="Logo" className="h-12 cursor-pointer hover:opacity-80 transition" />
+        </Link>
 
         <h1 className="text-xl font-bold text-white">Simulation</h1>
 
@@ -29,7 +31,7 @@ function SimulationPage() {
             <button className="text-red-400 hover:text-red-600 text-xs">Sign Out</button>
           </div>
         </div>
-      </div>
+      </nav>
 
       {/* Content */}
       <div className="px-6 py-8 space-y-6">

@@ -6,7 +6,7 @@ import { signOut } from "firebase/auth";
 import axios from "axios";
 import adfLogo from "../assets/image-removebg-preview.png";
 import trackxLogo from "../assets/trackx-logo-removebg-preview.png";
-import { Calendar, MapPin, Hash, Info, Route } from "lucide-react";
+import { Calendar, MapPin, Hash, Info, Route, Home, FilePlus2, FolderOpen, Briefcase, LayoutDashboard } from "lucide-react";
 import {
   PieChart,
   Pie,
@@ -16,6 +16,9 @@ import {
   ResponsiveContainer,
 } from "recharts";
 import MiniHeatMapWindow from "../components/MiniHeatMapWindow";
+import NotificationModal from "../components/NotificationModal";
+import useNotificationModal from "../hooks/useNotificationModal";
+import { getFriendlyErrorMessage } from "../utils/errorMessages";
 
 function MyCasesPage() {
   const { profile } = useAuth();
@@ -36,6 +39,7 @@ function MyCasesPage() {
   const [date, setDate] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   const [urgencyFilter, setUrgencyFilter] = useState("");
+  const { modalState, openModal, closeModal } = useNotificationModal();
 
   // === AI Summary state
   const [aiOpen, setAiOpen] = useState(false);
@@ -173,18 +177,46 @@ function MyCasesPage() {
     }
   };
 
-  const handleDeleteCase = async () => {
-    if (!selectedCase) return;
-    if (!window.confirm("Are you sure you want to delete this case?")) return;
+  const deleteSelectedCase = async (caseItem) => {
+    closeModal();
+    if (!caseItem) return;
     try {
-      await axios.delete(`http://localhost:8000/cases/delete/${selectedCase.doc_id}`);
-      alert("Case deleted successfully.");
-      setMyCases((prev) => prev.filter((c) => c.doc_id !== selectedCase.doc_id));
-      setSelectedCase(null);
+      await axios.delete(`http://localhost:8000/cases/delete/${caseItem.doc_id}`);
+      openModal({
+        variant: "success",
+        title: "Case deleted",
+        description: `“${caseItem.caseTitle}” has been removed successfully.`,
+      });
+      setMyCases((prev) => prev.filter((c) => c.doc_id !== caseItem.doc_id));
+      if (selectedCase?.doc_id === caseItem.doc_id) {
+        setSelectedCase(null);
+      }
     } catch (err) {
       console.error("Delete failed:", err);
-      alert("Failed to delete case.");
+      openModal({
+        variant: "error",
+        title: "Delete failed",
+        description: getFriendlyErrorMessage(err, "We couldn't delete the case. Please try again."),
+      });
     }
+  };
+
+  const requestCaseDeletion = () => {
+    if (!selectedCase) return;
+    const caseReference = selectedCase;
+    openModal({
+      variant: "warning",
+      title: "Delete case?",
+      description: `Are you sure you want to delete “${caseReference.caseTitle}”? This action cannot be undone.`,
+      primaryAction: {
+        label: "Delete case",
+        closeOnClick: false,
+        onClick: () => deleteSelectedCase(caseReference),
+      },
+      secondaryAction: {
+        label: "Cancel",
+      },
+    });
   };
 
   // Fetch notifications for the current user with pagination
@@ -252,7 +284,11 @@ function MyCasesPage() {
   // === AI Summary actions
   const openAISummary = async () => {
     if (!selectedCase) {
-      alert("Please select a case first.");
+      openModal({
+        variant: "info",
+        title: "Select a case",
+        description: "Choose a case from the list before opening an AI summary.",
+      });
       return;
     }
     setAiOpen(true);
@@ -271,6 +307,7 @@ function MyCasesPage() {
         user_id: uid,
         user_role: role,
         case_ids: [selectedCase.doc_id],
+        backend: "openai",
       });
 
       setAiMarkdown(res.data.markdown || "(No summary returned)");
@@ -324,7 +361,13 @@ function MyCasesPage() {
           >
             &#9776;
           </div>
-          <img src={adfLogo} alt="ADF Logo" className="h-10" />
+          <Link to="/home" className="inline-flex">
+            <img
+              src={adfLogo}
+              alt="ADF Logo"
+              className="h-10 cursor-pointer hover:opacity-80 transition"
+            />
+          </Link>
         </div>
         <div className="absolute left-1/2 transform -translate-x-1/2 text-3xl font-extrabold text-white flex items-center space-x-2">
           <img src={trackxLogo} alt="TrackX Logo Left" className="h-8" />
@@ -344,11 +387,46 @@ function MyCasesPage() {
       </nav>
 
       {showMenu && !aiOpen && (
-        <div className="absolute top-16 left-0 bg-black bg-opacity-90 text-white w-64 p-6 z-30 space-y-4 border-r border-gray-700 shadow-lg">
-          <Link to="/home" className="block hover:text-blue-400" onClick={() => setShowMenu(false)}>🏠 Home</Link>
-          <Link to="/new-case" className="block hover:text-blue-400" onClick={() => setShowMenu(false)}>📝 Create New Case / Report</Link>
-          <Link to="/manage-cases" className="block hover:text-blue-400" onClick={() => setShowMenu(false)}>📁 Manage Cases</Link>
-          <Link to="/my-cases" className="block hover:text-blue-400" onClick={() => setShowMenu(false)}>📁 My Cases</Link>
+        <div className="absolute top-16 left-0 w-64 rounded-r-3xl border border-white/10 bg-gradient-to-br from-gray-900/95 to-black/90 backdrop-blur-xl p-6 z-30 shadow-2xl space-y-2">
+          <Link
+            to="/home"
+            className="flex items-center gap-3 px-3 py-2 rounded-2xl text-sm font-medium text-gray-200 hover:text-white hover:bg-white/10 transition"
+            onClick={() => setShowMenu(false)}
+          >
+            <Home className="w-4 h-4" />
+            Home
+          </Link>
+          <Link
+            to="/new-case"
+            className="flex items-center gap-3 px-3 py-2 rounded-2xl text-sm font-medium text-gray-200 hover:text-white hover:bg-white/10 transition"
+            onClick={() => setShowMenu(false)}
+          >
+            <FilePlus2 className="w-4 h-4" />
+            Create New Case
+          </Link>
+          <Link
+            to="/manage-cases"
+            className="flex items-center gap-3 px-3 py-2 rounded-2xl text-sm font-medium text-gray-200 hover:text-white hover:bg-white/10 transition"
+            onClick={() => setShowMenu(false)}
+          >
+            <FolderOpen className="w-4 h-4" />
+            Manage Cases
+          </Link>
+          <div className="flex items-center gap-3 px-3 py-2 rounded-2xl text-sm font-medium text-white bg-white/10">
+            <Briefcase className="w-4 h-4" />
+            My Cases
+          </div>
+
+          {profile?.role === "admin" && (
+            <Link
+              to="/admin-dashboard"
+              className="flex items-center gap-3 px-3 py-2 rounded-2xl text-sm font-medium text-gray-200 hover:text-white hover:bg-white/10 transition"
+              onClick={() => setShowMenu(false)}
+            >
+              <LayoutDashboard className="w-4 h-4" />
+              Admin Dashboard
+            </Link>
+          )}
         </div>
       )}
 
@@ -639,7 +717,7 @@ function MyCasesPage() {
 
       {/* Delete Button */}
       <button
-        onClick={handleDeleteCase}
+                onClick={requestCaseDeletion}
         disabled={!selectedCase}
         className={`fixed bottom-6 right-6 z-40 font-bold py-3 px-6 rounded-full shadow-lg transition-colors duration-200 ${
           selectedCase
@@ -721,6 +799,16 @@ function MyCasesPage() {
           </div>
         </div>
       )}
+
+      <NotificationModal
+        isOpen={modalState.isOpen}
+        title={modalState.title}
+        description={modalState.description}
+        variant={modalState.variant}
+        onClose={closeModal}
+        primaryAction={modalState.primaryAction}
+        secondaryAction={modalState.secondaryAction}
+      />
     </div>
   );
 }

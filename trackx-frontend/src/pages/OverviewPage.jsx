@@ -2,12 +2,15 @@ import React, { useState, useEffect, useRef } from "react";
 import { Link, useNavigate, useLocation } from "react-router-dom";
 import adflogo from "../assets/image-removebg-preview.png";
 import { motion } from "framer-motion";
-import { AlertTriangle, MapPin, FileText, Camera } from "lucide-react";
+import { AlertTriangle, MapPin, FileText, Camera, Home, FilePlus2, FolderOpen, Briefcase, LayoutDashboard } from "lucide-react";
 import jsPDF from "jspdf";
 import { useAuth } from "../context/AuthContext";
 import { signOut } from "firebase/auth";
 import { auth } from "../firebase";
 import FirebaseStatus from "../components/FirebaseStatus";
+import NotificationModal from "../components/NotificationModal";
+import useNotificationModal from "../hooks/useNotificationModal";
+import { getFriendlyErrorMessage } from "../utils/errorMessages";
 
 // ---- DOCX + save-as ----
 import { Document, Packer, Paragraph, TextRun, HeadingLevel, ImageRun } from "docx";
@@ -236,6 +239,7 @@ function OverviewPage() {
   const { profile } = useAuth();
   const navigate = useNavigate();
   const [showMenu, setShowMenu] = useState(false);
+  const { modalState, openModal, closeModal } = useNotificationModal();
 
   const location = useLocation();
   const caseIdFromState = location.state?.caseId || null;
@@ -272,6 +276,27 @@ function OverviewPage() {
   const [isSaving, setIsSaving] = useState(false);
   const [lastSaved, setLastSaved] = useState(null);
   const [saveError, setSaveError] = useState(null);
+
+  const showError = (title, error, fallback) =>
+    openModal({
+      variant: "error",
+      title,
+      description: getFriendlyErrorMessage(error, fallback),
+    });
+
+  const showInfo = (title, description) =>
+    openModal({
+      variant: "info",
+      title,
+      description,
+    });
+
+  const showSuccess = (title, description) =>
+    openModal({
+      variant: "success",
+      title,
+      description,
+    });
 
   // Evidence & Technical Terms
   const [evidenceItems, setEvidenceItems] = useState([]);
@@ -909,7 +934,7 @@ const generateDOCX = async () => {
           }
         } catch (err) {
           console.error("DOCX generation failed:", err);
-          alert(`DOCX generation failed:\n${err.message || err}`);
+          showError("DOCX generation failed", err, "We couldn't generate the DOCX report. Please try again.");
         }
       }
 
@@ -949,7 +974,7 @@ const generateDOCX = async () => {
           }
         } catch (err) {
           console.error("Google Doc generation failed:", err);
-          alert(`Google Doc generation failed:\n${err.message || err}`);
+          showError("Google Doc generation failed", err, "We couldn't create the Google Doc. Please try again.");
         }
       }
 
@@ -1003,7 +1028,7 @@ const generateDOCX = async () => {
       saveToLocalStorage({ generatedReports: newLocal });
     } catch (e) {
       console.error("Error in report generation:", e);
-      alert("There was an error generating the report. Please try again.");
+      showError("Report generation failed", e, "There was an error generating the report. Please try again.");
     } finally {
       setIsGenerating(false);
     }
@@ -1025,8 +1050,8 @@ const generateDOCX = async () => {
       try {
         const blob = await generateDOCX();
         saveAs(blob, report.name);
-      } catch {
-        alert("Failed to regenerate DOCX for download.");
+      } catch (err) {
+        showError("Download failed", err, "We couldn't regenerate the DOCX file. Please try again.");
       }
       return;
     }
@@ -1051,8 +1076,8 @@ const generateDOCX = async () => {
         try {
           const blob = await generateDOCX();
           saveAs(blob, name);
-        } catch {
-          alert("Failed to regenerate DOCX for download.");
+        } catch (err) {
+          showError("Download failed", err, "We couldn't regenerate the DOCX file. Please try again.");
         }
         return;
       }
@@ -1060,11 +1085,11 @@ const generateDOCX = async () => {
         window.open(report.webViewLink, "_blank");
         return;
       }
-      alert("This report was saved to Firebase as metadata only.");
+      showInfo("Download unavailable", "This report only has metadata stored in Firebase and cannot be downloaded.");
       return;
     }
 
-    alert(`Downloading ${report.name}...`);
+    showInfo("Download starting", `Downloading ${report.name}...`);
   };
 
   // --- UI helpers ---
@@ -1154,22 +1179,59 @@ const generateDOCX = async () => {
 
       {/* Hamburger Menu */}
       {showMenu && (
-        <div className="absolute top-16 left-0 bg-black bg-opacity-90 backdrop-blur-md text-white w-64 p-6 z-30 space-y-4 border-r border-gray-700 shadow-lg">
-          <Link to="/home" className="block hover:text-blue-400" onClick={() => setShowMenu(false)}>
-            🏠 Home
+        <div className="absolute top-16 left-0 w-64 rounded-r-3xl border border-white/10 bg-gradient-to-br from-gray-900/95 to-black/90 backdrop-blur-xl p-6 z-30 shadow-2xl space-y-2">
+          <Link
+            to="/home"
+            className="flex items-center gap-3 px-3 py-2 rounded-2xl text-sm font-medium text-gray-200 hover:text-white hover:bg-white/10 transition"
+            onClick={() => setShowMenu(false)}
+          >
+            <Home className="w-4 h-4" />
+            Home
           </Link>
-          <Link to="/new-case" className="block hover:text-blue-400" onClick={() => setShowMenu(false)}>
-            📝 Create New Case / Report
+          <Link
+            to="/new-case"
+            className="flex items-center gap-3 px-3 py-2 rounded-2xl text-sm font-medium text-gray-200 hover:text-white hover:bg-white/10 transition"
+            onClick={() => setShowMenu(false)}
+          >
+            <FilePlus2 className="w-4 h-4" />
+            Create New Case
           </Link>
-          <Link to="/manage-cases" className="block hover:text-blue-400" onClick={() => setShowMenu(false)}>
-            📁 Manage Cases
+          <Link
+            to="/manage-cases"
+            className="flex items-center gap-3 px-3 py-2 rounded-2xl text-sm font-medium text-gray-200 hover:text-white hover:bg-white/10 transition"
+            onClick={() => setShowMenu(false)}
+          >
+            <FolderOpen className="w-4 h-4" />
+            Manage Cases
           </Link>
-          <Link to="/my-cases" className="block hover:text-blue-400" onClick={() => setShowMenu(false)}>
-            📁 My Cases
+          <Link
+            to="/annotations"
+            className="flex items-center gap-3 px-3 py-2 rounded-2xl text-sm font-medium text-gray-200 hover:text-white hover:bg-white/10 transition"
+            onClick={() => setShowMenu(false)}
+          >
+            <MapPin className="w-4 h-4" />
+            Annotations
           </Link>
+          <Link
+            to="/my-cases"
+            className="flex items-center gap-3 px-3 py-2 rounded-2xl text-sm font-medium text-gray-200 hover:text-white hover:bg-white/10 transition"
+            onClick={() => setShowMenu(false)}
+          >
+            <Briefcase className="w-4 h-4" />
+            My Cases
+          </Link>
+          <div className="flex items-center gap-3 px-3 py-2 rounded-2xl text-sm font-medium text-white bg-white/10">
+            <FileText className="w-4 h-4" />
+            Overview
+          </div>
           {profile?.role === "admin" && (
-            <Link to="/admin-dashboard" className="block hover:text-blue-400" onClick={() => setShowMenu(false)}>
-              🛠 Admin Dashboard
+            <Link
+              to="/admin-dashboard"
+              className="flex items-center gap-3 px-3 py-2 rounded-2xl text-sm font-medium text-gray-200 hover:text-white hover:bg-white/10 transition"
+              onClick={() => setShowMenu(false)}
+            >
+              <LayoutDashboard className="w-4 h-4" />
+              Admin Dashboard
             </Link>
           )}
         </div>
@@ -1177,18 +1239,20 @@ const generateDOCX = async () => {
 
       {/* Tabs */}
       <div className="flex justify-center space-x-8 bg-gradient-to-r from-black to-gray-900 bg-opacity-80 backdrop-blur-md py-2 text-white text-sm">
-        <Link to="/new-case" className="text-gray-400 hover:text-white">
+        <Link to="/new-case" className="text-gray-300 hover:text-white">
           Case Information
         </Link>
-        <Link to="/annotations" className="text-gray-400 hover:text-white">
+        <Link to="/annotations" className="text-gray-300 hover:text-white">
           Annotations
         </Link>
-        <span className="font-bold underline">Overview</span>
+        <span className="inline-flex items-center rounded-full bg-white/15 px-4 py-1.5 font-semibold text-white">
+          Overview
+        </span>
       </div>
 
       {/* Case bar */}
-      <div className="bg-gray-800 bg-opacity-50 py-2 px-6">
-        <div className="flex flex-wrap justify-between text-sm text-gray-300">
+      <div className="bg-gradient-to-r from-black to-gray-900 bg-opacity-80 backdrop-blur-md border-b border-white/10 py-3 px-6">
+        <div className="flex flex-wrap justify-between text-sm text-gray-200">
           <div className="mr-6 mb-1">
             <span className="text-gray-400">Case:</span> {caseDetails.caseNumber}
           </div>
@@ -1532,6 +1596,16 @@ const generateDOCX = async () => {
           </div>
         </div>
       </div>
+
+      <NotificationModal
+        isOpen={modalState.isOpen}
+        title={modalState.title}
+        description={modalState.description}
+        variant={modalState.variant}
+        onClose={closeModal}
+        primaryAction={modalState.primaryAction}
+        secondaryAction={modalState.secondaryAction}
+      />
     </motion.div>
   );
 }
