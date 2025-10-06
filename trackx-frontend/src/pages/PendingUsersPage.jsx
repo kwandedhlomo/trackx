@@ -16,6 +16,10 @@ import adfLogo from "../assets/image-removebg-preview.png";
 import trackxLogo from "../assets/trackx-logo-removebg-preview.png";
 import { motion } from "framer-motion";
 import emailjs from "@emailjs/browser";
+import NotificationModal from "../components/NotificationModal";
+import useNotificationModal from "../hooks/useNotificationModal";
+import { getFriendlyErrorMessage } from "../utils/errorMessages";
+import { Home, FilePlus2, FolderOpen, Briefcase, LayoutDashboard, Users } from "lucide-react";
 
 function PendingUsersPage() {
   const [allUsers, setAllUsers] = useState([]);
@@ -23,7 +27,10 @@ function PendingUsersPage() {
   const [showMenu, setShowMenu] = useState(false);
   const [profile, setProfile] = useState(null);
   const [filter, setFilter] = useState("pending");
+  const [page, setPage] = useState(1);
+  const pageSize = 10;
   const navigate = useNavigate();
+  const { modalState, openModal, closeModal } = useNotificationModal();
 
   useEffect(() => {
     fetchUsers();
@@ -54,12 +61,26 @@ function PendingUsersPage() {
     }
   };
 
-  const approveUser = async (userId, wasRejected = false) => {
-    if (wasRejected) {
-      const confirmed = window.confirm(
-        "This user was previously rejected. Are you SURE you want to allow them into the system with their account?"
-      );
-      if (!confirmed) return;
+  const approveUser = async (userId, wasRejected = false, skipConfirmation = false) => {
+    if (wasRejected && !skipConfirmation) {
+      openModal({
+        variant: "warning",
+        title: "Approve rejected user?",
+        description:
+          "This user was previously rejected. Approving them will allow access to the system. Continue?",
+        primaryAction: {
+          label: "Approve user",
+          closeOnClick: false,
+          onClick: () => {
+            closeModal();
+            approveUser(userId, true, true);
+          },
+        },
+        secondaryAction: {
+          label: "Cancel",
+        },
+      });
+      return;
     }
 
     try {
@@ -82,13 +103,24 @@ function PendingUsersPage() {
         "nv9uRgDbQKDVfYOf4"
       );
 
-      alert("User approved and notified via email.");
+      openModal({
+        variant: "success",
+        title: "User approved",
+        description: "The user has been approved and notified via email.",
+      });
       setAllUsers((prev) =>
         prev.map((u) => (u.id === userId ? { ...u, isApproved: true, status: "approved" } : u))
       );
     } catch (err) {
       console.error("Error approving user:", err);
-      alert("Error approving user or sending email.");
+      openModal({
+        variant: "error",
+        title: "Approval failed",
+        description: getFriendlyErrorMessage(
+          err,
+          "We couldn't approve the user or send the email notification. Please try again."
+        ),
+      });
     }
   };
 
@@ -96,13 +128,21 @@ function PendingUsersPage() {
     try {
       const userRef = doc(db, "users", userId);
       await updateDoc(userRef, { isApproved: false, status: "rejected" });
-      alert("User rejected.");
+      openModal({
+        variant: "info",
+        title: "User rejected",
+        description: "The user has been marked as rejected.",
+      });
       setAllUsers((prev) =>
         prev.map((u) => (u.id === userId ? { ...u, isApproved: false, status: "rejected" } : u))
       );
     } catch (err) {
       console.error("Error rejecting user:", err);
-      alert("Error rejecting user.");
+      openModal({
+        variant: "error",
+        title: "Rejection failed",
+        description: getFriendlyErrorMessage(err, "We couldn't update the user status. Please try again."),
+      });
     }
   };
 
@@ -176,7 +216,13 @@ function PendingUsersPage() {
           >
             &#9776;
           </div>
-          <img src={adfLogo} alt="ADF Logo" className="h-10 w-auto" />
+          <Link to="/home" className="inline-flex">
+            <img
+              src={adfLogo}
+              alt="ADF Logo"
+              className="h-10 w-auto cursor-pointer hover:opacity-80 transition"
+            />
+          </Link>
         </div>
 
         <div className="absolute left-1/2 transform -translate-x-1/2 text-3xl font-extrabold text-white font-sans flex items-center space-x-2">
@@ -203,30 +249,50 @@ function PendingUsersPage() {
       </nav>
 
       {showMenu && (
-        <div className="absolute top-16 left-0 bg-black bg-opacity-90 backdrop-blur-md text-white w-64 p-6 z-30 space-y-4 border-r border-gray-700 shadow-lg">
-          <Link to="/home" className="block hover:text-blue-400" onClick={() => setShowMenu(false)}>
-            🏠 Home
+        <div className="absolute top-16 left-0 w-64 rounded-r-3xl border border-white/10 bg-gradient-to-br from-gray-900/95 to-black/90 backdrop-blur-xl p-6 z-30 shadow-2xl space-y-2">
+          <Link
+            to="/home"
+            className="flex items-center gap-3 px-3 py-2 rounded-2xl text-sm font-medium text-gray-200 hover:text-white hover:bg-white/10 transition"
+            onClick={() => setShowMenu(false)}
+          >
+            <Home className="w-4 h-4" />
+            Home
           </Link>
           <Link
             to="/new-case"
-            className="block hover:text-blue-400"
+            className="flex items-center gap-3 px-3 py-2 rounded-2xl text-sm font-medium text-gray-200 hover:text-white hover:bg-white/10 transition"
             onClick={() => setShowMenu(false)}
           >
-            📝 Create New Case / Report
+            <FilePlus2 className="w-4 h-4" />
+            Create New Case
           </Link>
           <Link
             to="/manage-cases"
-            className="block hover:text-blue-400"
+            className="flex items-center gap-3 px-3 py-2 rounded-2xl text-sm font-medium text-gray-200 hover:text-white hover:bg-white/10 transition"
             onClick={() => setShowMenu(false)}
           >
-            📁 Manage Cases
+            <FolderOpen className="w-4 h-4" />
+            Manage Cases
           </Link>
           <Link
-            to="/admin-dashboard"
-            className="block hover:text-blue-400"
+            to="/my-cases"
+            className="flex items-center gap-3 px-3 py-2 rounded-2xl text-sm font-medium text-gray-200 hover:text-white hover:bg-white/10 transition"
             onClick={() => setShowMenu(false)}
           >
-            🛠️ Admin Dashboard
+            <Briefcase className="w-4 h-4" />
+            My Cases
+          </Link>
+          <div className="flex items-center gap-3 px-3 py-2 rounded-2xl text-sm font-medium text-white bg-white/10">
+            <Users className="w-4 h-4" />
+            Pending Users
+          </div>
+          <Link
+            to="/admin-dashboard"
+            className="flex items-center gap-3 px-3 py-2 rounded-2xl text-sm font-medium text-gray-200 hover:text-white hover:bg-white/10 transition"
+            onClick={() => setShowMenu(false)}
+          >
+            <LayoutDashboard className="w-4 h-4" />
+            Admin Dashboard
           </Link>
         </div>
       )}
@@ -263,6 +329,16 @@ function PendingUsersPage() {
           <p className="text-gray-400">No users found.</p>
         )}
       </div>
+
+      <NotificationModal
+        isOpen={modalState.isOpen}
+        title={modalState.title}
+        description={modalState.description}
+        variant={modalState.variant}
+        onClose={closeModal}
+        primaryAction={modalState.primaryAction}
+        secondaryAction={modalState.secondaryAction}
+      />
     </motion.div>
   );
 }

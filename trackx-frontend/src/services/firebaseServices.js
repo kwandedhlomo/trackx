@@ -27,26 +27,63 @@ import {
   /**
    * Get current user ID with fallbacks
    */
-  export const getCurrentUserId = () => {
-    try {
-      if (getAuthUserId) {
-        const userId = getAuthUserId();
-        if (userId && userId !== 'anonymous_user_' + Date.now()) {
-          return userId;
-        }
+export const getCurrentUserId = () => {
+  try {
+    if (getAuthUserId) {
+      const userId = getAuthUserId();
+      if (userId && userId !== 'anonymous_user_' + Date.now()) {
+        return userId;
       }
-      
-      if (auth && auth.currentUser) {
-        return auth.currentUser.uid;
-      }
-      
-      console.warn('No authenticated user found, using fallback ID');
-      return 'dev_user_' + Date.now();
-    } catch (error) {
-      console.error('Error getting current user ID:', error);
-      return 'fallback_user_' + Date.now();
     }
-  };
+
+    if (auth && auth.currentUser) {
+      return auth.currentUser.uid;
+    }
+
+    console.warn('No authenticated user found, using fallback ID');
+    return 'dev_user_' + Date.now();
+  } catch (error) {
+    console.error('Error getting current user ID:', error);
+    return 'fallback_user_' + Date.now();
+  }
+};
+
+const fetchCaseDocsForUser = async (userId) => {
+  if (!db) {
+    throw new Error('Firebase database not initialized');
+  }
+
+  const casesRef = collection(db, CASES_COLLECTION);
+  const docsMap = new Map();
+
+  if (!userId) {
+    const snapshot = await getDocs(casesRef);
+    snapshot.forEach((docSnap) => docsMap.set(docSnap.id, docSnap));
+    return Array.from(docsMap.values());
+  }
+
+  try {
+    const userIdsQuery = query(casesRef, where('userIds', 'array-contains', userId));
+    const userIdsSnapshot = await getDocs(userIdsQuery);
+    userIdsSnapshot.forEach((docSnap) => docsMap.set(docSnap.id, docSnap));
+  } catch (error) {
+    console.warn('userIds query failed or returned no results:', error);
+  }
+
+  try {
+    const legacyQuery = query(casesRef, where('userId', '==', userId));
+    const legacySnapshot = await getDocs(legacyQuery);
+    legacySnapshot.forEach((docSnap) => {
+      if (!docsMap.has(docSnap.id)) {
+        docsMap.set(docSnap.id, docSnap);
+      }
+    });
+  } catch (error) {
+    console.warn('legacy userId query failed or returned no results:', error);
+  }
+
+  return Array.from(docsMap.values());
+};
   
   /**
    * Convert data URL to blob for upload with better error handling
@@ -96,11 +133,19 @@ import {
       
       const finalUserId = userId || getCurrentUserId();
       console.log('Using userId:', finalUserId);
-      
+
+      const initialUserIds = Array.isArray(caseData.userIds) ? caseData.userIds : [];
+      const mergedUserIds = [];
+      [...initialUserIds, finalUserId].forEach((uid) => {
+        if (uid && !mergedUserIds.includes(uid)) {
+          mergedUserIds.push(uid);
+        }
+      });
+
       // Create case document ID
       const caseId = caseData.caseId || `case_${caseData.caseNumber?.replace(/[^a-zA-Z0-9]/g, '_')}_${Date.now()}`;
       const caseRef = doc(db, CASES_COLLECTION, caseId);
-      
+
       const caseDoc = {
         caseId: caseId,
         caseNumber: caseData.caseNumber,
@@ -113,7 +158,8 @@ import {
         region: caseData.region,
         between: caseData.between || '',
         urgency: caseData.urgency || 'Medium',
-        userId: finalUserId,
+        userId: mergedUserIds[0] || finalUserId,
+        userIds: mergedUserIds,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       
@@ -279,6 +325,7 @@ import {
         between: caseData.between || '',
         urgency: caseData.urgency || '',
         userId: caseData.userId,
+        userIds: caseData.userIds || (caseData.userId ? [caseData.userId] : []),
         locations: locations.filter(Boolean),
         locationTitles: caseData.locationTitles || [],
         reportIntro: caseData.reportIntro || '',
@@ -698,16 +745,11 @@ import {
       
       const finalUserId = userId || getCurrentUserId();
       
-      const casesQuery = query(
-        collection(db, CASES_COLLECTION),
-        where('userId', '==', finalUserId)
-      );
-      
-      const querySnapshot = await getDocs(casesQuery);
       const cases = [];
-      
-      querySnapshot.forEach((doc) => {
-        const data = doc.data();
+      const docSnapshots = await fetchCaseDocsForUser(finalUserId);
+
+      docSnapshots.forEach((doc) => {
+        const data = doc.data() || {};
         cases.push({
           id: doc.id,
           caseId: data.caseId,
@@ -725,6 +767,7 @@ import {
           locationTitles: data.locationTitles || [],
           reportIntro: data.reportIntro || '',
           reportConclusion: data.reportConclusion || '',
+          userIds: data.userIds || [],
         });        
       });
       
@@ -876,8 +919,9 @@ import {
         totalLocations: 0,
         totalSnapshots: 0
       };
-      
-      for (const caseDoc of querySnapshot.docs) {
+      const caseDocs = await fetchCaseDocsForUser(finalUserId);
+
+      for (const caseDoc of caseDocs) {
         stats.totalCases++;
         
         // Check locations subcollection

@@ -22,3 +22,4 @@ class CaseCreateRequest(BaseModel):
     csv_data: List[GpsPoint]  
     all_points: List[GpsPoint] 
     userID: Optional[str] = None
+    userIDs: Optional[List[str]] = Field(default_factory=list)

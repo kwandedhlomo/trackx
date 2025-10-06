@@ -1,12 +1,15 @@
 import React, { useState, useEffect, useRef } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
-import { ArrowLeft, ArrowRight, MapPin, AlertTriangle, Camera } from "lucide-react";
+import { ArrowLeft, ArrowRight, MapPin, AlertTriangle, Camera, Home, FilePlus2, FolderOpen, Briefcase, LayoutDashboard, FileText } from "lucide-react";
 import adflogo from "../assets/image-removebg-preview.png";
 import { useAuth } from "../context/AuthContext";
 import { signOut } from "firebase/auth";
 import { auth } from "../firebase";
 import axios from "axios";
+import NotificationModal from "../components/NotificationModal";
+import useNotificationModal from "../hooks/useNotificationModal";
+import { getFriendlyErrorMessage } from "../utils/errorMessages";
 
 
 // Import Firebase services
@@ -23,6 +26,7 @@ function AnnotationsPage() {
   const navigate = useNavigate();
   const { profile } = useAuth();
   const [showMenu, setShowMenu] = useState(false);
+  const { modalState, openModal, closeModal } = useNotificationModal();
 
   // at top of AnnotationsPage.jsx
 const isNum = (v) => typeof v === "number" && !Number.isNaN(v);
@@ -86,7 +90,14 @@ const isNum = (v) => typeof v === "number" && !Number.isNaN(v);
       }
     } catch (err) {
       console.error("AI description generation failed:", err);
-      alert("Could not generate description. Please try again.");
+      openModal({
+        variant: "error",
+        title: "Description unavailable",
+        description: getFriendlyErrorMessage(
+          err,
+          "Could not generate a description for this location. Please try again."
+        ),
+      });
     } finally {
       setIsGenerating(false);
     }
@@ -264,7 +275,11 @@ const isNum = (v) => typeof v === "number" && !Number.isNaN(v);
     const mapUrl = getGoogleMapUrl(loc);
     const svUrl  = getStreetViewUrl(loc);
     if (!mapUrl && !svUrl) {
-      alert("No map/street view available for this location.");
+      openModal({
+        variant: "info",
+        title: "Imagery unavailable",
+        description: "We couldn't retrieve map or street view imagery for this location.",
+      });
       return;
     }
 
@@ -291,10 +306,21 @@ const isNum = (v) => typeof v === "number" && !Number.isNaN(v);
       setSnapshotCaptured(true);
       sessionStorage.setItem("locationSnapshots", JSON.stringify(next));
       console.log("Snapshots captured (via proxy) for location", currentIndex);
-      alert("Snapshots captured successfully!");
+      openModal({
+        variant: "success",
+        title: "Snapshots captured",
+        description: "Map and street view imagery were saved for this location.",
+      });
     } catch (err) {
       console.error("Error capturing snapshots via proxy:", err);
-      alert(`Error capturing snapshots: ${err.message || err}`);
+      openModal({
+        variant: "error",
+        title: "Snapshot capture failed",
+        description: getFriendlyErrorMessage(
+          err,
+          "We couldn't capture imagery for this location. Please try again."
+        ),
+      });
     } finally {
       setIsCapturingSnapshot(false);
     }
@@ -761,36 +787,85 @@ useEffect(() => {
   
       {/* Hamburger Menu Content */}
       {showMenu && (
-        <div className="absolute top-16 left-0 bg-black bg-opacity-90 backdrop-blur-md text-white w-64 p-6 z-30 space-y-4 border-r border-gray-700 shadow-lg">
-          <Link to="/home" className="block hover:text-blue-400" onClick={() => setShowMenu(false)}>🏠 Home</Link>
-          <Link to="/new-case" className="block hover:text-blue-400" onClick={() => setShowMenu(false)}>📝 Create New Case / Report</Link>
-          <Link to="/manage-cases" className="block hover:text-blue-400" onClick={() => setShowMenu(false)}>📁 Manage Cases</Link>
-          <Link to="/my-cases" className="block hover:text-blue-400" onClick={() => setShowMenu(false)}>📁 My Cases</Link>
-  
+        <div className="absolute top-16 left-0 w-64 rounded-r-3xl border border-white/10 bg-gradient-to-br from-gray-900/95 to-black/90 backdrop-blur-xl p-6 z-30 shadow-2xl space-y-2">
+          <Link
+            to="/home"
+            className="flex items-center gap-3 px-3 py-2 rounded-2xl text-sm font-medium text-gray-200 hover:text-white hover:bg-white/10 transition"
+            onClick={() => setShowMenu(false)}
+          >
+            <Home className="w-4 h-4" />
+            Home
+          </Link>
+          <Link
+            to="/new-case"
+            className="flex items-center gap-3 px-3 py-2 rounded-2xl text-sm font-medium text-gray-200 hover:text-white hover:bg-white/10 transition"
+            onClick={() => setShowMenu(false)}
+          >
+            <FilePlus2 className="w-4 h-4" />
+            Create New Case
+          </Link>
+          <Link
+            to="/manage-cases"
+            className="flex items-center gap-3 px-3 py-2 rounded-2xl text-sm font-medium text-gray-200 hover:text-white hover:bg-white/10 transition"
+            onClick={() => setShowMenu(false)}
+          >
+            <FolderOpen className="w-4 h-4" />
+            Manage Cases
+          </Link>
+          <div className="flex items-center gap-3 px-3 py-2 rounded-2xl text-sm font-medium text-white bg-white/10">
+            <MapPin className="w-4 h-4" />
+            Annotations
+          </div>
+          <Link
+            to="/overview"
+            className="flex items-center gap-3 px-3 py-2 rounded-2xl text-sm font-medium text-gray-200 hover:text-white hover:bg-white/10 transition"
+            onClick={() => setShowMenu(false)}
+          >
+            <FileText className="w-4 h-4" />
+            Overview
+          </Link>
+          <Link
+            to="/my-cases"
+            className="flex items-center gap-3 px-3 py-2 rounded-2xl text-sm font-medium text-gray-200 hover:text-white hover:bg-white/10 transition"
+            onClick={() => setShowMenu(false)}
+          >
+            <Briefcase className="w-4 h-4" />
+            My Cases
+          </Link>
+
           {profile?.role === "admin" && (
-            <Link to="/admin-dashboard" className="block hover:text-blue-400" onClick={() => setShowMenu(false)}>
-              🛠 Admin Dashboard
+            <Link
+              to="/admin-dashboard"
+              className="flex items-center gap-3 px-3 py-2 rounded-2xl text-sm font-medium text-gray-200 hover:text-white hover:bg-white/10 transition"
+              onClick={() => setShowMenu(false)}
+            >
+              <LayoutDashboard className="w-4 h-4" />
+              Admin Dashboard
             </Link>
           )}
         </div>
       )}
 
       {/* Nav Tabs */}
-      <div className="flex justify-center space-x-8 bg-gradient-to-r from-black to-gray-900 bg-opacity-80 backdrop-blur-md py-2 text-white text-sm">        
-        <Link to="/new-case" className="text-gray-400 hover:text-white">Case Information</Link>
-        <span className="font-bold underline">Annotations</span>
+      <div className="flex justify-center space-x-8 bg-gradient-to-r from-black to-gray-900 bg-opacity-80 backdrop-blur-md py-2 text-white text-sm">
+        <Link to="/new-case" className="text-gray-300 hover:text-white">
+          Case Information
+        </Link>
+        <span className="inline-flex items-center rounded-full bg-white/15 px-4 py-1.5 font-semibold text-white">
+          Annotations
+        </span>
         <Link
           to="/overview"
           onClick={(e) => { e.preventDefault(); saveAllAnnotations().then(() => navigate("/overview")); }}
-          className="text-gray-400 hover:text-white"
+          className="text-gray-300 hover:text-white"
         >
           Overview
         </Link>
       </div>
 
       {/* Case Information Bar */}
-      <div className="bg-gray-800 bg-opacity-50 py-2 px-6">
-        <div className="flex flex-wrap justify-between text-sm text-gray-300">
+      <div className="bg-gradient-to-r from-black to-gray-900 bg-opacity-80 backdrop-blur-md border-b border-white/10 py-3 px-6">
+        <div className="flex flex-wrap justify-between text-sm text-gray-200">
           <div className="mr-6 mb-1">
             <span className="text-gray-400">Case:</span> {caseDetails.caseNumber}
           </div>
@@ -1064,6 +1139,16 @@ useEffect(() => {
           </div>
         </div>
       )}
+
+      <NotificationModal
+        isOpen={modalState.isOpen}
+        title={modalState.title}
+        description={modalState.description}
+        variant={modalState.variant}
+        onClose={closeModal}
+        primaryAction={modalState.primaryAction}
+        secondaryAction={modalState.secondaryAction}
+      />
     </motion.div>
   );
 }
