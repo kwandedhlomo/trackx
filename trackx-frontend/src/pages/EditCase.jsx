@@ -778,7 +778,7 @@ function EditCasePage() {
   );
 }
 
-// export default EditCasePage;
+export default EditCasePage;
 // import React, { useState, useEffect } from "react";
 // import { useLocation, useNavigate, Link } from "react-router-dom";
 // import { motion } from "framer-motion";
