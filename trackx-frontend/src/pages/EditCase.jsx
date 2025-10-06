@@ -13,7 +13,7 @@ import { clearCaseSession } from "../utils/caseSession";
 import {
   loadCaseWithAnnotations,
   getUserCases,
-  saveCaseWithAnnotations,
+  updateCaseAnnotations,
   getCurrentUserId,
   loadSnapshotsFromFirebase,
   getCaseReports,
@@ -265,8 +265,7 @@ function EditCasePage() {
       // B) Firebase update (if we have an existing Firebase case)
       if (firebaseCase?.caseId) {
         try {
-          const updated = {
-            ...firebaseCase,
+          const metadataUpdates = {
             caseNumber,
             caseTitle,
             dateOfIncident,
@@ -275,7 +274,12 @@ function EditCasePage() {
             status,
             urgency,
           };
-          await saveCaseWithAnnotations(updated, getCurrentUserId());
+
+          const filteredUpdates = Object.fromEntries(
+            Object.entries(metadataUpdates).filter(([, value]) => value !== undefined)
+          );
+
+          await updateCaseAnnotations(firebaseCase.caseId, filteredUpdates);
         } catch (fbErr) {
           console.warn("Firebase update failed:", fbErr);
         }
@@ -711,3 +715,6 @@ function EditCasePage() {
 }
 
 export default EditCasePage;
+
+
+

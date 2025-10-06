@@ -70,8 +70,27 @@ function SimulationPage2() {
   // --- 3D/2D toggle state & refs ---
   const [mode3D, setMode3D] = useState(true);
   const [isMorphing, setIsMorphing] = useState(false);
+
+  const viewerReady = !!viewerRef.current?.cesiumElement;
+  const floatingButtonBaseStyle = {
+    position: "absolute",
+    right: "30px",
+    padding: "10px 18px",
+    borderRadius: "999px",
+    border: "1px solid rgba(56, 189, 248, 0.35)",
+    background: "rgba(15, 23, 42, 0.85)",
+    color: "#e2e8f0",
+    fontWeight: 600,
+    fontSize: "0.9rem",
+    boxShadow: "0 12px 30px rgba(15, 23, 42, 0.45)",
+    backdropFilter: "blur(6px)",
+    letterSpacing: "0.01em",
+    zIndex: 1000,
+    transition: "transform 0.2s ease, box-shadow 0.2s ease",
+    cursor: "pointer"
+  };
   // remember whether playback was running before morph
-const wasAnimatingRef = useRef(true);
+  const wasAnimatingRef = useRef(true);
 
 // keep exactly one onTick handler to force repaint during play/scrub
 const onTickCleanupRef = useRef(null);
@@ -1456,19 +1475,12 @@ async function rebuildFlagBillboards(viewer, flaggedPoints, liftMeters = 1.5) {
           <button
             onClick={() => setShowFlagModal(true)}
             style={{
-              position: "absolute",
+              ...floatingButtonBaseStyle,
               top: "100px",
-              right: "30px",
-              padding: "10px 20px",
-              backgroundColor: "#38bdf8",
-              color: "black",
-              border: "none",
-              borderRadius: "10px",
-              fontWeight: "bold",
-              fontSize: "0.95rem",
-              boxShadow: "0 0 8px rgba(56, 189, 248, 0.5)",
-              zIndex: 1000,
-              cursor: "pointer"
+              background: "linear-gradient(135deg, rgba(14, 165, 233, 0.92), rgba(56, 189, 248, 0.88))",
+              border: "1px solid rgba(56, 189, 248, 0.5)",
+              color: "#0f172a",
+              boxShadow: "0 18px 35px rgba(14, 165, 233, 0.25)"
             }}
           >
             📍 Flag This Moment
@@ -1561,53 +1573,45 @@ async function rebuildFlagBillboards(viewer, flaggedPoints, liftMeters = 1.5) {
             </div>
           </div>
         )}
-        <button
-          onClick={handleSeeThisMoment}
+        {!loading && vehicleReady && vehicleEntityRef.current && (
+          <button
+            onClick={handleSeeThisMoment}
             style={{
-            position: "absolute",
-            top: "160px",       
-            right: "30px",      
-            padding: "10px 20px",
-            backgroundColor: "#34d399", 
-            color: "black",
-            border: "none",
-            borderRadius: "10px",
-            fontWeight: "bold",
-            fontSize: "0.95rem",
-            boxShadow: "0 0 8px rgba(52, 211, 153, 0.5)",
-            zIndex: 1000,
-            cursor: "pointer"
-                  }}
-                >
-                  👁️ See This Moment
-                </button>
+              ...floatingButtonBaseStyle,
+              top: "156px",
+              background: "linear-gradient(135deg, rgba(59, 130, 246, 0.92), rgba(147, 197, 253, 0.88))",
+              border: "1px solid rgba(148, 163, 184, 0.35)",
+              color: "#0f172a",
+              boxShadow: "0 18px 35px rgba(59, 130, 246, 0.25)"
+            }}
+          >
+            👁️ See This Moment
+          </button>
+        )}
 
-                <div
-                  style={{
-                    position: "absolute",
-                    right: 24,
-                    top: 210,           // adjust to sit right under your “See This Moment” button
-                    zIndex: 1000
-                  }}
-                >
-                  <button
-                    onClick={onToggleProjection}
-                    disabled={isMorphing}
-                    style={{
-                      padding: "10px 20px",
-                      borderRadius: 9999,
-                      border: "none",
-                      fontWeight: 700,
-                      fontSize: "0.95rem",
-                      color: "#fff",
-                      backgroundColor: isMorphing ? "#64748b" : (mode3D ? "#0284c7" : "#4f46e5"),
-                      boxShadow: "0 4px 12px rgba(0,0,0,0.2)",
-                      cursor: isMorphing ? "not-allowed" : "pointer"
-                    }}
-                  >
-                    {isMorphing ? "Switching…" : (mode3D ? "Switch to 2D (Fallback)" : "Return to 3D")}
-                  </button>
-                </div>
+        {!loading && viewerReady && (
+          <button
+            onClick={onToggleProjection}
+            disabled={isMorphing}
+            style={{
+              ...floatingButtonBaseStyle,
+              top: "212px",
+              background: isMorphing
+                ? "rgba(100, 116, 139, 0.35)"
+                : "linear-gradient(135deg, rgba(129, 140, 248, 0.9), rgba(165, 180, 252, 0.85))",
+              border: isMorphing
+                ? "1px solid rgba(148, 163, 184, 0.35)"
+                : "1px solid rgba(165, 180, 252, 0.6)",
+              color: isMorphing ? "#cbd5f5" : "#0f172a",
+              cursor: isMorphing ? "wait" : "pointer",
+              boxShadow: isMorphing
+                ? "none"
+                : "0 18px 35px rgba(129, 140, 248, 0.25)"
+            }}
+          >
+            {isMorphing ? "Switching…" : (mode3D ? "Switch to 2D (Fallback)" : "Return to 3D")}
+          </button>
+        )}
 
               
               console.log("viewer?", viewerRef.current?.cesiumElement);
