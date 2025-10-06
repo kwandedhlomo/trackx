@@ -12,6 +12,8 @@ import axios from "axios";
 import NotificationModal from "../components/NotificationModal";
 import useNotificationModal from "../hooks/useNotificationModal";
 import { getFriendlyErrorMessage } from "../utils/errorMessages";
+import TechnicalTermsSelector from "../components/TechnicalTermsSelector";
+import { formatTechnicalTerm, normalizeTechnicalTermList } from "../utils/technicalTerms";
 
 // ---- DOCX + save-as ----
 import { Document, Packer, Paragraph, TextRun, HeadingLevel, ImageRun } from "docx";
@@ -429,7 +431,7 @@ useEffect(() => {
           setLocationTitles(fb.locationTitles || Array((fb.locations || []).length).fill(""));
           setReportIntro(fb.reportIntro || "");
           setEvidenceItems(fb.evidenceItems || []);
-          setTechnicalTerms(fb.technicalTerms || []);
+          setTechnicalTerms(normalizeTechnicalTermList(fb.technicalTerms || []));
           setReportConclusion(fb.reportConclusion || "");
           setSelectedLocations(fb.selectedForReport || []);
           setCurrentCaseId(caseId);
@@ -514,7 +516,7 @@ useEffect(() => {
     setSelectedLocations(caseData.selectedForReport || []);
     setReportIntro(caseData.reportIntro || "");
     setEvidenceItems(caseData.evidenceItems || []);
-    setTechnicalTerms(caseData.technicalTerms || []);
+    setTechnicalTerms(normalizeTechnicalTermList(caseData.technicalTerms || []));
     setReportConclusion(caseData.reportConclusion || "");
     setLocationTitles(caseData.locationTitles || Array(caseData.locations.length).fill(""));
     setGeneratedReports(caseData.generatedReports || []);
@@ -539,6 +541,16 @@ useEffect(() => {
       const s = localStorage.getItem("trackxCaseData");
       if (!s) return;
       const caseData = JSON.parse(s);
+
+      const extraCopy = { ...extra };
+      let termsForSave;
+      if (Object.prototype.hasOwnProperty.call(extraCopy, "technicalTerms")) {
+        termsForSave = normalizeTechnicalTermList(extraCopy.technicalTerms);
+        delete extraCopy.technicalTerms;
+      } else {
+        termsForSave = normalizeTechnicalTermList(technicalTerms);
+      }
+
       const updated = {
         ...caseData,
         reportIntro,
@@ -547,9 +559,9 @@ useEffect(() => {
         locationTitles,
         generatedReports,
         evidenceItems,
-        technicalTerms,
-        ...extra,
-      };      
+        ...extraCopy,
+        technicalTerms: termsForSave,
+      };
       localStorage.setItem("trackxCaseData", JSON.stringify(updated));
     } catch (e) {
       console.error("Error saving to localStorage:", e);
@@ -565,15 +577,24 @@ useEffect(() => {
     setIsSaving(true);
     setSaveError(null);
     try {
+      const extraCopy = { ...additionalData };
+      let termsForUpdate;
+      if (Object.prototype.hasOwnProperty.call(extraCopy, "technicalTerms")) {
+        termsForUpdate = normalizeTechnicalTermList(extraCopy.technicalTerms);
+        delete extraCopy.technicalTerms;
+      } else {
+        termsForUpdate = normalizeTechnicalTermList(technicalTerms);
+      }
+
       const updateData = {
         locationTitles,
         reportIntro: reportIntro || "",
         reportConclusion: reportConclusion || "",
         selectedForReport: selectedLocations,
         evidenceItems,
-        technicalTerms,
-        ...additionalData,
-      };      
+        ...extraCopy,
+        technicalTerms: termsForUpdate,
+      };
       await updateCaseAnnotations(currentCaseId, updateData);
       setLastSaved(new Date().toLocaleTimeString());
       setSaveError(null);
@@ -622,6 +643,7 @@ const generatePDF = async () => {
     const pdfWidth = pdf.internal.pageSize.getWidth();
     const pdfHeight = pdf.internal.pageSize.getHeight();
     const margin = 15;
+    const normalizedTerms = normalizeTechnicalTermList(technicalTerms);
     const displayBetween = caseDetails.between || "Not specified";
 
     // --- COVER PAGE ---
@@ -656,12 +678,16 @@ const generatePDF = async () => {
     }
 
     // --- 3. TECHNICAL TERMS ---
-    if (technicalTerms.length > 0) {
+    if (normalizedTerms.length > 0) {
       pdf.setFontSize(16);
       pdf.text("3. TECHNICAL TERMS", margin, margin);
       pdf.setFontSize(11);
-      technicalTerms.forEach((term, idx) => {
-        pdf.text(`3.${idx + 1} ${term}`, margin, margin + 10 + idx * 8);
+      normalizedTerms.forEach((term, idx) => {
+        const formatted = formatTechnicalTerm(term);
+        if (!formatted) {
+          return;
+        }
+        pdf.text(`3.${idx + 1} ${formatted}`, margin, margin + 10 + idx * 8);
       });
       pdf.addPage();
     }
@@ -776,6 +802,7 @@ const generatePDF = async () => {
       between: caseDetails.between || "Not specified",
       intro: reportIntro || "",
       conclusion: reportConclusion || "",
+      technicalTerms: normalizeTechnicalTermList(technicalTerms),
       locations: locationsForPayload,
       selectedIndices,
       snapshots: filteredSnapshots,
@@ -786,6 +813,7 @@ const generatePDF = async () => {
 const generateDOCX = async () => {
   const payload = buildReportPayload();
   const docChildren = [];
+  const normalizedTerms = normalizeTechnicalTermList(payload.technicalTerms || technicalTerms);
   const displayBetween = payload.between || "Not specified";
 
   // --- COVER PAGE ---
@@ -811,10 +839,14 @@ const generateDOCX = async () => {
   }
 
   // --- 3. TECHNICAL TERMS ---
-  if (technicalTerms.length > 0) {
+  if (normalizedTerms.length > 0) {
     docChildren.push(makeHeading("3. TECHNICAL TERMS", HeadingLevel.HEADING_1));
-    technicalTerms.forEach((term, idx) => {
-      docChildren.push(new Paragraph({ text: `3.${idx + 1} ${term}` }));
+    normalizedTerms.forEach((term, idx) => {
+      const formatted = formatTechnicalTerm(term);
+      if (!formatted) {
+        return;
+      }
+      docChildren.push(new Paragraph({ text: `3.${idx + 1} ${formatted}` }));
     });
   }
 
@@ -906,6 +938,7 @@ const generateDOCX = async () => {
   const handleGenerate = async () => {
     setIsGenerating(true);
     const newLocal = [...generatedReports];
+    const normalizedTerms = normalizeTechnicalTermList(technicalTerms);
     const today = new Date().toISOString().split("T")[0];
     const base = `_${caseDetails.caseNumber}_${today}`;
 
@@ -927,7 +960,7 @@ const generateDOCX = async () => {
                   introduction: reportIntro,
                   conclusion: reportConclusion,
                   evidence: evidenceItems,
-                  technicalTerms: technicalTerms,
+                  technicalTerms: normalizedTerms,
                 },
                 getCurrentUserId()
               );              
@@ -1000,7 +1033,7 @@ const generateDOCX = async () => {
                   introduction: reportIntro,
                   conclusion: reportConclusion,
                   evidence: evidenceItems,
-                  technicalTerms: technicalTerms,
+                  technicalTerms: normalizedTerms,
                 },
                 getCurrentUserId()
               );              
@@ -1413,32 +1446,15 @@ const handleGenerateConclusion = async () => {
           </button>
         </div>
 
-        {/* Technical Terms */}
-        <div className="bg-gray-800 p-4 rounded-lg shadow">
-          <h2 className="text-lg font-semibold mb-3">Technical Terms</h2>
-          {technicalTerms.map((item, idx) => (
-            <div key={idx} className="flex items-center mb-2">
-              <span className="mr-2 text-gray-400">3.{idx + 1}</span>
-              <input
-                type="text"
-                value={item}
-                onChange={(e) => {
-                  const newItems = [...technicalTerms];
-                  newItems[idx] = e.target.value;
-                  setTechnicalTerms(newItems);
-                  saveToLocalStorage();
-                }}
-                className="flex-grow bg-gray-900 border border-gray-700 rounded px-2 py-1 text-white"
-              />
-            </div>
-          ))}
-          <button
-            onClick={() => setTechnicalTerms([...technicalTerms, ""])}
-            className="mt-2 px-3 py-1 bg-blue-600 hover:bg-blue-700 rounded text-white text-sm"
-          >
-            + Add Term
-          </button>
-        </div>
+        <TechnicalTermsSelector
+          value={technicalTerms}
+          onChange={(items) => {
+            const next = normalizeTechnicalTermList(items);
+            setTechnicalTerms(next);
+            saveToLocalStorage({ technicalTerms: next });
+          }}
+          disabled={isSaving}
+        />
 
 
         {/* Report Conclusion */}

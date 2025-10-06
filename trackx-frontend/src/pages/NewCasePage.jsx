@@ -14,6 +14,8 @@ import { clearCaseSession } from "../utils/caseSession";
 import NotificationModal from "../components/NotificationModal";
 import useNotificationModal from "../hooks/useNotificationModal";
 import { getFriendlyErrorMessage } from "../utils/errorMessages";
+import TechnicalTermsSelector from "../components/TechnicalTermsSelector";
+import { normalizeTechnicalTermList } from "../utils/technicalTerms";
 
 
 
@@ -70,6 +72,7 @@ function NewCasePage() {
   const [region, setRegion] = useState("");
   const [between, setBetween] = useState("");
   const [urgency, setUrgency] = useState("");
+  const [selectedTechnicalTerms, setSelectedTechnicalTerms] = useState([]);
 
   // File processing state
   const [file, setFile] = useState(null);
@@ -193,6 +196,7 @@ function NewCasePage() {
       reportIntro: mirror.reportIntro || "",
       reportConclusion: mirror.reportConclusion || "",
       selectedForReport: mirror.selectedForReport || [],
+      technicalTerms: mirror.technicalTerms || [],
       // keep legacy mirrors so old readers don't break; safe to remove after migration
       title: mirror.caseTitle,
       date: mirror.dateOfIncident ? new Date(mirror.dateOfIncident) : new Date(),
@@ -904,6 +908,7 @@ Please ensure your PDF contains GPS coordinates in one of these formats:
 
       setIsProcessing(true);
 
+      const normalizedTerms = normalizeTechnicalTermList(selectedTechnicalTerms);
       const assignedUserIds = assignedUsers.map((user) => user.id).filter(Boolean);
       if (!assignedUserIds.length) {
         openModal({
@@ -987,6 +992,7 @@ Please ensure your PDF contains GPS coordinates in one of these formats:
         reportIntro: "",
         reportConclusion: "",
         selectedForReport: parsedData.stoppedPoints.map((_, i) => i),
+        technicalTerms: normalizedTerms,
       };
   
       await upsertFirebaseMirror(backendCaseId, mirror);
@@ -1377,6 +1383,12 @@ Please ensure your PDF contains GPS coordinates in one of these formats:
               </div>
             </div>
           )}
+
+          <TechnicalTermsSelector
+            value={selectedTechnicalTerms}
+            onChange={setSelectedTechnicalTerms}
+            disabled={isProcessing}
+          />
 
           {/* Enhanced File Upload Section */}
           <div className="mt-8">
