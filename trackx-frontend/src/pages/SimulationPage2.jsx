@@ -20,10 +20,13 @@ import {
   where, 
   onSnapshot,
 } from "firebase/firestore";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { CustomDataSource } from "resium";
 import flagIcon from "../assets/flag.png";
 console.log("flagIcon path:", flagIcon);
+import NotificationModal from "../components/NotificationModal";
+import useNotificationModal from "../hooks/useNotificationModal";
+import { getFriendlyErrorMessage } from "../utils/errorMessages";
 
 
 
@@ -39,6 +42,31 @@ function SimulationPage2() {
   const [flaggedPoints, setFlaggedPoints] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const { modalState, openModal, closeModal } = useNotificationModal();
+  const showError = (title, error, fallback) =>
+    openModal({
+      variant: "error",
+      title,
+      description: getFriendlyErrorMessage(error, fallback),
+    });
+  const showInfo = (title, description) =>
+    openModal({
+      variant: "info",
+      title,
+      description,
+    });
+  const showWarning = (title, description) =>
+    openModal({
+      variant: "warning",
+      title,
+      description,
+    });
+  const showSuccess = (title, description) =>
+    openModal({
+      variant: "success",
+      title,
+      description,
+    });
   const viewerRef = useRef();
   const lastKnownPositionRef = useRef(null);
   const [vehicleReady, setVehicleReady] = useState(false);
@@ -70,8 +98,27 @@ function SimulationPage2() {
   // --- 3D/2D toggle state & refs ---
   const [mode3D, setMode3D] = useState(true);
   const [isMorphing, setIsMorphing] = useState(false);
+
+  const viewerReady = !!viewerRef.current?.cesiumElement;
+  const floatingButtonBaseStyle = {
+    position: "absolute",
+    right: "30px",
+    padding: "10px 18px",
+    borderRadius: "999px",
+    border: "1px solid rgba(56, 189, 248, 0.35)",
+    background: "rgba(15, 23, 42, 0.85)",
+    color: "#e2e8f0",
+    fontWeight: 600,
+    fontSize: "0.9rem",
+    boxShadow: "0 12px 30px rgba(15, 23, 42, 0.45)",
+    backdropFilter: "blur(6px)",
+    letterSpacing: "0.01em",
+    zIndex: 1000,
+    transition: "transform 0.2s ease, box-shadow 0.2s ease",
+    cursor: "pointer"
+  };
   // remember whether playback was running before morph
-const wasAnimatingRef = useRef(true);
+  const wasAnimatingRef = useRef(true);
 
 // keep exactly one onTick handler to force repaint during play/scrub
 const onTickCleanupRef = useRef(null);
@@ -441,13 +488,13 @@ useEffect(() => {
       // See This Moment
       const handleSeeThisMoment = async () => {
         try {
-          const viewer = viewerRef.current?.cesiumElement;
-          const vehicleEntity = vehicleEntityRef.current;
-    
-          if (!viewer || !vehicleEntity || !vehicleEntity.position) {
-            alert("Vehicle position not ready yet.");
+      const viewer = viewerRef.current?.cesiumElement;
+      const vehicleEntity = vehicleEntityRef.current;
+
+      if (!viewer || !vehicleEntity || !vehicleEntity.position) {
+            showWarning("Vehicle not ready", "The vehicle position is still loading. Please try again in a moment.");
             return;
-          }
+      }
     
           const currentTime = viewer.clock.currentTime;
           let position = vehicleEntity.position.getValue(currentTime);
@@ -456,7 +503,7 @@ useEffect(() => {
             position = lastKnownPositionRef.current;
           }
           if (!position) {
-            alert("Position not available yet.");
+            showWarning("Position unavailable", "We haven't received the vehicle's current position yet. Please try again shortly.");
             return;
           }
     
@@ -466,11 +513,11 @@ useEffect(() => {
     
           // Open Google Street View at this lat/lng
           window.open(`https://www.google.com/maps?q=&layer=c&cbll=${lat},${lng}`, "_blank");
-        } catch (err) {
-          console.error("Failed to open Street View:", err);
-          alert("Could not open Street View.");
-        }
-      };
+      } catch (err) {
+        console.error("Failed to open Street View:", err);
+          showError("Street View failed", err, "We couldn't open Google Street View for this location.");
+      }
+    };
 
 //For the Flagging:
 const handleFlagSubmit = async () => {
@@ -482,19 +529,19 @@ const handleFlagSubmit = async () => {
 
     if (!viewer) {
       console.error("Viewer not available.");
-      alert("Viewer is not ready.");
+      showError("Viewer unavailable", null, "The 3D viewer isn't ready yet. Please wait a moment and try again.");
       return;
     }
 
     if (!vehicleEntity) {
       console.error("Vehicle entity not found.");
-      alert("Vehicle entity is not ready.");
+      showWarning("Vehicle not loaded", "The vehicle entity is still loading. Please try again in a moment.");
       return;
     }
 
     if (!vehicleEntity.position) {
       console.error("Vehicle entity has no position property.");
-      alert("Vehicle position data is missing.");
+      showWarning("Position data missing", "We couldn't access the vehicle position data. Please try again later.");
       return;
     }
 
@@ -511,7 +558,7 @@ const handleFlagSubmit = async () => {
 
     if (!position) {
       console.error("Position is still undefined after fallback.");
-      alert("Vehicle position is not available yet.");
+      showWarning("Position unavailable", "We haven't received the vehicle's current position yet. Please try again shortly.");
       return;
     }
 
@@ -575,7 +622,7 @@ const handleFlagSubmit = async () => {
 
     if (!closestDoc) {
       console.error("No matching Firestore point found.");
-      alert("No matching point found in Firestore.");
+      showInfo("Point not found", "We couldn't find a matching location in Firestore for the current time.");
       return;
     }
 
@@ -586,13 +633,13 @@ const handleFlagSubmit = async () => {
       note: flagNote
     });
 
-    alert("Point flagged successfully");
+    showSuccess("Point flagged", "This moment has been flagged for follow-up.");
     setShowFlagModal(false);
     setFlagTitle("");
     setFlagNote("");
   } catch (err) {
     console.error("Flagging failed:", err);
-    alert("Something went wrong.");
+    showError("Flagging failed", err, "We couldn't flag this location. Please try again.");
   }
 };
 
@@ -1026,14 +1073,16 @@ async function rebuildFlagBillboards(viewer, flaggedPoints, liftMeters = 1.5) {
     >
       <div className="absolute inset-0 bg-gradient-to-br from-black via-gray-900 to-black -z-10" />
 
-      <div className="flex items-center justify-between px-6 py-4 bg-black shadow-md z-10">
-        <img src={adflogo} alt="Logo" className="h-12" />
+      <nav className="flex items-center justify-between px-6 py-4 bg-gradient-to-r from-black to-gray-900 bg-opacity-80 backdrop-blur-md shadow-md z-10">
+        <Link to="/home" className="inline-flex">
+          <img src={adflogo} alt="Logo" className="h-12 cursor-pointer hover:opacity-80 transition" />
+        </Link>
         <h1 className="text-xl font-bold">Route Simulation</h1>
         <div>
           <p className="text-sm">{profile ? `${profile.firstName} ${profile.surname}` : "Loading..."}</p>
           <button onClick={handleSignOut} className="text-red-400 hover:text-red-600 text-xs">Sign Out</button>
         </div>
-      </div>
+      </nav>
 
       <div className="relative w-full h-[88vh] border border-gray-600 rounded overflow-hidden">
         <SimulationSidebar viewerRef={viewerRef} disabled={isPreparing} />
@@ -1624,6 +1673,16 @@ async function rebuildFlagBillboards(viewer, flaggedPoints, liftMeters = 1.5) {
           </div>
         )}
       </div>
+
+      <NotificationModal
+        isOpen={modalState.isOpen}
+        title={modalState.title}
+        description={modalState.description}
+        variant={modalState.variant}
+        onClose={closeModal}
+        primaryAction={modalState.primaryAction}
+        secondaryAction={modalState.secondaryAction}
+      />
     </motion.div>
   );
 }

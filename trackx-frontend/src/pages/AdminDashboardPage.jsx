@@ -1,13 +1,40 @@
-import React from "react";
+import React, { useState } from "react";
 import { Link } from "react-router-dom";
 import trackxLogo from "../assets/trackx-logo-removebg-preview.png";
 import ADFLogoNoBg from "../assets/image-removebg-preview.png";
 import AnimatedMap from "../components/AnimatedMap";
-import { useNavigate } from "react-router-dom";
-
-
+import technicalTermsSeed from "../data/technicalTermsSeed";
+import { seedTechnicalTerms } from "../services/firebaseServices";
 
 function AdminDashboardPage() {
+  const [isSeedingTerms, setIsSeedingTerms] = useState(false);
+  const [seedResult, setSeedResult] = useState(null);
+  const [seedError, setSeedError] = useState("");
+
+  const handleSeedTechnicalTerms = async () => {
+    if (isSeedingTerms) {
+      return;
+    }
+    const confirmed = window.confirm(
+      "This will upsert the predefined technical glossary into Firestore. Continue?"
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      setIsSeedingTerms(true);
+      setSeedError("");
+      setSeedResult(null);
+      const result = await seedTechnicalTerms(technicalTermsSeed);
+      setSeedResult(result);
+    } catch (error) {
+      setSeedError(error.message || "Failed to seed technical terms. Check the console for details.");
+    } finally {
+      setIsSeedingTerms(false);
+    }
+  };
+
   return (
     <div className="relative min-h-screen overflow-hidden font-sans bg-black">
       <div className="absolute inset-0 z-0">
@@ -37,6 +64,25 @@ function AdminDashboardPage() {
               Return Home
             </button>
           </Link>
+          <button
+            onClick={handleSeedTechnicalTerms}
+            disabled={isSeedingTerms}
+            className={`w-48 py-2 rounded shadow transition-all duration-300 ${
+              isSeedingTerms
+                ? "bg-blue-900 cursor-not-allowed"
+                : "bg-gradient-to-r from-green-600 to-green-500 hover:from-green-700 hover:to-green-600"
+            }`}
+          >
+            {isSeedingTerms ? "Seeding Terms..." : "Initial Create Terms"}
+          </button>
+          {seedResult && (
+            <p className="text-sm text-green-400">
+              Completed: {seedResult.created} created, {seedResult.updated} updated.
+            </p>
+          )}
+          {seedError && (
+            <p className="text-sm text-red-400">{seedError}</p>
+          )}
         </div>
       </div>
     </div>
@@ -44,6 +90,3 @@ function AdminDashboardPage() {
 }
 
 export default AdminDashboardPage;
-
-
-

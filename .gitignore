@@ -3,3 +3,26 @@ node_modules/
 # Secrets
 trackx-backend/.env
 trackx-backend/gcp-service-account.json
+# Secrets
+trackx-backend/.env
+trackx-backend/gcp-service-account.json
+
+# Python caches
+__pycache__/
+*.pyc
+
+# Node/Vite build
+node_modules/
+dist/
+.vite/
+
+# macOS
+.DS_Store
+
+# Lockfile oddballs
+package-lock *.json
+!package-lock.json
+trackx-backend/.env
+trackx-backend/gcp-service-account.json
+trackx-backend/.env
+trackx-backend/gcp-service-account.json
