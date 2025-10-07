@@ -320,12 +320,42 @@ function NewCasePage() {
   const [securityResults, setSecurityResults] = useState(null);
   const [showSecurityDetails, setShowSecurityDetails] = useState(false);
 
+  // Evidence Locker state
+  const [evidenceItems, setEvidenceItems] = useState([]);
+
   // Initialize security scanner
   const securityScanner = new FileSecurityScanner();
 
   useEffect(() => {
     clearCaseSession();
   }, []);
+
+  // Evidence Locker Functions
+  const generateEvidenceId = () => {
+    const timestamp = Date.now();
+    const random = Math.floor(Math.random() * 1000);
+    return `EV-${timestamp}-${random}`;
+  };
+
+  const addEvidence = () => {
+    const newEvidence = {
+      id: generateEvidenceId(),
+      description: '',
+      dateAdded: new Date().toISOString(),
+      caseNumber: caseNumber || 'Pending'
+    };
+    setEvidenceItems([...evidenceItems, newEvidence]);
+  };
+
+  const updateEvidence = (id, description) => {
+    setEvidenceItems(evidenceItems.map(item => 
+      item.id === id ? { ...item, description } : item
+    ));
+  };
+
+  const removeEvidence = (id) => {
+    setEvidenceItems(evidenceItems.filter(item => item.id !== id));
+  };
 
   // minimal mirror writer
   async function upsertFirebaseMirror(caseId, mirror) {
@@ -344,6 +374,7 @@ function NewCasePage() {
       reportIntro: mirror.reportIntro || "",
       reportConclusion: mirror.reportConclusion || "",
       selectedForReport: mirror.selectedForReport || [],
+      evidenceItems: mirror.evidenceItems || [],
       title: mirror.caseTitle,
       date: mirror.dateOfIncident ? new Date(mirror.dateOfIncident) : new Date(),
       createdAt: serverTimestamp(),
@@ -809,7 +840,7 @@ Please ensure your PDF contains GPS coordinates in one of these formats:
     }
   };
 
-  // --- CSV parsing helpers & parser ---
+  // CSV parsing helpers & parser
   const determineIgnitionStatus = (description) => {
     if (!description) return null;
 
@@ -1110,6 +1141,7 @@ Please ensure your PDF contains GPS coordinates in one of these formats:
         between: between || "",
         urgency,
         userID: auth.currentUser ? auth.currentUser.uid : null,
+        evidence_items: evidenceItems,
   
         csv_data: parsedData.stoppedPoints.map((p) => ({
           latitude: p.lat,
@@ -1152,6 +1184,7 @@ Please ensure your PDF contains GPS coordinates in one of these formats:
         between: between || "",
         urgency,
         userId: auth.currentUser ? auth.currentUser.uid : null,
+        evidenceItems,
   
         locations: parsedData.stoppedPoints.map((p, i) => ({
           lat: p.lat,
@@ -1184,7 +1217,7 @@ Please ensure your PDF contains GPS coordinates in one of these formats:
     }
   };
 
-  // ---------- Handlers for upload UI ----------
+  // Handlers for upload UI
   const handleDragOver = (e) => {
     e.preventDefault();
     setIsDragging(true);
@@ -1204,7 +1237,7 @@ Please ensure your PDF contains GPS coordinates in one of these formats:
     }
   };
 
-  // Submit: just call create
+  // Submit
   const handleNext = async (e) => {
     e.preventDefault();
 
@@ -1307,7 +1340,7 @@ Please ensure your PDF contains GPS coordinates in one of these formats:
     );
   };
 
-  // ---------- UI ----------
+  // UI
   return (
     <motion.div
       initial={{ opacity: 0 }}
@@ -1498,6 +1531,84 @@ Please ensure your PDF contains GPS coordinates in one of these formats:
               <option value="High">High</option>
               <option value="Critical">Critical</option>
             </select>
+          </div>
+
+          {/* Evidence Locker Section */}
+          <div className="mt-8 bg-gray-800 p-6 rounded-lg border border-gray-600">
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h3 className="text-lg font-semibold text-white flex items-center">
+                  <FileText className="w-5 h-5 mr-2 text-blue-400" />
+                  Evidence Locker
+                </h3>
+                <p className="text-sm text-gray-400 mt-1">
+                  Add evidence items that will be associated with this case
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={addEvidence}
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded text-white text-sm flex items-center"
+              >
+                <span className="mr-2">+</span>
+                Add Evidence
+              </button>
+            </div>
+
+            {evidenceItems.length === 0 ? (
+              <div className="text-center py-8 text-gray-400">
+                <FileText className="w-12 h-12 mx-auto mb-2 opacity-50" />
+                <p>No evidence items added yet</p>
+                <p className="text-sm mt-1">Click "Add Evidence" to create an evidence entry</p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {evidenceItems.map((item, idx) => (
+                  <div key={item.id} className="bg-gray-700 p-4 rounded border border-gray-600">
+                    <div className="flex items-start justify-between mb-2">
+                      <div className="flex-grow">
+                        <div className="flex items-center space-x-2 mb-2">
+                          <span className="text-xs font-mono bg-blue-900 text-blue-300 px-2 py-1 rounded">
+                            {item.id}
+                          </span>
+                          <span className="text-xs text-gray-400">
+                            Added: {new Date(item.dateAdded).toLocaleString()}
+                          </span>
+                        </div>
+                        <input
+                          type="text"
+                          placeholder="Enter evidence description..."
+                          value={item.description}
+                          onChange={(e) => updateEvidence(item.id, e.target.value)}
+                          className="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-white text-sm focus:border-blue-500 focus:ring focus:ring-blue-500 focus:ring-opacity-50"
+                        />
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => removeEvidence(item.id)}
+                        className="ml-3 text-red-400 hover:text-red-300"
+                        title="Remove evidence"
+                      >
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {evidenceItems.length > 0 && (
+              <div className="mt-4 p-3 bg-gray-900 rounded border border-gray-700">
+                <p className="text-sm text-gray-400">
+                  <span className="font-semibold text-white">Total Evidence Items:</span> {evidenceItems.length}
+                </p>
+                <p className="text-xs text-gray-500 mt-1">
+                  These items will be saved with the case and can be referenced in your report
+                </p>
+              </div>
+            )}
           </div>
 
           {/* Enhanced File Upload Section with Security */}

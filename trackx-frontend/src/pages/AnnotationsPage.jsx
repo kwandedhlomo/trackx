@@ -265,6 +265,12 @@ function AnnotationsPage() {
       updateSnapshotDescription(value);
     }
   };
+
+  // NEW: Handle blur events - save when user clicks away from text fields
+  const handleBlur = () => {
+    console.log('Field blurred - saving annotations...');
+    saveAllAnnotations();
+  };
   
   const updateSnapshotDescription = (description) => {
     if (!snapshots || !snapshots[currentIndex]) return;
@@ -559,15 +565,8 @@ function AnnotationsPage() {
     setSnapshotCaptured(!!currentSnapshot);
   }, [currentIndex, snapshots]);
 
-  useEffect(() => {
-    if (!isLoading && annotations.length > 0 && !isSaving && currentCaseId) {
-      const timeoutId = setTimeout(() => {
-        saveAllAnnotations();
-      }, 3000);
-      
-      return () => clearTimeout(timeoutId);
-    }
-  }, [annotations, selectedForReport, isLoading, currentCaseId]);
+  // REMOVED: Auto-save useEffect that was saving every 3 seconds
+  // User changes are now saved only when they click away from text fields (onBlur)
   
   const currentLocation = locations[currentIndex] || null;
   
@@ -842,7 +841,7 @@ function AnnotationsPage() {
           <div className="mb-4 p-3 rounded bg-gray-800 bg-opacity-50">
             <div className="flex items-center justify-between">
               <div className="text-sm text-gray-400">
-                Annotations are automatically saved every 3 seconds
+                💡 Your changes are saved automatically when you click away from a text field
                 {currentCaseId && (
                   <span className="text-green-400 ml-2">✓ Cloud sync enabled</span>
                 )}
@@ -922,7 +921,6 @@ function AnnotationsPage() {
                 </div>
               </div>
               
-              {/* UPDATED: Dynamic Street View Panorama */}
               <div className="bg-gray-800 rounded-lg overflow-hidden">
                 <div className="bg-gray-700 py-2 px-4 text-sm font-medium flex justify-between items-center">
                   <span>Google Street View - Interactive 360°</span>
@@ -958,7 +956,8 @@ function AnnotationsPage() {
                     placeholder="e.g. Suspect's Home, Fuel Station, etc."
                     value={annotations[currentIndex]?.title || ''}
                     onChange={(e) => updateAnnotation('title', e.target.value)}
-                    className="w-full p-2 bg-gray-900 border border-gray-700 rounded text-white"
+                    onBlur={handleBlur}
+                    className="w-full p-2 bg-gray-900 border border-gray-700 rounded text-white focus:border-blue-500 focus:ring focus:ring-blue-500 focus:ring-opacity-50"
                   />
                 </div>
                 
@@ -983,7 +982,8 @@ function AnnotationsPage() {
                     placeholder="Provide details about the significance of this location..."
                     value={annotations[currentIndex]?.description || ''}
                     onChange={(e) => updateAnnotation('description', e.target.value)}
-                    className="w-full p-2 bg-gray-900 border border-gray-700 rounded text-white h-64 resize-none"
+                    onBlur={handleBlur}
+                    className="w-full p-2 bg-gray-900 border border-gray-700 rounded text-white h-64 resize-none focus:border-blue-500 focus:ring focus:ring-blue-500 focus:ring-opacity-50"
                   />
                 </div>
 
