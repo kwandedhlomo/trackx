@@ -13,13 +13,13 @@ import {
 import { signOut } from "firebase/auth";
 import { Link, useNavigate } from "react-router-dom";
 import adfLogo from "../assets/image-removebg-preview.png";
-import trackxLogo from "../assets/trackx-logo-removebg-preview.png";
 import { motion } from "framer-motion";
+import AnimatedMap from "../components/AnimatedMap";
 import emailjs from "@emailjs/browser";
 import NotificationModal from "../components/NotificationModal";
 import useNotificationModal from "../hooks/useNotificationModal";
 import { getFriendlyErrorMessage } from "../utils/errorMessages";
-import { Home, FilePlus2, FolderOpen, Briefcase, LayoutDashboard, Users } from "lucide-react";
+import { Home, FilePlus2, FolderOpen, Briefcase, LayoutDashboard, Users, UserCheck, UserX } from "lucide-react";
 
 function PendingUsersPage() {
   const [allUsers, setAllUsers] = useState([]);
@@ -27,10 +27,9 @@ function PendingUsersPage() {
   const [showMenu, setShowMenu] = useState(false);
   const [profile, setProfile] = useState(null);
   const [filter, setFilter] = useState("pending");
-  const [page, setPage] = useState(1);
-  const pageSize = 10;
   const navigate = useNavigate();
   const { modalState, openModal, closeModal } = useNotificationModal();
+  const formattedDateTime = new Date().toLocaleString();
 
   useEffect(() => {
     fetchUsers();
@@ -158,178 +157,267 @@ function PendingUsersPage() {
     return true;
   });
 
-  const renderUserCard = (user) => (
-    <div
-      key={user.id}
-      className="bg-gray-800 rounded-lg p-4 shadow-md text-white space-y-2 w-full max-w-md mx-auto"
-    >
-      <p>
-        <strong>Name:</strong> {user.firstName} {user.surname}
-      </p>
-      <p>
-        <strong>Email:</strong> {user.email}
-      </p>
-      <p>
-        <strong>Role:</strong> {user.role}
-      </p>
-      <div className="flex space-x-4">
-        {filter === "pending" && (
-          <>
-            <button
-              onClick={() => approveUser(user.id)}
-              className="bg-green-600 hover:bg-green-700 px-4 py-1 rounded w-full"
-            >
-              Approve
-            </button>
-            <button
-              onClick={() => rejectUser(user.id)}
-              className="bg-red-600 hover:bg-red-700 px-4 py-1 rounded w-full"
-            >
-              Reject
-            </button>
-          </>
-        )}
-        {filter === "rejected" && (
-          <button
-            onClick={() => approveUser(user.id, true)}
-            className="bg-yellow-600 hover:bg-yellow-700 px-4 py-1 rounded w-full"
-          >
-            Approve This Rejected User
-          </button>
-        )}
+  const pendingCount = allUsers.filter((user) => user.isApproved === false && user.status !== "rejected").length;
+  const approvedCount = allUsers.filter((user) => user.isApproved === true).length;
+  const rejectedCount = allUsers.filter((user) => user.status === "rejected").length;
+  const filterOptions = [
+    {
+      value: "pending",
+      label: "Pending",
+      description: "Awaiting review",
+      accent: "from-blue-500/70 to-indigo-500/70",
+    },
+    {
+      value: "approved",
+      label: "Approved",
+      description: "Active investigators",
+      accent: "from-emerald-500/70 to-teal-500/70",
+    },
+    {
+      value: "rejected",
+      label: "Rejected",
+      description: "Previously declined",
+      accent: "from-rose-500/70 to-orange-500/70",
+    },
+  ];
+
+  const renderUserCard = (user) => {
+    const accent = user.status === "rejected"
+      ? "from-rose-500/60 via-rose-500/30"
+      : user.isApproved
+      ? "from-emerald-500/60 via-emerald-500/30"
+      : "from-blue-500/60 via-indigo-500/30";
+
+    return (
+      <div
+        key={user.id}
+        className="group relative overflow-hidden rounded-3xl border border-white/10 bg-white/[0.025] p-6 text-left shadow-[0_18px_45px_rgba(15,23,42,0.45)] backdrop-blur-2xl transition hover:border-white/25"
+      >
+        <div className={`absolute inset-0 -z-10 bg-gradient-to-br ${accent} opacity-0 transition group-hover:opacity-60`} />
+        <div className="flex flex-col gap-4 text-sm text-gray-200">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p className="text-base font-semibold text-white">
+                {user.firstName} {user.surname}
+              </p>
+              <p className="text-xs text-gray-300">{user.email}</p>
+            </div>
+            <span className="rounded-full border border-white/20 bg-black/30 px-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-gray-200">
+              {user.role || "User"}
+            </span>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-3 text-xs text-gray-300">
+            <span className="rounded-full border border-white/15 bg-white/[0.05] px-3 py-1">
+              Status: {user.status || (user.isApproved ? "approved" : "pending")}
+            </span>
+            <span className="rounded-full border border-white/15 bg-white/[0.05] px-3 py-1">
+              UID: {user.id}
+            </span>
+          </div>
+
+          <div className={`grid gap-3 ${filter === "pending" ? "sm:grid-cols-2" : ""}`}>
+            {filter === "pending" && (
+              <>
+                <button
+                  onClick={() => approveUser(user.id)}
+                  className="inline-flex items-center justify-center rounded-full bg-gradient-to-r from-emerald-500 to-teal-500 px-4 py-2 text-xs font-semibold text-white shadow-lg shadow-emerald-500/20 transition hover:from-emerald-400 hover:to-teal-400"
+                >
+                  Approve
+                </button>
+                <button
+                  onClick={() => rejectUser(user.id)}
+                  className="inline-flex items-center justify-center rounded-full bg-gradient-to-r from-rose-500 to-orange-500 px-4 py-2 text-xs font-semibold text-white shadow-lg shadow-rose-500/20 transition hover:from-rose-400 hover:to-orange-400"
+                >
+                  Reject
+                </button>
+              </>
+            )}
+            {filter === "rejected" && (
+              <button
+                onClick={() => approveUser(user.id, true)}
+                className="inline-flex items-center justify-center rounded-full bg-gradient-to-r from-amber-500 to-yellow-500 px-4 py-2 text-xs font-semibold text-white shadow-lg shadow-amber-500/20 transition hover:from-amber-400 hover:to-yellow-400"
+              >
+                Approve User
+              </button>
+            )}
+          </div>
+        </div>
       </div>
-    </div>
-  );
+    );
+  };
 
   return (
-    <motion.div
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      transition={{ duration: 1 }}
-      className="min-h-screen bg-black text-white font-sans"
-    >
-      <nav className="flex justify-between items-center bg-gradient-to-r from-black to-gray-900 bg-opacity-80 backdrop-blur-md p-4 relative font-sans">
-        <div className="flex items-center space-x-4">
-          <div
-            className="text-white text-3xl cursor-pointer"
-            onClick={() => setShowMenu(!showMenu)}
-          >
-            &#9776;
-          </div>
-          <Link to="/home" className="inline-flex">
-            <img
-              src={adfLogo}
-              alt="ADF Logo"
-              className="h-10 w-auto cursor-pointer hover:opacity-80 transition"
-            />
-          </Link>
-        </div>
-
-        <div className="absolute left-1/2 transform -translate-x-1/2 text-3xl font-extrabold text-white font-sans flex items-center space-x-2">
-          <img src={trackxLogo} alt="TrackX Logo Left" className="h-8 w-auto" />
-          <span>TRACKX</span>
-          <img src={trackxLogo} alt="TrackX Logo Right" className="h-8 w-auto" />
-        </div>
-
-        <div className="flex items-center space-x-6 text-white font-sans">
-          <Link to="/admin-dashboard" className="hover:text-gray-300">
-            Admin
-          </Link>
-          <div className="flex flex-col text-right">
-            <span>{profile ? profile.firstName : "Loading..."}</span>
-            <button
-              onClick={handleSignOut}
-              className="text-sm text-gray-300 hover:text-white"
-            >
-              Sign Out
-            </button>
-          </div>
-          <div className="text-sm text-gray-300">{new Date().toLocaleString()}</div>
-        </div>
-      </nav>
-
-      {showMenu && (
-        <div className="absolute top-16 left-0 w-64 rounded-r-3xl border border-white/10 bg-gradient-to-br from-gray-900/95 to-black/90 backdrop-blur-xl p-6 z-30 shadow-2xl space-y-2">
-          <Link
-            to="/home"
-            className="flex items-center gap-3 px-3 py-2 rounded-2xl text-sm font-medium text-gray-200 hover:text-white hover:bg-white/10 transition"
-            onClick={() => setShowMenu(false)}
-          >
-            <Home className="w-4 h-4" />
-            Home
-          </Link>
-          <Link
-            to="/new-case"
-            className="flex items-center gap-3 px-3 py-2 rounded-2xl text-sm font-medium text-gray-200 hover:text-white hover:bg-white/10 transition"
-            onClick={() => setShowMenu(false)}
-          >
-            <FilePlus2 className="w-4 h-4" />
-            Create New Case
-          </Link>
-          <Link
-            to="/manage-cases"
-            className="flex items-center gap-3 px-3 py-2 rounded-2xl text-sm font-medium text-gray-200 hover:text-white hover:bg-white/10 transition"
-            onClick={() => setShowMenu(false)}
-          >
-            <FolderOpen className="w-4 h-4" />
-            Manage Cases
-          </Link>
-          <Link
-            to="/my-cases"
-            className="flex items-center gap-3 px-3 py-2 rounded-2xl text-sm font-medium text-gray-200 hover:text-white hover:bg-white/10 transition"
-            onClick={() => setShowMenu(false)}
-          >
-            <Briefcase className="w-4 h-4" />
-            My Cases
-          </Link>
-          <div className="flex items-center gap-3 px-3 py-2 rounded-2xl text-sm font-medium text-white bg-white/10">
-            <Users className="w-4 h-4" />
-            Pending Users
-          </div>
-          <Link
-            to="/admin-dashboard"
-            className="flex items-center gap-3 px-3 py-2 rounded-2xl text-sm font-medium text-gray-200 hover:text-white hover:bg-white/10 transition"
-            onClick={() => setShowMenu(false)}
-          >
-            <LayoutDashboard className="w-4 h-4" />
-            Admin Dashboard
-          </Link>
-        </div>
-      )}
-
-      <div className="flex flex-col items-center justify-center px-4 py-10 space-y-6">
-        <h1 className="text-3xl font-bold mb-4">User Management</h1>
-
-        <div className="flex space-x-4 mb-6">
-          <button
-            onClick={() => setFilter("pending")}
-            className={`px-4 py-2 rounded ${filter === "pending" ? "bg-blue-600" : "bg-gray-700"}`}
-          >
-            Pending
-          </button>
-          <button
-            onClick={() => setFilter("approved")}
-            className={`px-4 py-2 rounded ${filter === "approved" ? "bg-green-600" : "bg-gray-700"}`}
-          >
-            Approved
-          </button>
-          <button
-            onClick={() => setFilter("rejected")}
-            className={`px-4 py-2 rounded ${filter === "rejected" ? "bg-red-600" : "bg-gray-700"}`}
-          >
-            Rejected
-          </button>
-        </div>
-
-        {loading ? (
-          <p className="text-gray-400">Loading...</p>
-        ) : filteredUsers.length > 0 ? (
-          <div className="space-y-6 w-full">{filteredUsers.map(renderUserCard)}</div>
-        ) : (
-          <p className="text-gray-400">No users found.</p>
-        )}
+    <>
+      <motion.div
+        initial={{ opacity: 0, y: 18 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.8 }}
+        className="relative min-h-screen overflow-hidden bg-gradient-to-br from-black via-gray-900 to-black font-sans text-white"
+      >
+    <div className="absolute inset-0 -z-20">
+      <AnimatedMap />
+    </div>
+    <div className="pointer-events-none absolute inset-0 -z-10 bg-[radial-gradient(circle_at_top,rgba(59,130,246,0.18),transparent_55%)]" />
+    <div className="pointer-events-none absolute inset-0 -z-10 bg-[radial-gradient(circle_at_bottom,rgba(129,140,248,0.14),transparent_60%)]" />
+  
+    <nav className="mx-6 mt-6 flex items-center justify-between rounded-3xl border border-white/10 bg-gradient-to-br from-black/85 via-slate-900/70 to-black/80 px-6 py-4 shadow-xl shadow-[0_25px_65px_rgba(8,11,24,0.65)] backdrop-blur-xl">
+      <div className="flex items-center gap-4">
+        <button
+          type="button"
+          onClick={() => setShowMenu(!showMenu)}
+          className="flex h-11 w-11 items-center justify-center rounded-full border border-white/10 bg-white/[0.02] text-xl text-white shadow-inner shadow-white/5 transition hover:bg-white/10"
+          aria-label="Toggle navigation"
+        >
+          &#9776;
+        </button>
+        <Link to="/home" className="hidden sm:block">
+          <img
+            src={adfLogo}
+            alt="ADF Logo"
+            className="h-11 w-auto drop-shadow-[0_10px_20px_rgba(59,130,246,0.35)] transition hover:opacity-90"
+          />
+        </Link>
       </div>
-
+  
+      <div className="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 text-2xl font-semibold tracking-[0.35em] text-white/80 drop-shadow-[0_2px_12px_rgba(15,23,42,0.55)]">
+        USER ADMIN
+      </div>
+  
+      <div className="flex items-center gap-4 text-sm text-gray-200">
+        <span className="hidden text-right md:block">
+          <span className="block text-xs text-gray-400">Pending • {pendingCount}</span>
+          <span>{formattedDateTime}</span>
+        </span>
+      </div>
+    </nav>
+  
+    {showMenu && (
+      <div className="absolute left-6 top-32 z-30 w-64 space-y-2 rounded-3xl border border-white/10 bg-gradient-to-br from-slate-950/85 via-slate-900/78 to-black/78 p-6 shadow-2xl shadow-[0_30px_60px_rgba(30,58,138,0.45)] backdrop-blur-2xl">
+        <Link
+          to="/home"
+          className="flex items-center gap-3 rounded-2xl px-3 py-2 text-sm font-medium text-gray-200 transition hover:bg-white/10 hover:text-white"
+          onClick={() => setShowMenu(false)}
+        >
+          <Home className="h-4 w-4" />
+          Home
+        </Link>
+        <Link
+          to="/new-case"
+          className="flex items-center gap-3 rounded-2xl px-3 py-2 text-sm font-medium text-gray-200 transition hover:bg-white/10 hover:text-white"
+          onClick={() => setShowMenu(false)}
+        >
+          <FilePlus2 className="h-4 w-4" />
+          Create New Case
+        </Link>
+        <Link
+          to="/manage-cases"
+          className="flex items-center gap-3 rounded-2xl px-3 py-2 text-sm font-medium text-gray-200 transition hover:bg-white/10 hover:text-white"
+          onClick={() => setShowMenu(false)}
+        >
+          <FolderOpen className="h-4 w-4" />
+          Manage Cases
+        </Link>
+        <Link
+          to="/my-cases"
+          className="flex items-center gap-3 rounded-2xl px-3 py-2 text-sm font-medium text-gray-200 transition hover:bg-white/10 hover:text-white"
+          onClick={() => setShowMenu(false)}
+        >
+          <Briefcase className="h-4 w-4" />
+          My Cases
+        </Link>
+        <div className="flex items-center gap-3 rounded-2xl px-3 py-2 text-sm font-medium text-white bg-white/[0.045] shadow-inner shadow-white/10">
+          <Users className="h-4 w-4" />
+          Pending Users
+        </div>
+        <Link
+          to="/admin-dashboard"
+          className="flex items-center gap-3 rounded-2xl px-3 py-2 text-sm font-medium text-gray-200 transition hover:bg-white/10 hover:text-white"
+          onClick={() => setShowMenu(false)}
+        >
+          <LayoutDashboard className="h-4 w-4" />
+          Admin Dashboard
+        </Link>
+      </div>
+    )}
+  
+    <main className="mx-auto flex w-full max-w-6xl flex-col gap-8 px-6 pb-24 pt-16">
+      <section className="relative overflow-hidden rounded-3xl border border-white/10 bg-white/[0.03] px-8 py-8 shadow-[0_35px_90px_rgba(15,23,42,0.55)] backdrop-blur-2xl">
+        <div className="pointer-events-none absolute -top-24 right-0 h-48 w-48 rounded-full bg-blue-900/25 blur-3xl" />
+        <div className="pointer-events-none absolute -bottom-20 left-0 h-40 w-40 rounded-full bg-purple-900/20 blur-3xl" />
+        <div className="relative z-10 grid gap-6 lg:grid-cols-4">
+          <div className="lg:col-span-2">
+            <h1 className="text-3xl font-semibold text-white">User Management Console</h1>
+            <p className="mt-3 text-sm text-gray-300">
+              Approve incoming investigators, keep tabs on rejected requests, and audit the active roster. Use the filters below to pivot between cohorts.
+            </p>
+          </div>
+          <div className="grid gap-4 text-sm text-gray-200 sm:grid-cols-3 lg:col-span-2">
+            <div className="rounded-2xl border border-white/10 bg-white/[0.05] p-4">
+              <p className="text-xs uppercase tracking-wide text-gray-400">Pending</p>
+              <p className="mt-2 text-xl font-semibold text-white">{pendingCount}</p>
+              <p className="text-[11px] text-gray-400">Awaiting decision</p>
+            </div>
+            <div className="rounded-2xl border border-white/10 bg-white/[0.05] p-4">
+              <p className="text-xs uppercase tracking-wide text-gray-400">Approved</p>
+              <p className="mt-2 text-xl font-semibold text-emerald-300">{approvedCount}</p>
+              <p className="text-[11px] text-gray-400">Active accounts</p>
+            </div>
+            <div className="rounded-2xl border border-white/10 bg-white/[0.05] p-4">
+              <p className="text-xs uppercase tracking-wide text-gray-400">Rejected</p>
+              <p className="mt-2 text-xl font-semibold text-rose-300">{rejectedCount}</p>
+              <p className="text-[11px] text-gray-400">Require follow-up</p>
+            </div>
+          </div>
+        </div>
+      </section>
+  
+      <section className="rounded-3xl border border-white/10 bg-white/[0.018] p-6 shadow-[0_25px_70px_rgba(15,23,42,0.45)] backdrop-blur-2xl">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <h2 className="text-lg font-semibold text-white">Filter by status</h2>
+          <p className="text-xs text-gray-400">Switch between cohorts to focus on the approvals that matter right now.</p>
+        </div>
+      <div className="mt-5 grid gap-3 sm:grid-cols-3">
+        {filterOptions.map(({ value, label, description, accent }) => (
+          <button
+            key={value}
+            onClick={() => setFilter(value)}
+            className={`group relative overflow-hidden rounded-2xl border px-4 py-4 text-left transition ${
+              filter === value
+                ? `border-white/30 text-white`
+                : `border-white/10 text-gray-300 hover:border-white/20`
+            }`}
+          >
+            <div
+              className={`absolute inset-0 -z-10 bg-gradient-to-br ${accent} transition ${
+                filter === value ? 'opacity-70' : 'opacity-0 group-hover:opacity-40'
+              }`}
+            />
+            <p className="text-sm font-semibold">{label}</p>
+            <p className="mt-1 text-xs text-gray-200">{description}</p>
+          </button>
+        ))}
+      </div>
+      </section>
+  
+      <section className="rounded-3xl border border-white/10 bg-white/[0.02] p-6 shadow-[0_25px_70px_rgba(15,23,42,0.45)] backdrop-blur-2xl">
+       {loading ? (
+         <div className="py-12 text-center text-gray-300">
+            <div className="flex items-center justify-center gap-3">
+              <span className="h-5 w-5 animate-spin rounded-full border-b-2 border-t-2 border-blue-500" />
+              Loading users...
+            </div>
+          </div>
+        ) : filteredUsers.length > 0 ? (
+          <div className="grid gap-4 md:grid-cols-2">
+            {filteredUsers.map(renderUserCard)}
+          </div>
+        ) : (
+          <p className="text-sm text-gray-400">No users match the selected filter.</p>
+        )}
+      </section>
+    </main>
+      </motion.div>
       <NotificationModal
         isOpen={modalState.isOpen}
         title={modalState.title}
@@ -339,7 +427,7 @@ function PendingUsersPage() {
         primaryAction={modalState.primaryAction}
         secondaryAction={modalState.secondaryAction}
       />
-    </motion.div>
+    </>
   );
 }
 

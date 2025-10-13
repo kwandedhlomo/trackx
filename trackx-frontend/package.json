@@ -17,6 +17,8 @@
     "cesium": "^1.130.0",
     "deck.gl": "^9.1.12",
     "docx": "^9.5.1",
+    "echarts": "^5.5.1",
+    "echarts-for-react": "^3.0.2",
     "file-saver": "^2.0.5",
     "firebase": "^11.6.1",
     "framer-motion": "^12.9.2",

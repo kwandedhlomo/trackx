@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
-import { Upload, Info, CheckCircle, AlertCircle, FileText, Home, FilePlus2, FolderOpen, Briefcase, LayoutDashboard, UserPlus, X } from "lucide-react";
+import { Upload, Info, CheckCircle, AlertCircle, FileText, Home, FilePlus2, FolderOpen, Briefcase, LayoutDashboard, UserPlus, X, Shield, AlertTriangle } from "lucide-react";
 import Papa from "papaparse";
 import adflogo from "../assets/image-removebg-preview.png";
 import axios from "axios";
@@ -14,50 +14,174 @@ import { clearCaseSession } from "../utils/caseSession";
 import NotificationModal from "../components/NotificationModal";
 import useNotificationModal from "../hooks/useNotificationModal";
 import { getFriendlyErrorMessage } from "../utils/errorMessages";
-
-
-
+import TechnicalTermsSelector from "../components/TechnicalTermsSelector";
+import { normalizeTechnicalTermList } from "../utils/technicalTerms";
+import EvidenceLocker from "../components/EvidenceLocker";
 // Firebase services
-import { saveCaseWithAnnotations, getCurrentUserId } from "../services/firebaseServices";
+import { updateCaseAnnotations, getCurrentUserId } from "../services/firebaseServices";
 
-// Dynamic PDF.js import to ensure version compatibility
+
+
+// ADD: Security config and scanner (lightweight content/mimetype checks; client-side only)
 let pdfjsLib = null;
 
-// Initialize PDF.js (resilient loader)
+const SECURITY_CONFIG = {
+  maxFileSize: 10 * 1024 * 1024, // 10MB
+  allowedMimeTypes: [
+    "text/csv",
+    "text/plain",
+    "application/vnd.ms-excel",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "application/pdf",
+  ],
+  allowedExtensions: [".csv", ".xls", ".xlsx", ".pdf"],
+  maliciousPatterns: [
+    /<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi,
+    /javascript:/gi,
+    /vbscript:/gi,
+    /onload\s*=/gi,
+    /onerror\s*=/gi,
+    /eval\s*\(/gi,
+    /document\.write/gi,
+    /innerHTML/gi,
+    /<\?php/gi,
+    /<%/gi,
+    /<asp:/gi,
+    /cmd\.exe/gi,
+    /powershell/gi,
+    /system\(/gi,
+    /exec\(/gi,
+  ],
+};
+
+class FileSecurityScanner {
+  constructor() {
+    this.config = SECURITY_CONFIG;
+  }
+  async scanFile(file) {
+    const results = { safe: true, threats: [], warnings: [], fileHash: null, scanResults: {} };
+    try {
+      if (file.size > this.config.maxFileSize) {
+        results.safe = false;
+        results.threats.push(`File size exceeds limit (${(file.size / 1024 / 1024).toFixed(1)}MB > 10MB)`);
+      }
+      const ext = file.name.toLowerCase().slice(file.name.lastIndexOf("."));
+      if (!this.config.allowedExtensions.includes(ext)) {
+        results.safe = false;
+        results.threats.push(`File extension '${ext}' is not allowed`);
+      }
+      if (!this.config.allowedMimeTypes.includes(file.type)) {
+        results.warnings.push(`MIME type '${file.type}' may not be supported`);
+      }
+      results.fileHash = await this.generateFileHash(file);
+      const contentScan = await this.scanFileContent(file);
+      results.scanResults.contentScan = contentScan;
+      if (!contentScan.safe) {
+        results.safe = false;
+        results.threats.push(...contentScan.threats);
+      }
+      if (ext === ".pdf") {
+        const pdfScan = await this.scanPDFStructure(file);
+        results.scanResults.pdfScan = pdfScan;
+        if (!pdfScan.safe) {
+          results.safe = false;
+          results.threats.push(...pdfScan.threats);
+        }
+      }
+      results.riskLevel = !results.safe ? "HIGH" : results.warnings.length ? "MEDIUM" : "LOW";
+    } catch (e) {
+      results.safe = false;
+      results.threats.push(`Security scan failed: ${e.message}`);
+    }
+    return results;
+  }
+  async generateFileHash(file) {
+    try {
+      const buffer = await file.arrayBuffer();
+      const hashBuffer = await crypto.subtle.digest("SHA-256", buffer);
+      const hashArray = Array.from(new Uint8Array(hashBuffer));
+      return hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
+    } catch {
+      return null;
+    }
+  }
+  async scanFileContent(file) {
+    const res = { safe: true, threats: [], patternsFound: [] };
+    try {
+      const txt = await new Promise((resolve, reject) => {
+        const r = new FileReader();
+        r.onload = () => resolve(r.result);
+        r.onerror = () => reject(r.error);
+        r.readAsText(file.slice(0, 50000));
+      });
+      if (file.type.startsWith("text/") && txt.includes("\x00")) {
+        res.safe = false;
+        res.threats.push("File contains binary data but has a text MIME type");
+      }
+      for (const p of this.config.maliciousPatterns) {
+        if (p.test(txt)) {
+          res.safe = false;
+          const pat = p.toString().slice(1, -3);
+          res.threats.push(`Potentially malicious pattern detected: ${pat}`);
+          res.patternsFound.push(pat);
+        }
+      }
+      if (txt.includes("MZ") || txt.includes("PK")) {
+        res.safe = false;
+        res.threats.push("File may contain embedded executable/archive content");
+      }
+      if (/\\x[0-9a-fA-F]{2}|\\u[0-9a-fA-F]{4}|%[0-9a-fA-F]{2}/g.test(txt)) {
+        res.safe = false;
+        res.threats.push("File contains suspicious encoded content");
+      }
+    } catch {}
+    return res;
+  }
+  async scanPDFStructure(file) {
+    const res = { safe: true, threats: [] };
+    try {
+      const buf = await file.arrayBuffer();
+      const text = new TextDecoder().decode(buf);
+      if (!text.startsWith("%PDF-")) {
+        res.safe = false;
+        res.threats.push("Invalid PDF header (file may be corrupted)");
+      }
+      for (const feature of ["/JavaScript", "/JS", "/Launch", "/SubmitForm", "/ImportData", "/ExportData", "/Movie", "/Sound", "/EmbeddedFile"]) {
+        if (text.includes(feature)) {
+          res.safe = false;
+          res.threats.push(`PDF contains potentially dangerous feature: ${feature}`);
+        }
+      }
+      if (text.includes("/Encrypt")) {
+        res.safe = false;
+        res.threats.push("PDF is encrypted/password protected");
+      }
+    } catch {}
+    return res;
+  }
+}
+
+// Dynamic PDF.js loader
 const initPDFJS = async () => {
   if (!pdfjsLib) {
-    try {
-      const workerSrc =
-        "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js";
-      const script = document.createElement("script");
-      script.src = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js";
-      script.onload = () => {
+    const workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js";
+    const script = document.createElement("script");
+    script.src = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js";
+    document.head.appendChild(script);
+    await new Promise((resolve) => {
+      const tick = () => {
         if (window.pdfjsLib) {
           pdfjsLib = window.pdfjsLib;
           pdfjsLib.GlobalWorkerOptions.workerSrc = workerSrc;
-        }
+          resolve();
+        } else setTimeout(tick, 80);
       };
-      document.head.appendChild(script);
-
-      await new Promise((resolve) => {
-        const checkLoaded = () => {
-          if (window.pdfjsLib) {
-            pdfjsLib = window.pdfjsLib;
-            pdfjsLib.GlobalWorkerOptions.workerSrc = workerSrc;
-            resolve();
-          } else {
-            setTimeout(checkLoaded, 100);
-          }
-        };
-        checkLoaded();
-      });
-    } catch (error) {
-      console.error("Failed to load PDF.js:", error);
-      throw new Error("PDF processing library failed to load");
-    }
+      tick();
+    });
   }
   return pdfjsLib;
 };
+
 
 function NewCasePage() {
   const navigate = useNavigate();
@@ -70,6 +194,7 @@ function NewCasePage() {
   const [region, setRegion] = useState("");
   const [between, setBetween] = useState("");
   const [urgency, setUrgency] = useState("");
+  const [selectedTechnicalTerms, setSelectedTechnicalTerms] = useState([]);
 
   // File processing state
   const [file, setFile] = useState(null);
@@ -86,7 +211,15 @@ function NewCasePage() {
   const [userSearchTerm, setUserSearchTerm] = useState("");
   const [userSearchResults, setUserSearchResults] = useState([]);
   const [isSearchingUsers, setIsSearchingUsers] = useState(false);
+  const [isScanning, setIsScanning] = useState(false);
+  const [securityResults, setSecurityResults] = useState(null);
+  const [showSecurityDetails, setShowSecurityDetails] = useState(false);
+  const [evidenceItems, setEvidenceItems] = useState([]);
   const API_BASE = (import.meta.env.VITE_API_URL || "http://localhost:8000").replace(/\/+$/, "");
+  const formattedDateTime = new Date().toLocaleString();
+  const canProceed = Boolean(
+    parsedData && parsedData.stoppedPoints && parsedData.stoppedPoints.length > 0 && !isProcessing
+  );
 
   useEffect(() => {
     const current = auth.currentUser;
@@ -193,6 +326,7 @@ function NewCasePage() {
       reportIntro: mirror.reportIntro || "",
       reportConclusion: mirror.reportConclusion || "",
       selectedForReport: mirror.selectedForReport || [],
+      technicalTerms: mirror.technicalTerms || [],
       // keep legacy mirrors so old readers don't break; safe to remove after migration
       title: mirror.caseTitle,
       date: mirror.dateOfIncident ? new Date(mirror.dateOfIncident) : new Date(),
@@ -234,17 +368,362 @@ function NewCasePage() {
   }
 
   /**
-   * Extracts time from description and returns ISO timestamp using dateOfIncident
+   * Timestamp normalization helpers: coerce various time/date fragments into ISO strings.
    */
-  function convertToISO(description) {
+  const EXCEL_EPOCH_UTC = Date.UTC(1899, 11, 30);
+
+  const toISOIfValid = (dateObj) => {
+    if (!(dateObj instanceof Date)) return null;
+    return Number.isNaN(dateObj.getTime()) ? null : dateObj.toISOString();
+  };
+
+  const buildISOFromParts = (year, month, day, hours = 0, minutes = 0, seconds = 0, milliseconds = 0) => {
+    if (![year, month, day].every((part) => Number.isFinite(part))) return null;
+    const date = new Date(Date.UTC(year, month - 1, day, hours, minutes, seconds, milliseconds));
+    return toISOIfValid(date);
+  };
+
+  const parseTimeComponents = (value) => {
+    if (value === null || value === undefined) return null;
+    const str = String(value).trim();
+    if (!str) return null;
+
+    const timePattern = /^(\d{1,2}):(\d{2})(?::(\d{2}))?(?:\.(\d+))?(?:\s*(AM|PM))?$/i;
+    const colonMatch = str.match(timePattern);
+    if (colonMatch) {
+      let hours = parseInt(colonMatch[1], 10);
+      const minutes = parseInt(colonMatch[2], 10);
+      const seconds = colonMatch[3] ? parseInt(colonMatch[3], 10) : 0;
+      const millis = colonMatch[4] ? parseInt(colonMatch[4].slice(0, 3).padEnd(3, "0"), 10) : 0;
+      const period = colonMatch[5] ? colonMatch[5].toUpperCase() : null;
+
+      if (Number.isNaN(hours) || minutes > 59 || seconds > 59) return null;
+
+      if (period === "PM" && hours < 12) hours += 12;
+      if (period === "AM" && hours === 12) hours = 0;
+
+      if (hours > 23) return null;
+
+      return { hours, minutes, seconds, millis };
+    }
+
+    const compactMatch = str.match(/^(\d{2})(\d{2})(\d{2})$/);
+    if (compactMatch) {
+      const hours = parseInt(compactMatch[1], 10);
+      const minutes = parseInt(compactMatch[2], 10);
+      const seconds = parseInt(compactMatch[3], 10);
+      if (hours > 23 || minutes > 59 || seconds > 59) return null;
+      return { hours, minutes, seconds, millis: 0 };
+    }
+
+    return null;
+  };
+
+  const parseDateComponents = (value) => {
+    if (value === null || value === undefined) return null;
+    const str = String(value).trim();
+    if (!str) return null;
+
+    const incidentParts = dateOfIncident ? dateOfIncident.split("-").map((part) => parseInt(part, 10)) : null;
+    const inferDayMonthOrder = (first, second) => {
+      if (first > 12 && second <= 12) return { day: first, month: second };
+      if (second > 12 && first <= 12) return { day: second, month: first };
+
+      if (incidentParts) {
+        const [, incidentMonth, incidentDay] = incidentParts;
+        if (first === incidentDay && second === incidentMonth) return { day: first, month: second };
+        if (second === incidentDay && first === incidentMonth) return { day: second, month: first };
+      }
+
+      return { day: first, month: second };
+    };
+
+    const isoMatch = str.match(/^(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})$/);
+    if (isoMatch) {
+      const year = parseInt(isoMatch[1], 10);
+      const month = parseInt(isoMatch[2], 10);
+      const day = parseInt(isoMatch[3], 10);
+      return { year, month, day };
+    }
+
+    const dmyMatch = str.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})$/);
+    if (dmyMatch) {
+      let year = parseInt(dmyMatch[3], 10);
+      if (year < 100) year += year >= 70 ? 1900 : 2000;
+      const first = parseInt(dmyMatch[1], 10);
+      const second = parseInt(dmyMatch[2], 10);
+      const { day, month } = inferDayMonthOrder(first, second);
+      return { year, month, day };
+    }
+
+    const compactMatch = str.match(/^(\d{4})(\d{2})(\d{2})$/);
+    if (compactMatch) {
+      const year = parseInt(compactMatch[1], 10);
+      const month = parseInt(compactMatch[2], 10);
+      const day = parseInt(compactMatch[3], 10);
+      return { year, month, day };
+    }
+
+    if (incidentParts && str === dateOfIncident) {
+      const [year, month, day] = incidentParts;
+      return { year, month, day };
+    }
+
+    const parsed = new Date(str);
+    if (!Number.isNaN(parsed.getTime())) {
+      return {
+        year: parsed.getUTCFullYear(),
+        month: parsed.getUTCMonth() + 1,
+        day: parsed.getUTCDate(),
+      };
+    }
+
+    return null;
+  };
+
+  const parseDateTimeString = (value) => {
+    if (value === null || value === undefined) return null;
+    const str = String(value).trim();
+    if (!str) return null;
+
+    const clean = str.replace(/['"]/g, "").replace(/\s+/g, " ");
+
+    const directDate = new Date(clean);
+    if (!Number.isNaN(directDate.getTime())) {
+      return toISOIfValid(directDate);
+    }
+
+    const isoLike = clean.match(/^(\d{4}-\d{2}-\d{2})\s+(\d{1,2}:\d{2}(?::\d{2})?)$/);
+    if (isoLike) {
+      const candidate = `${isoLike[1]}T${isoLike[2]}`;
+      const date = new Date(candidate);
+      if (!Number.isNaN(date.getTime())) {
+        return date.toISOString();
+      }
+      const utcCandidate = `${candidate}Z`;
+      return toISOIfValid(new Date(utcCandidate));
+    }
+
+    const dmy = clean.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})\s+(\d{1,2}:\d{2}(?::\d{2})?)$/);
+    if (dmy) {
+      const dateParts = parseDateComponents(`${dmy[1]}-${dmy[2]}-${dmy[3]}`);
+      const timeParts = parseTimeComponents(dmy[4]);
+      if (dateParts && timeParts) {
+        return buildISOFromParts(
+          dateParts.year,
+          dateParts.month,
+          dateParts.day,
+          timeParts.hours,
+          timeParts.minutes,
+          timeParts.seconds,
+          timeParts.millis
+        );
+      }
+    }
+
+    const numeric = clean.match(/^(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})$/);
+    if (numeric) {
+      return buildISOFromParts(
+        parseInt(numeric[1], 10),
+        parseInt(numeric[2], 10),
+        parseInt(numeric[3], 10),
+        parseInt(numeric[4], 10),
+        parseInt(numeric[5], 10),
+        parseInt(numeric[6], 10)
+      );
+    }
+
+    return null;
+  };
+
+  const convertExcelSerial = (value) => {
+    if (typeof value !== "number" || Number.isNaN(value) || !Number.isFinite(value)) return null;
+    if (value === 0) return null;
+
+    const hasDateComponent = value >= 1;
+    const serial = value > 59 ? value - 1 : value;
+    const milliseconds = Math.round(serial * 24 * 60 * 60 * 1000);
+
+    if (!hasDateComponent && dateOfIncident) {
+      const [year, month, day] = dateOfIncident.split("-").map((part) => parseInt(part, 10));
+      return toISOIfValid(new Date(Date.UTC(year, month - 1, day, 0, 0, 0, 0) + milliseconds));
+    }
+
+    return toISOIfValid(new Date(EXCEL_EPOCH_UTC + milliseconds));
+  };
+
+  const normalizeTimestampNumber = (value) => {
+    if (typeof value !== "number" || Number.isNaN(value)) return null;
+    if (value > 1e11) {
+      return toISOIfValid(new Date(value));
+    }
+    if (value > 1e9) {
+      return toISOIfValid(new Date(value * 1000));
+    }
+    if (value >= 1) {
+      return convertExcelSerial(value);
+    }
+    return null;
+  };
+
+  const normalizeTimestampString = (value) => {
+    if (value === null || value === undefined) return null;
+    const str = String(value).trim();
+    if (!str || str.toLowerCase().startsWith("record")) return null;
+
+    const numeric = Number(str);
+    if (!Number.isNaN(numeric) && Number.isFinite(numeric)) {
+      const fromNumeric = normalizeTimestampNumber(numeric);
+      if (fromNumeric) return fromNumeric;
+    }
+
+    const direct = parseDateTimeString(str);
+    if (direct) return direct;
+
+    const timeMatch = str.match(/(\d{1,2}:\d{2}(?::\d{2})?\s*(?:AM|PM)?)/i);
+    if (timeMatch) {
+      const timeParts = parseTimeComponents(timeMatch[1]);
+      if (timeParts) {
+        const dateParts = parseDateComponents(str);
+        if (dateParts) {
+          return buildISOFromParts(
+            dateParts.year,
+            dateParts.month,
+            dateParts.day,
+            timeParts.hours,
+            timeParts.minutes,
+            timeParts.seconds,
+            timeParts.millis
+          );
+        }
+        if (dateOfIncident) {
+          const [year, month, day] = dateOfIncident.split("-").map((part) => parseInt(part, 10));
+          return buildISOFromParts(
+            year,
+            month,
+            day,
+            timeParts.hours,
+            timeParts.minutes,
+            timeParts.seconds,
+            timeParts.millis
+          );
+        }
+      }
+    }
+
+    return null;
+  };
+
+  const combineDateAndTimeColumns = (row, timestampColumns = []) => {
+    if (!row || timestampColumns.length < 2) return null;
+    const lower = timestampColumns.map((col) => col.toLowerCase());
+
+    const dateIndex = lower.findIndex((col) => col.includes("date"));
+    const timeIndex = lower.findIndex((col) => col.includes("time"));
+
+    if (dateIndex === -1 || timeIndex === -1) return null;
+
+    const dateParts = parseDateComponents(row[timestampColumns[dateIndex]]);
+    const timeParts = parseTimeComponents(row[timestampColumns[timeIndex]]);
+
+    if (!dateParts || !timeParts) return null;
+
+    return buildISOFromParts(
+      dateParts.year,
+      dateParts.month,
+      dateParts.day,
+      timeParts.hours,
+      timeParts.minutes,
+      timeParts.seconds,
+      timeParts.millis
+    );
+  };
+
+  const scanRowForTime = (row) => {
+    if (!row || typeof row !== "object") return null;
+    for (const [key, value] of Object.entries(row)) {
+      if (value instanceof Date) {
+        const iso = toISOIfValid(value);
+        if (iso) return iso;
+      }
+
+      const lowerKey = key.toLowerCase();
+      const keySuggestsTime =
+        lowerKey.includes("time") ||
+        lowerKey.includes("date") ||
+        lowerKey.includes("stamp") ||
+        lowerKey.includes("utc") ||
+        lowerKey.includes("recorded");
+
+      if (typeof value === "number" && keySuggestsTime) {
+        const iso =
+          value > 1e11
+            ? toISOIfValid(new Date(value))
+            : value > 1e9
+            ? toISOIfValid(new Date(value * 1000))
+            : convertExcelSerial(value);
+        if (iso) return iso;
+      }
+
+      if (typeof value === "string") {
+        const iso = normalizeTimestampString(value);
+        if (iso) return iso;
+        if (keySuggestsTime) {
+          const numeric = Number(value);
+          if (!Number.isNaN(numeric) && Number.isFinite(numeric)) {
+            const numericIso = normalizeTimestampNumber(numeric);
+            if (numericIso) return numericIso;
+          }
+        }
+      }
+    }
+    return null;
+  };
+
+  const convertDescriptionToISO = (description) => {
     if (!description || !dateOfIncident) return null;
-    const timeMatch = description.match(/\b\d{2}:\d{2}:\d{2}\b/);
+    const timeMatch = description.match(/(\d{1,2}:\d{2}(?::\d{2})?\s*(?:AM|PM)?)/i);
     if (!timeMatch) return null;
-    const timePart = timeMatch[0];
-    const isoString = `${dateOfIncident}T${timePart}Z`;
-    const date = new Date(isoString);
-    return isNaN(date.getTime()) ? null : date.toISOString();
-  }
+
+    const timeParts = parseTimeComponents(timeMatch[1]);
+    if (!timeParts) return null;
+
+    const [year, month, day] = dateOfIncident.split("-").map((part) => parseInt(part, 10));
+    return buildISOFromParts(
+      year,
+      month,
+      day,
+      timeParts.hours,
+      timeParts.minutes,
+      timeParts.seconds,
+      timeParts.millis
+    );
+  };
+
+  const normalizeTimestampValue = (rawValue, row, description, timestampColumns = []) => {
+    if (rawValue instanceof Date) {
+      const iso = toISOIfValid(rawValue);
+      if (iso) return iso;
+    }
+
+    if (typeof rawValue === "number") {
+      const iso = normalizeTimestampNumber(rawValue);
+      if (iso) return iso;
+    }
+
+    if (typeof rawValue === "string") {
+      const iso = normalizeTimestampString(rawValue);
+      if (iso) return iso;
+    }
+
+    const combined = combineDateAndTimeColumns(row, timestampColumns);
+    if (combined) return combined;
+
+    const scanned = scanRowForTime(row);
+    if (scanned) return scanned;
+
+    return convertDescriptionToISO(description);
+  };
 
   /**
    * Validate if coordinates are within reasonable bounds
@@ -564,7 +1043,36 @@ Please ensure your PDF contains GPS coordinates in one of these formats:
         const contextEnd = Math.min(fullText.length, coordIndex + 200);
         const context = fullText.substring(contextStart, contextEnd);
 
-        const timestamp = timestamps[index] || coord.time || `Point ${index + 1}`;
+        const rawTimestamp = timestamps[index] ?? coord.time ?? null;
+        let timestamp =
+          normalizeTimestampString(rawTimestamp) ||
+          convertDescriptionToISO(context) ||
+          convertDescriptionToISO(coord.originalText);
+        if (!timestamp && rawTimestamp) {
+          const numeric = Number(rawTimestamp);
+          if (!Number.isNaN(numeric) && Number.isFinite(numeric)) {
+            timestamp = normalizeTimestampNumber(numeric);
+          }
+        }
+        if (!timestamp && rawTimestamp && typeof rawTimestamp === "string" && rawTimestamp.trim()) {
+          // Try parsing against the incident date if the string only has a time fragment
+          const timeParts = parseTimeComponents(rawTimestamp);
+          if (timeParts && dateOfIncident) {
+            const [year, month, day] = dateOfIncident.split("-").map((part) => parseInt(part, 10));
+            timestamp = buildISOFromParts(
+              year,
+              month,
+              day,
+              timeParts.hours,
+              timeParts.minutes,
+              timeParts.seconds,
+              timeParts.millis
+            );
+          }
+        }
+        if (!timestamp) {
+          console.warn("[NewCase] Unable to derive PDF timestamp for point", index, rawTimestamp);
+        }
         const description =
           coord.source === "structured_table"
             ? `GPS Point ${index + 1} (from table)`
@@ -816,9 +1324,23 @@ Please ensure your PDF contains GPS coordinates in one of these formats:
                 ignitionStatus = determineIgnitionStatus(description);
               }
 
-              const timestamp = bestColumns.timestamp
+              const rawTimestamp = bestColumns.timestamp
                 ? row[bestColumns.timestamp]
-                : `Record ${index + 1}`;
+                : null;
+              const normalizedTimestamp = normalizeTimestampValue(
+                rawTimestamp,
+                row,
+                description,
+                possibleColumns.timestamp
+              );
+              const timestamp = normalizedTimestamp || null;
+              if (!normalizedTimestamp) {
+                console.warn(
+                  "[NewCase] Unable to normalize timestamp for row",
+                  index,
+                  rawTimestamp
+                );
+              }
 
               if (isNaN(lat) || isNaN(lng)) return null;
 
@@ -890,132 +1412,90 @@ Please ensure your PDF contains GPS coordinates in one of these formats:
     });
   };
 
+  
+
   const handleCreateCase = async () => {
     try {
       if (!caseNumber || !caseTitle || !dateOfIncident || !region || !parsedData) {
-        openModal({
-          variant: "warning",
-          title: "Missing information",
-          description:
-            "Please complete the case details and upload a valid file before creating the case.",
-        });
+        alert("Please fill all required fields and upload a valid file");
         return;
       }
 
       setIsProcessing(true);
 
-      const assignedUserIds = assignedUsers.map((user) => user.id).filter(Boolean);
-      if (!assignedUserIds.length) {
-        openModal({
-          variant: "warning",
-          title: "Add at least one user",
-          description: "Please ensure the case has at least one assigned investigator.",
-        });
-        setIsProcessing(false);
-        return;
-      }
-
-      // 1) BACKEND — create the case in the original, working system
-      const casePayload = {
+      // 1) Create in backend, return caseId
+      const payload = {
         case_number: caseNumber,
-        case_title: caseTitle,                    // keep backend happy
+        case_title: caseTitle,
         date_of_incident: dateOfIncident,
         region,
         between: between || "",
         urgency,
         userID: auth.currentUser ? auth.currentUser.uid : null,
-        userIds: assignedUserIds,
-
-        // what the backend already accepted previously:
-        csv_data: parsedData.stoppedPoints.map((p) => ({
+        userIds: assignedUsers.map(u => u.id),
+        evidence_items: evidenceItems,
+        csv_data: (parsedData.stoppedPoints || []).map((p) => ({
           latitude: p.lat,
           longitude: p.lng,
           timestamp: p.timestamp || null,
           description: p.description || null,
-          ignitionStatus: p.ignitionStatus || false,
+          ignitionStatus: p.ignitionStatus || "Unknown",
         })),
         all_points: (parsedData.raw || []).map((p) => ({
           latitude: p.lat,
           longitude: p.lng,
-          timestamp: (() => {
-            // same helper you had
-            const iso = (() => {
-              const m = (p.description || "").match(/\b\d{2}:\d{2}:\d{2}\b/);
-              if (!m || !dateOfIncident) return null;
-              const isoStr = `${dateOfIncident}T${m[0]}Z`;
-              const d = new Date(isoStr);
-              return isNaN(d.getTime()) ? null : d.toISOString();
-            })();
-            return iso || p.timestamp || null;
-          })(),
+          timestamp: p.timestamp || null,
           description: p.description || null,
         })),
       };
-  
-      const { data: created } = await axios.post(
-        `${API_BASE}/cases/create`,
-        casePayload,
-        { headers: { "Content-Type": "application/json" } }
-      );
-  
-      // the backend should return its canonical ID; adapt the path if yours differs
+
+      const base = (import.meta.env.VITE_API_URL || "http://localhost:8000").replace(/\/+$/,"");
+      const { data: created } = await axios.post(`${base}/cases/create`, payload, {
+        headers: { "Content-Type": "application/json" },
+      });
+
       const backendCaseId = created?.caseId || created?.id || created?.case_id;
       if (!backendCaseId) throw new Error("Backend did not return caseId");
-  
-      // 2) FIREBASE — write a mirror that Annotations/Reports use
+
+      // 2) Mirror to Firebase via Jon’s updater
       const mirror = {
         caseNumber,
-        caseTitle,                 // canonical for UI
+        caseTitle,
         dateOfIncident,
         region,
         between: between || "",
         urgency,
-        userId: assignedUserIds[0] || (auth.currentUser ? auth.currentUser.uid : null),
-        userIds: assignedUserIds,
-
-        locations: parsedData.stoppedPoints.map((p, i) => ({
+        userId: getCurrentUserId() || auth.currentUser?.uid || null,
+        userIds: assignedUsers.map(u => u.id),
+        evidenceItems,
+        locations: (parsedData.stoppedPoints || []).map((p, i) => ({
           lat: p.lat,
           lng: p.lng,
           timestamp: p.timestamp || null,
           description: p.description || "",
           ignitionStatus: p.ignitionStatus || "Unknown",
-          rawData: p.rawData || null,
-          address: p.address || null,
           order: i,
         })),
-        locationTitles: parsedData.stoppedPoints.map(() => ""),
+        locationTitles: (parsedData.stoppedPoints || []).map(() => ""),
         reportIntro: "",
         reportConclusion: "",
-        selectedForReport: parsedData.stoppedPoints.map((_, i) => i),
+        selectedForReport: (parsedData.stoppedPoints || []).map((_, i) => i),
       };
-  
+
       await upsertFirebaseMirror(backendCaseId, mirror);
-  
-      // 3) local state for subsequent pages
+
+      // 3) Route to annotations
       localStorage.setItem("trackxCurrentCaseId", backendCaseId);
       localStorage.setItem("trackxCaseData", JSON.stringify({ ...mirror, caseId: backendCaseId }));
-  
-      openModal({
-        variant: "success",
-        title: "Case created",
-        description:
-          "Your case was created successfully. Continue to annotations to work with the extracted data.",
-        primaryAction: {
-          label: "Continue to annotations",
-          onClick: () => navigate("/annotations"),
-        },
-      });
+      navigate("/annotations");
     } catch (err) {
       console.error("Failed to create case:", err);
-      openModal({
-        variant: "error",
-        title: "Case creation failed",
-        description: getFriendlyErrorMessage(err),
-      });
+      alert(`Failed to create case: ${err.message}`);
     } finally {
       setIsProcessing(false);
     }
   };
+
 
   // ---------- Handlers for upload UI ----------
   const handleDragOver = (e) => {
@@ -1036,25 +1516,32 @@ Please ensure your PDF contains GPS coordinates in one of these formats:
       handleFile(e.target.files[0]);
     }
   };
-  const handleFile = (file) => {
-    const fileName = file.name.toLowerCase();
-
-    if (file.type === "text/csv" || fileName.endsWith(".csv")) {
-      setFile(file);
+// ADD: security-first file handler
+const securityScanner = new FileSecurityScanner();
+const handleFile = async (selected) => {
+  setFile(null); setParsedData(null); setCsvStats(null); setParseError(null);
+  setSecurityResults(null); setIsScanning(true);
+  try {
+    const scan = await securityScanner.scanFile(selected);
+    setSecurityResults(scan);
+    if (!scan.safe) { setParseError(`🚫 File rejected:\n${scan.threats.join("\n")}`); return; }
+    setFile(selected);
+    const name = selected.name.toLowerCase();
+    if (selected.type === "text/csv" || name.endsWith(".csv")) {
       setFileType("csv");
-      parseCSV(file);
-    } else if (file.type === "application/pdf" || fileName.endsWith(".pdf")) {
-      setFile(file);
+      setIsScanning(false);
+      parseCSV(selected);
+    } else if (selected.type === "application/pdf" || name.endsWith(".pdf")) {
       setFileType("pdf");
-      parsePDF(file);
+      setIsScanning(false);
+      parsePDF(selected);
     } else {
-      setParseError("Please upload a CSV or PDF file. Other file types are not supported.");
-      setFile(null);
-      setFileType(null);
-      setParsedData(null);
-      setCsvStats(null);
+      setParseError("Please upload a CSV or PDF file");
     }
-  };
+  } finally {
+    setIsScanning(false);
+  }
+};
 
   // Submit: just call create
   const handleNext = async (e) => {
@@ -1094,73 +1581,87 @@ Please ensure your PDF contains GPS coordinates in one of these formats:
       <div className="absolute inset-0 bg-gradient-to-br from-black via-gray-900 to-black -z-10" />
 
       {/* Navbar */}
-      <div className="flex items-center justify-between px-6 py-4 bg-gradient-to-r from-black to-gray-900 shadow-md">
-        <div className="flex items-center space-x-4">
-          {/* Hamburger Icon */}
-          <div className="text-3xl cursor-pointer" onClick={() => setShowMenu(!showMenu)}>
+      <nav className="mx-6 mt-6 flex items-center justify-between rounded-3xl border border-white/10 bg-gradient-to-br from-black/85 via-slate-900/70 to-black/80 px-6 py-4 shadow-xl shadow-[0_25px_65px_rgba(8,11,24,0.65)] backdrop-blur-xl">
+        <div className="flex items-center gap-4">
+          <button
+            type="button"
+            onClick={() => setShowMenu(!showMenu)}
+            className="flex h-11 w-11 items-center justify-center rounded-full border border-white/10 bg-white/[0.02] text-xl text-white shadow-inner shadow-white/5 transition hover:bg-white/10"
+            aria-label="Toggle navigation"
+          >
             &#9776;
-          </div>
+          </button>
 
-          <Link to="/home">
+          <Link to="/home" className="hidden sm:block">
             <img
               src={adflogo}
-              alt="Logo"
-              className="h-12 cursor-pointer hover:opacity-80 transition"
+              alt="ADF Logo"
+              className="h-11 w-auto drop-shadow-[0_10px_20px_rgba(59,130,246,0.35)] transition hover:opacity-90"
             />
           </Link>
         </div>
 
-        <h1 className="text-xl font-bold text-white">New Case</h1>
-
-        <div className="text-right">
-          <p className="text-sm text-white">
-            {profile ? `${profile.firstName} ${profile.surname}` : "Loading..."}
-          </p>
-          <button onClick={handleSignOut} className="text-red-400 hover:text-red-600 text-xs">
-            Sign Out
-          </button>
+        <div className="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 text-2xl font-semibold tracking-[0.35em] text-white/80 drop-shadow-[0_2px_12px_rgba(15,23,42,0.55)]">
+          NEW CASE
         </div>
-      </div>
+
+        <div className="flex items-center space-x-6 text-sm text-gray-200">
+          <div className="flex flex-col items-end">
+            <span className="text-base font-semibold text-white">
+              {profile ? `${profile.firstName || ""} ${profile.surname || ""}`.trim() || "Loading..." : "Loading..."}
+            </span>
+            <button
+              onClick={handleSignOut}
+              className="text-xs text-gray-400 transition hover:text-white"
+            >
+              Sign Out
+            </button>
+          </div>
+          <div className="rounded-full bg-white/[0.02] px-3 py-1.5 text-xs font-medium text-gray-400 shadow-inner shadow-white/5">
+            {formattedDateTime}
+          </div>
+        </div>
+      </nav>
 
       {/* Hamburger Menu Content */}
       {showMenu && (
-        <div className="absolute top-16 left-0 w-64 rounded-r-3xl border border-white/10 bg-gradient-to-br from-gray-900/95 to-black/90 backdrop-blur-xl p-6 z-30 shadow-2xl space-y-2">
+        <div className="absolute left-6 top-32 z-30 w-64 space-y-2 rounded-3xl border border-white/10 bg-gradient-to-br from-slate-950/85 via-slate-900/78 to-black/78 p-6 shadow-2xl shadow-[0_30px_60px_rgba(30,58,138,0.45)] backdrop-blur-2xl">
           <Link
             to="/home"
-            className="flex items-center gap-3 px-3 py-2 rounded-2xl text-sm font-medium text-gray-200 hover:text-white hover:bg-white/10 transition"
+            className="flex items-center gap-3 rounded-2xl px-3 py-2 text-sm font-medium text-gray-200 transition hover:bg-white/10 hover:text-white"
             onClick={() => setShowMenu(false)}
           >
-            <Home className="w-4 h-4" />
+            <Home className="h-4 w-4" />
             Home
           </Link>
-          <div className="flex items-center gap-3 px-3 py-2 rounded-2xl text-sm font-medium text-white bg-white/10">
-            <FilePlus2 className="w-4 h-4" />
+          <div className="flex items-center gap-3 rounded-2xl px-3 py-2 text-sm font-medium text-white bg-white/[0.045] shadow-inner shadow-white/10">
+            <FilePlus2 className="h-4 w-4" />
             Create New Case
           </div>
           <Link
             to="/manage-cases"
-            className="flex items-center gap-3 px-3 py-2 rounded-2xl text-sm font-medium text-gray-200 hover:text-white hover:bg-white/10 transition"
+            className="flex items-center gap-3 rounded-2xl px-3 py-2 text-sm font-medium text-gray-200 transition hover:bg-white/10 hover:text-white"
             onClick={() => setShowMenu(false)}
           >
-            <FolderOpen className="w-4 h-4" />
+            <FolderOpen className="h-4 w-4" />
             Manage Cases
           </Link>
           <Link
             to="/my-cases"
-            className="flex items-center gap-3 px-3 py-2 rounded-2xl text-sm font-medium text-gray-200 hover:text-white hover:bg-white/10 transition"
+            className="flex items-center gap-3 rounded-2xl px-3 py-2 text-sm font-medium text-gray-200 transition hover:bg-white/10 hover:text-white"
             onClick={() => setShowMenu(false)}
           >
-            <Briefcase className="w-4 h-4" />
+            <Briefcase className="h-4 w-4" />
             My Cases
           </Link>
 
           {profile?.role === "admin" && (
             <Link
               to="/admin-dashboard"
-              className="flex items-center gap-3 px-3 py-2 rounded-2xl text-sm font-medium text-gray-200 hover:text-white hover:bg-white/10 transition"
+              className="flex items-center gap-3 rounded-2xl px-3 py-2 text-sm font-medium text-gray-200 transition hover:bg-white/10 hover:text-white"
               onClick={() => setShowMenu(false)}
             >
-              <LayoutDashboard className="w-4 h-4" />
+              <LayoutDashboard className="h-4 w-4" />
               Admin Dashboard
             </Link>
           )}
@@ -1168,23 +1669,44 @@ Please ensure your PDF contains GPS coordinates in one of these formats:
       )}
 
       {/* Nav Tabs */}
-      <div className="flex justify-center space-x-8 bg-gradient-to-r from-black to-gray-900 bg-opacity-80 backdrop-blur-md py-2 text-white text-sm">
-        <span className="inline-flex items-center rounded-full bg-white/15 px-4 py-1.5 font-semibold text-white">
+      <div className="mx-6 mt-6 flex justify-center gap-8 rounded-full border border-white/10 bg-white/[0.02] px-6 py-2 text-xs font-semibold text-gray-300 shadow-[0_15px_40px_rgba(15,23,42,0.45)] backdrop-blur-xl">
+        <span className="inline-flex items-center rounded-full bg-gradient-to-r from-blue-900/80 to-purple-900/80 px-5 py-1.5 text-white shadow-[0_12px_30px_rgba(15,23,42,0.45)]">
           Case Information
         </span>
-        <Link to="/annotations" className="text-gray-300 hover:text-white">
+        <Link to="/annotations" className="text-gray-400 transition hover:text-white">
           Annotations
         </Link>
-        <Link to="/overview" className="text-gray-300 hover:text-white">
+        <Link to="/overview" className="text-gray-400 transition hover:text-white">
           Overview
         </Link>
       </div>
 
       {/* Page Content */}
-      <div className="max-w-4xl mx-auto px-6 py-8">
-        <form onSubmit={handleNext} className="space-y-6">
+      <div className="relative mx-auto mt-10 w-full max-w-5xl px-6 pb-20">
+        <form
+          onSubmit={handleNext}
+          className="relative space-y-10 overflow-hidden rounded-3xl border border-white/10 bg-white/[0.02] px-8 py-10 shadow-[0_35px_90px_rgba(15,23,42,0.55)] backdrop-blur-2xl"
+        >
+          <div className="pointer-events-none absolute -top-24 right-10 h-56 w-56 rounded-full bg-blue-900/20 blur-3xl" />
+          <div className="pointer-events-none absolute -bottom-20 left-0 h-48 w-48 rounded-full bg-purple-900/20 blur-3xl" />
+          <div className="relative z-10 space-y-2 text-center sm:text-left">
+            <p className="text-xs font-semibold uppercase tracking-[0.35em] text-gray-400">
+              Case Onboarding
+            </p>
+            <h2 className="text-3xl font-semibold text-white">Capture the mission details</h2>
+            <p className="text-sm text-gray-400">
+              Complete the case metadata, assign collaborators, and upload investigative files to begin analysis.
+            </p>
+          </div>
           {/* Case Details Section */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <section className="relative z-10 space-y-6 rounded-2xl border border-white/10 bg-white/[0.018] p-6 shadow-[0_18px_45px_rgba(15,23,42,0.45)]">
+            <div className="flex flex-col gap-1 sm:flex-row sm:items-baseline sm:justify-between">
+              <div>
+                <h3 className="text-lg font-semibold text-white">Case Details</h3>
+                <p className="text-xs text-gray-400">Capture identifiers that anchor this investigation to your docket.</p>
+              </div>
+            </div>
+            <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
             {/* Case Number */}
             <div>
               <label htmlFor="caseNumber" className="block text-sm font-medium text-gray-300 mb-1">
@@ -1195,7 +1717,7 @@ Please ensure your PDF contains GPS coordinates in one of these formats:
                 id="caseNumber"
                 value={caseNumber}
                 onChange={(e) => setCaseNumber(e.target.value)}
-                className="w-full p-2 bg-gray-800 border border-gray-600 rounded text-white"
+                className="w-full rounded-xl border border-white/10 bg-white/[0.02] px-3 py-2 text-sm text-white placeholder-gray-500 focus:border-blue-700/50 focus:outline-none focus:ring-2 focus:ring-blue-700/30"
                 required
               />
             </div>
@@ -1210,7 +1732,7 @@ Please ensure your PDF contains GPS coordinates in one of these formats:
                 id="caseTitle"
                 value={caseTitle}
                 onChange={(e) => setCaseTitle(e.target.value)}
-                className="w-full p-2 bg-gray-800 border border-gray-600 rounded text-white"
+                className="w-full rounded-xl border border-white/10 bg-white/[0.02] px-3 py-2 text-sm text-white placeholder-gray-500 focus:border-blue-700/50 focus:outline-none focus:ring-2 focus:ring-blue-700/30"
                 required
               />
             </div>
@@ -1225,7 +1747,7 @@ Please ensure your PDF contains GPS coordinates in one of these formats:
                 id="dateOfIncident"
                 value={dateOfIncident}
                 onChange={(e) => setDateOfIncident(e.target.value)}
-                className="w-full p-2 bg-gray-800 border border-gray-600 rounded text-white"
+                className="w-full rounded-xl border border-white/10 bg-white/[0.02] px-3 py-2 text-sm text-white placeholder-gray-500 focus:border-blue-700/50 focus:outline-none focus:ring-2 focus:ring-blue-700/30"
                 required
               />
             </div>
@@ -1239,7 +1761,7 @@ Please ensure your PDF contains GPS coordinates in one of these formats:
                 id="region"
                 value={region}
                 onChange={(e) => setRegion(e.target.value)}
-                className="w-full p-2 bg-gray-800 border border-gray-600 rounded text-white"
+                className="w-full rounded-xl border border-white/10 bg-white/[0.02] px-3 py-2 text-sm text-white placeholder-gray-500 focus:border-blue-700/50 focus:outline-none focus:ring-2 focus:ring-blue-700/30"
                 required
               >
                 <option value="">Select a region</option>
@@ -1265,22 +1787,26 @@ Please ensure your PDF contains GPS coordinates in one of these formats:
                 id="between"
                 value={between}
                 onChange={(e) => setBetween(e.target.value)}
-                className="w-full p-2 bg-gray-800 border border-gray-600 rounded text-white"
+                className="w-full rounded-xl border border-white/10 bg-white/[0.02] px-3 py-2 text-sm text-white placeholder-gray-500 focus:border-blue-700/50 focus:outline-none focus:ring-2 focus:ring-blue-700/30"
                 placeholder="e.g. The State vs. John Doe"
               />
             </div>
-          </div>
+            </div>
+          </section>
 
           {/* Urgency */}
-          <div className="md:col-span-2">
-            <label htmlFor="urgency" className="block text-sm font-medium text-gray-300 mb-1">
-              Urgency Level *
-            </label>
+          <section className="relative z-10 space-y-4 rounded-2xl border border-white/10 bg-white/[0.018] p-6 shadow-[0_18px_45px_rgba(15,23,42,0.45)]">
+            <div className="flex flex-col gap-1 sm:flex-row sm:items-baseline sm:justify-between">
+              <div>
+                <h3 className="text-lg font-semibold text-white">Priority & Workflow</h3>
+                <p className="text-xs text-gray-400">Set the urgency to guide notifications and investigator focus.</p>
+              </div>
+            </div>
             <select
               id="urgency"
               value={urgency}
               onChange={(e) => setUrgency(e.target.value)}
-              className="w-full p-2 bg-gray-800 border border-gray-600 rounded text-white"
+              className="w-full rounded-xl border border-white/10 bg-white/[0.02] px-3 py-2 text-sm text-white focus:border-blue-700/50 focus:outline-none focus:ring-2 focus:ring-blue-700/30"
               required
             >
               <option value="">Select urgency level</option>
@@ -1289,11 +1815,11 @@ Please ensure your PDF contains GPS coordinates in one of these formats:
               <option value="High">High</option>
               <option value="Critical">Critical</option>
             </select>
-          </div>
+          </section>
 
           {profile?.role === "admin" && (
-            <div className="md:col-span-2 bg-gray-900 bg-opacity-60 border border-gray-700 rounded-xl p-4 space-y-4">
-              <div className="flex items-center justify-between">
+            <section className="md:col-span-2 space-y-4 rounded-2xl border border-white/10 bg-white/[0.018] p-6 shadow-[0_18px_45px_rgba(15,23,42,0.45)]">
+              <div className="flex flex-col gap-1 sm:flex-row sm:items-baseline sm:justify-between">
                 <div>
                   <h3 className="text-sm font-semibold text-white">Collaborators</h3>
                   <p className="text-xs text-gray-400">
@@ -1306,14 +1832,14 @@ Please ensure your PDF contains GPS coordinates in one of these formats:
                 {assignedUsers.map((user) => (
                   <span
                     key={user.id}
-                    className="inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-1 text-xs text-white"
+                    className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.045] px-3 py-1 text-xs text-white backdrop-blur"
                   >
                     <span className="font-medium">{user.name || user.email || user.id}</span>
                     {user.id !== currentUserId && (
                       <button
                         type="button"
                         onClick={() => handleRemoveAssignedUser(user.id)}
-                        className="text-gray-300 hover:text-red-300"
+                        className="text-gray-300 hover:text-rose-300"
                         aria-label={`Remove ${user.name || user.email || user.id}`}
                       >
                         <X className="w-3 h-3" />
@@ -1335,12 +1861,12 @@ Please ensure your PDF contains GPS coordinates in one of these formats:
                     }
                   }}
                   placeholder="Search by name or email"
-                  className="flex-1 rounded-lg bg-gray-800 border border-gray-700 text-white px-3 py-2 text-sm placeholder-gray-500"
+                  className="flex-1 rounded-xl border border-white/10 bg-white/[0.02] px-3 py-2 text-sm text-white placeholder-gray-500 focus:border-blue-700/50 focus:outline-none focus:ring-2 focus:ring-blue-700/30"
                 />
                 <button
                   type="button"
                   onClick={handleUserSearch}
-                  className="inline-flex items-center gap-2 px-4 py-2 bg-blue-700 hover:bg-blue-600 rounded-lg text-sm text-white"
+                  className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-gradient-to-r from-blue-900 via-slate-900 to-indigo-900 px-4 py-2 text-sm font-medium text-white shadow-[0_15px_35px_rgba(15,23,42,0.55)] transition hover:-translate-y-0.5"
                 >
                   <UserPlus className="w-4 h-4" />
                   Search
@@ -1354,7 +1880,7 @@ Please ensure your PDF contains GPS coordinates in one of these formats:
                   userSearchResults.map((user) => (
                     <div
                       key={user.id}
-                      className="flex items-center justify-between bg-gray-800 bg-opacity-60 border border-gray-700 rounded-lg px-3 py-2 text-xs"
+                      className="flex items-center justify-between rounded-2xl border border-white/10 bg-white/[0.02] px-3 py-2 text-xs shadow-[0_12px_30px_rgba(15,23,42,0.45)]"
                     >
                       <div>
                         <p className="text-white font-medium">{user.name || user.email || user.id}</p>
@@ -1363,7 +1889,7 @@ Please ensure your PDF contains GPS coordinates in one of these formats:
                       <button
                         type="button"
                         onClick={() => handleAddUserToCase(user)}
-                        className="inline-flex items-center gap-1 px-3 py-1 bg-green-600 hover:bg-green-500 rounded-full text-white"
+                        className="inline-flex items-center gap-1 rounded-full border border-white/10 bg-gradient-to-r from-emerald-800 to-teal-700 px-3 py-1 text-white transition hover:from-emerald-700 hover:to-teal-600"
                       >
                         <UserPlus className="w-3 h-3" /> Add
                       </button>
@@ -1375,19 +1901,35 @@ Please ensure your PDF contains GPS coordinates in one of these formats:
                   <p className="text-xs text-gray-500">Search to find users to add to this case.</p>
                 )}
               </div>
-            </div>
+            </section>
           )}
 
+          {/* NEW: Technical terms selector (case glossary) */}
+          <TechnicalTermsSelector
+            value={selectedTechnicalTerms}
+            onChange={setSelectedTechnicalTerms}
+            disabled={isProcessing}
+          />
+
+          {/* Evidence Locker (shared, glassmorphism) */}
+          <EvidenceLocker
+            evidenceItems={evidenceItems}
+            onChange={setEvidenceItems}
+            caseNumber={caseNumber}
+            title="Evidence Locker"
+            subtitle="Add evidence items that will be associated with this case"
+          />
+
           {/* Enhanced File Upload Section */}
-          <div className="mt-8">
-            <div className="flex items-center justify-between mb-2">
+          <section className="relative z-10 mt-8 space-y-4 rounded-2xl border border-white/10 bg-white/[0.018] p-6 shadow-[0_18px_45px_rgba(15,23,42,0.45)]">
+            <div className="mb-2 flex items-center justify-between">
               <label className="block text-sm font-medium text-gray-300">
                 Upload GPS Coordinates (CSV or PDF) *
               </label>
               <button
                 type="button"
                 onClick={() => setShowGuide(!showGuide)}
-                className="text-blue-400 hover:text-blue-300 text-sm flex items-center"
+                className="flex items-center text-sm text-blue-300 transition hover:text-white"
               >
                 <Info className="w-4 h-4 mr-1" />
                 {showGuide ? "Hide Guide" : "View File Guide"}
@@ -1396,12 +1938,12 @@ Please ensure your PDF contains GPS coordinates in one of these formats:
 
             {/* File Guide */}
             {showGuide && (
-              <div className="bg-gray-800 p-4 rounded-lg text-sm text-gray-300 mb-4">
+              <div className="mb-4 rounded-2xl border border-white/10 bg-white/[0.02] p-6 text-sm text-gray-200 shadow-[0_18px_45px_rgba(15,23,42,0.45)]">
                 <h3 className="font-semibold mb-2">Supported File Formats:</h3>
 
                 {/* CSV Section */}
                 <div className="mb-4">
-                  <h4 className="font-semibold text-blue-400 mb-1">CSV Files:</h4>
+                  <h4 className="font-semibold text-blue-300 mb-1">CSV Files:</h4>
                   <p className="mb-2">Your CSV should include the following columns:</p>
                   <ul className="list-disc pl-5 space-y-1 text-xs">
                     <li>
@@ -1426,7 +1968,7 @@ Please ensure your PDF contains GPS coordinates in one of these formats:
 
                 {/* PDF Section */}
                 <div className="mb-4">
-                  <h4 className="font-semibold text-green-400 mb-1">PDF Files:</h4>
+                  <h4 className="font-semibold text-emerald-300 mb-1">PDF Files:</h4>
                   <p className="mb-2">PDF files will be automatically processed to extract:</p>
                   <ul className="list-disc pl-5 space-y-1 text-xs">
                     <li>GPS coordinates in decimal format (e.g., -33.918861, 18.423300)</li>
@@ -1437,31 +1979,31 @@ Please ensure your PDF contains GPS coordinates in one of these formats:
                     <li>Degrees/Minutes/Seconds format (e.g., 33°55'07.9"S 18°25'23.9"E)</li>
                     <li>Timestamps and vehicle status information when available</li>
                   </ul>
-                  <p className="mt-2 text-xs text-yellow-400">
+                  <p className="mt-2 text-xs text-amber-300">
                     Note: PDF extraction works best with text-based PDFs. Scanned images may
                     not extract properly.
                   </p>
                 </div>
 
                 {/* Ignition Status Detection */}
-                <div className="mt-3 pt-3 border-t border-gray-700">
+                <div className="mt-3 border-t border-white/10 pt-3">
                   <p className="font-semibold mb-1">Intelligent Vehicle Status Detection:</p>
                   <p className="mb-2 text-xs text-gray-400">
                     The system analyzes text content to determine vehicle status:
                   </p>
                   <div className="grid grid-cols-3 gap-2 text-xs mt-2">
-                    <div className="p-2 bg-red-900 bg-opacity-20 rounded">
-                      <p className="font-semibold text-red-400 mb-1">Stopped</p>
+                    <div className="rounded border border-rose-500/20 bg-rose-950/40 p-2">
+                      <p className="mb-1 font-semibold text-rose-400">Stopped</p>
                       <p className="text-gray-400">
                         stopped, parked, ignition off, engine off, stationary
                       </p>
                     </div>
-                    <div className="p-2 bg-yellow-900 bg-opacity-20 rounded">
-                      <p className="font-semibold text-yellow-400 mb-1">Idle</p>
+                    <div className="rounded border border-amber-500/20 bg-amber-950/40 p-2">
+                      <p className="mb-1 font-semibold text-amber-300">Idle</p>
                       <p className="text-gray-400">idling, idle, engine on, ignition on, running</p>
                     </div>
-                    <div className="p-2 bg-green-900 bg-opacity-20 rounded">
-                      <p className="font-semibold text-green-400 mb-1">Moving</p>
+                    <div className="rounded border border-emerald-500/20 bg-emerald-950/40 p-2">
+                      <p className="mb-1 font-semibold text-emerald-300">Moving</p>
                       <p className="text-gray-400">moving, driving, traveling, speed, en route</p>
                     </div>
                   </div>
@@ -1470,10 +2012,10 @@ Please ensure your PDF contains GPS coordinates in one of these formats:
             )}
 
             <div
-              className={`border-2 border-dashed p-8 rounded-lg flex flex-col items-center justify-center cursor-pointer
-               ${isDragging ? "border-blue-500 bg-blue-900 bg-opacity-20" : "border-gray-600"}
-               ${file && !parseError ? "bg-green-900 bg-opacity-20" : ""}
-               ${parseError ? "bg-red-900 bg-opacity-20" : ""}`}
+              className={`group relative flex flex-col items-center justify-center rounded-3xl border border-white/12 bg-white/[0.018] p-10 text-center transition-all duration-300 cursor-pointer shadow-[0_22px_55px_rgba(15,23,42,0.45)]
+               ${isDragging ? "border-blue-700/80 shadow-[0_28px_70px_rgba(30,64,175,0.45)]" : ""}
+               ${file && !parseError ? "border-emerald-600/70 bg-emerald-950/10" : ""}
+               ${parseError ? "border-rose-600/70 bg-rose-950/10" : ""}`}
               onDragOver={handleDragOver}
               onDragLeave={handleDragLeave}
               onDrop={handleDrop}
@@ -1489,8 +2031,8 @@ Please ensure your PDF contains GPS coordinates in one of these formats:
 
               {isProcessing ? (
                 <div className="text-center">
-                  <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-blue-500 mx-auto mb-4"></div>
-                  <div className="text-blue-400 mb-2">
+                  <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-blue-700 mx-auto mb-4"></div>
+                  <div className="text-blue-300 mb-2">
                     Processing {fileType?.toUpperCase()} file...
                   </div>
                   <div className="text-xs text-gray-400">
@@ -1501,24 +2043,24 @@ Please ensure your PDF contains GPS coordinates in one of these formats:
                 </div>
               ) : file && !parseError ? (
                 <div className="text-center">
-                  <CheckCircle className="h-8 w-8 text-green-400 mx-auto mb-2" />
-                  <div className="text-green-400 mb-2">
+                  <CheckCircle className="mx-auto mb-2 h-8 w-8 text-emerald-300" />
+                  <div className="mb-2 text-emerald-300">
                     {fileType === "pdf"
                       ? "PDF processed successfully"
                       : "CSV processed successfully"}
                   </div>
-                  <p className="text-gray-300 flex items-center justify-center">
+                  <p className="flex items-center justify-center text-gray-200">
                     {fileType === "pdf" ? <FileText className="w-4 h-4 mr-2" /> : null}
                     {file.name}
                   </p>
                   {csvStats && (
-                    <div className="text-gray-400 mt-3 text-sm">
+                    <div className="mt-3 text-sm text-gray-300">
                       <p>Total data points: {csvStats.totalPoints}</p>
                       <p>Stopped/Relevant locations: {csvStats.stoppedPoints}</p>
 
                       {csvStats.columnsUsed &&
                         csvStats.columnsUsed.source !== "PDF extraction" && (
-                          <div className="mt-2 text-xs">
+                          <div className="mt-2 text-xs text-gray-300">
                             <p>Using columns:</p>
                             <p>Latitude: {csvStats.columnsUsed.lat}</p>
                             <p>Longitude: {csvStats.columnsUsed.lng}</p>
@@ -1535,16 +2077,16 @@ Please ensure your PDF contains GPS coordinates in one of these formats:
                         )}
 
                       {fileType === "pdf" && csvStats.pdfInfo && (
-                        <div className="mt-2 text-xs">
-                          <p className="text-green-400">
+                        <div className="mt-2 text-xs text-gray-300">
+                          <p className="text-emerald-300">
                             ✓ Processed {csvStats.pdfInfo.pages} PDF page(s)
                           </p>
-                          <p className="text-green-400">
+                          <p className="text-emerald-300">
                             ✓ Coordinate formats:{" "}
                             {csvStats.pdfInfo.coordinateFormats.join(", ")}
                           </p>
                           {csvStats.pdfInfo.timestampsFound > 0 && (
-                            <p className="text-green-400">
+                            <p className="text-emerald-300">
                               ✓ Found {csvStats.pdfInfo.timestampsFound} timestamps
                             </p>
                           )}
@@ -1552,7 +2094,7 @@ Please ensure your PDF contains GPS coordinates in one of these formats:
                       )}
 
                       {fileType === "csv" && csvStats.derivedStatus && (
-                        <p className="mt-1 text-yellow-400">
+                        <p className="mt-1 text-amber-300">
                           {fileType === "pdf"
                             ? "Vehicle status derived from PDF content"
                             : "Using descriptions to determine vehicle status"}
@@ -1563,14 +2105,14 @@ Please ensure your PDF contains GPS coordinates in one of these formats:
                 </div>
               ) : parseError ? (
                 <div className="text-center">
-                  <AlertCircle className="h-8 w-8 text-red-400 mx-auto mb-2" />
-                  <div className="text-red-400 mb-2">Error processing file</div>
-                  <p className="text-red-300 max-w-md">{parseError}</p>
+                  <AlertCircle className="h-8 w-8 text-rose-400 mx-auto mb-2" />
+                  <div className="text-rose-400 mb-2">Error processing file</div>
+                  <p className="text-rose-300 max-w-md">{parseError}</p>
                   <p className="text-gray-400 mt-2">Click to try another file</p>
 
                   {fileType === "pdf" && (
                     <div className="mt-3 text-xs text-gray-400">
-                      <p className="font-semibold text-red-400">PDF Processing Failed</p>
+                      <p className="font-semibold text-rose-400">PDF Processing Failed</p>
                       <p className="mb-2">{parseError}</p>
                       <div>
                         <p className="font-semibold mb-1">Troubleshooting Tips:</p>
@@ -1595,39 +2137,42 @@ Please ensure your PDF contains GPS coordinates in one of these formats:
                 </div>
               ) : (
                 <>
-                  <Upload className="h-12 w-12 text-gray-400 mb-4" />
-                  <p className="text-gray-300 mb-2">
+                  <Upload className="mb-4 h-12 w-12 text-gray-300" />
+                  <p className="mb-2 text-gray-200">
                     Drag and drop your CSV or PDF file here
                   </p>
-                  <p className="text-gray-500 text-sm">or click to browse</p>
-                  <div className="flex items-center mt-4 space-x-4 text-xs text-gray-400">
+                  <p className="text-sm text-gray-400">or click to browse</p>
+                  <div className="mt-4 flex items-center space-x-4 text-xs text-gray-400">
                     <div className="flex items-center">
-                      <div className="w-3 h-3 bg-blue-500 rounded mr-2"></div>
+                      <div className="mr-2 h-3 w-3 rounded bg-blue-600"></div>
                       CSV Files
                     </div>
                     <div className="flex items-center">
-                      <FileText className="w-3 h-3 mr-2" />
+                      <FileText className="mr-2 h-3 w-3 text-gray-300" />
                       PDF Files (New!)
                     </div>
                   </div>
                 </>
               )}
             </div>
-          </div>
+          </section>
 
           {/* Navigation Buttons */}
-          <div className="flex justify-between mt-10">
-            <Link to="/home" className="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded text-white">
+          <div className="mt-10 flex flex-wrap items-center justify-between gap-4">
+            <Link
+              to="/home"
+              className="rounded-full border border-white/10 bg-white/[0.02] px-5 py-2 text-sm font-medium text-gray-200 transition hover:bg-white/15 hover:text-white"
+            >
               Cancel
             </Link>
             <button
               type="submit"
-              className={`px-4 py-2 rounded text-white ${
-                parsedData && parsedData.stoppedPoints.length > 0 && !isProcessing
-                  ? "bg-blue-700 hover:bg-blue-600"
-                  : "bg-blue-900 cursor-not-allowed opacity-50"
+              className={`rounded-full px-6 py-2 text-sm font-semibold transition ${
+                canProceed
+                  ? "border border-white/10 bg-gradient-to-r from-blue-900 via-slate-900 to-purple-900 text-white shadow-[0_25px_65px_rgba(15,23,42,0.65)] hover:-translate-y-0.5"
+                  : "border border-white/10 bg-white/[0.04] text-gray-500 cursor-not-allowed"
               }`}
-              disabled={!parsedData || parsedData.stoppedPoints.length === 0 || isProcessing}
+              disabled={!canProceed}
             >
               {isProcessing ? "Creating Case..." : "Next"}
             </button>

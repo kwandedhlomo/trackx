@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from "react";
 import { Link, useNavigate, useLocation } from "react-router-dom";
 import adflogo from "../assets/image-removebg-preview.png";
 import { motion } from "framer-motion";
-import { AlertTriangle, MapPin, FileText, Camera, Home, FilePlus2, FolderOpen, Briefcase, LayoutDashboard } from "lucide-react";
+import { AlertTriangle, MapPin, FileText, Camera, Home, FilePlus2, FolderOpen, Briefcase, LayoutDashboard, Trash2, Plus } from "lucide-react";
 import jsPDF from "jspdf";
 import { useAuth } from "../context/AuthContext";
 import { signOut } from "firebase/auth";
@@ -12,6 +12,9 @@ import axios from "axios";
 import NotificationModal from "../components/NotificationModal";
 import useNotificationModal from "../hooks/useNotificationModal";
 import { getFriendlyErrorMessage } from "../utils/errorMessages";
+import TechnicalTermsSelector from "../components/TechnicalTermsSelector";
+import { formatTechnicalTerm, normalizeTechnicalTermList } from "../utils/technicalTerms";
+import EvidenceLocker from "../components/EvidenceLocker";
 
 // ---- DOCX + save-as ----
 import { Document, Packer, Paragraph, TextRun, HeadingLevel, ImageRun } from "docx";
@@ -234,6 +237,8 @@ function readJSON(storage, key) {
   }
 }
 
+
+
 // ---------- Component ----------
 function OverviewPage() {
   const reportRef = useRef(null);
@@ -278,6 +283,18 @@ function OverviewPage() {
   const [lastSaved, setLastSaved] = useState(null);
   const [saveError, setSaveError] = useState(null);
 
+  const totalLocations = locations.length;
+  const selectedCount = selectedLocations.length;
+  const snapshotsCapturedCount = snapshots.filter((s) => s && (s.mapImage || s.streetViewImage)).length;
+  const formattedDateTime = new Date().toLocaleString();
+  const savingStatus = isSaving
+    ? "Saving…"
+    : saveError
+    ? saveError
+    : lastSaved
+    ? `Saved ${lastSaved}`
+    : "";
+
   const showError = (title, error, fallback) =>
     openModal({
       variant: "error",
@@ -308,6 +325,60 @@ function OverviewPage() {
   const [conclusion, setConclusion] = useState("");
 
   // --- helpers ---
+  // --- Evidence Locker (structure + utils) ---
+  // Generate a stable-ish ID for new items
+// Normalize evidence to object shape expected by EvidenceLocker & exports
+const generateEvidenceId = () => `EV-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+const normalizeEvidenceItems = (raw, caseNumber = caseDetails.caseNumber || "Pending") => {
+  if (!Array.isArray(raw)) return [];
+  return raw.map((ev) => {
+    if (ev && typeof ev === "object") {
+      return {
+        id: ev.id || generateEvidenceId(),
+        description: ev.description ?? "",
+        dateAdded: ev.dateAdded || new Date().toISOString(),
+        caseNumber: ev.caseNumber || caseNumber,
+      };
+    }
+    return {
+      id: generateEvidenceId(),
+      description: String(ev || ""),
+      dateAdded: new Date().toISOString(),
+      caseNumber,
+    };
+  });
+};
+
+
+  // Evidence Locker actions
+  const addEvidence = () => {
+    const newEvidence = {
+      id: generateEvidenceId(),
+      description: "",
+      dateAdded: new Date().toISOString(),
+      caseNumber: caseDetails.caseNumber || "Pending",
+    };
+    const next = [...evidenceItems, newEvidence];
+    setEvidenceItems(next);
+    saveToLocalStorage({ evidenceItems: next });
+  };
+
+  const updateEvidence = (id, description) => {
+    const next = evidenceItems.map((item) =>
+      item.id === id ? { ...item, description } : item
+    );
+    setEvidenceItems(next);
+  };
+
+  const removeEvidence = (id) => {
+    const next = evidenceItems.filter((item) => item.id !== id);
+    setEvidenceItems(next);
+    saveToLocalStorage({ evidenceItems: next });
+  };
+
+  const handleEvidenceBlur = () => saveData();
+
+
   const formatDateForDisplay = (dateInput) => {
     if (!dateInput) return "Date not available";
     try {
@@ -428,8 +499,8 @@ useEffect(() => {
           setLocations(fb.locations || []);
           setLocationTitles(fb.locationTitles || Array((fb.locations || []).length).fill(""));
           setReportIntro(fb.reportIntro || "");
-          setEvidenceItems(fb.evidenceItems || []);
-          setTechnicalTerms(fb.technicalTerms || []);
+          setEvidenceItems(normalizeEvidenceItems(fb.evidenceItems || [], fb.caseNumber));
+          setTechnicalTerms(normalizeTechnicalTermList(fb.technicalTerms || []));
           setReportConclusion(fb.reportConclusion || "");
           setSelectedLocations(fb.selectedForReport || []);
           setCurrentCaseId(caseId);
@@ -513,8 +584,8 @@ useEffect(() => {
     setLocations(caseData.locations);
     setSelectedLocations(caseData.selectedForReport || []);
     setReportIntro(caseData.reportIntro || "");
-    setEvidenceItems(caseData.evidenceItems || []);
-    setTechnicalTerms(caseData.technicalTerms || []);
+    setEvidenceItems(normalizeEvidenceItems(caseData.evidenceItems || [], caseData.caseNumber));
+    setTechnicalTerms(normalizeTechnicalTermList(caseData.technicalTerms || []));
     setReportConclusion(caseData.reportConclusion || "");
     setLocationTitles(caseData.locationTitles || Array(caseData.locations.length).fill(""));
     setGeneratedReports(caseData.generatedReports || []);
@@ -539,6 +610,14 @@ useEffect(() => {
       const s = localStorage.getItem("trackxCaseData");
       if (!s) return;
       const caseData = JSON.parse(s);
+      const extraCopy = { ...extra };
+      let termsForSave;
+      if (Object.prototype.hasOwnProperty.call(extraCopy, "technicalTerms")) {
+        termsForSave = normalizeTechnicalTermList(extraCopy.technicalTerms);
+        delete extraCopy.technicalTerms;
+      } else {
+        termsForSave = normalizeTechnicalTermList(technicalTerms);
+      }
       const updated = {
         ...caseData,
         reportIntro,
@@ -556,35 +635,45 @@ useEffect(() => {
     }
   };
 
-  const saveData = async (additionalData = {}) => {
-    saveToLocalStorage(additionalData);
-    if (!currentCaseId) {
-      setSaveError("No cloud connection - using local storage only");
-      return;
+const saveData = async (additionalData = {}) => {
+  saveToLocalStorage(additionalData);
+  if (!currentCaseId) {
+    setSaveError("No cloud connection - using local storage only");
+    return;
+  }
+  setIsSaving(true);
+  setSaveError(null);
+  try {
+    const extraCopy = { ...additionalData };
+    let termsForUpdate;
+    if (Object.prototype.hasOwnProperty.call(extraCopy, "technicalTerms")) {
+      termsForUpdate = normalizeTechnicalTermList(extraCopy.technicalTerms);
+      delete extraCopy.technicalTerms;
+    } else {
+      termsForUpdate = normalizeTechnicalTermList(technicalTerms);
     }
-    setIsSaving(true);
+
+    const updateData = {
+      locationTitles,
+      reportIntro: reportIntro || "",
+      reportConclusion: reportConclusion || "",
+      selectedForReport: selectedLocations,
+      evidenceItems,
+      ...extraCopy,
+      technicalTerms: termsForUpdate,
+    };
+    await updateCaseAnnotations(currentCaseId, updateData);
+    setLastSaved(new Date().toLocaleTimeString());
     setSaveError(null);
-    try {
-      const updateData = {
-        locationTitles,
-        reportIntro: reportIntro || "",
-        reportConclusion: reportConclusion || "",
-        selectedForReport: selectedLocations,
-        evidenceItems,
-        technicalTerms,
-        ...additionalData,
-      };      
-      await updateCaseAnnotations(currentCaseId, updateData);
-      setLastSaved(new Date().toLocaleTimeString());
-      setSaveError(null);
-    } catch (e) {
-      console.error("Error saving to Firebase:", e);
-      setSaveError("Could not save to cloud database - saved locally only");
-      saveToLocalStorage(additionalData);
-    } finally {
-      setIsSaving(false);
-    }
-  };
+  } catch (e) {
+    console.error("Error saving to Firebase:", e);
+    setSaveError("Could not save to cloud database - saved locally only");
+    saveToLocalStorage(additionalData);
+  } finally {
+    setIsSaving(false);
+  }
+};
+
 
     // Debounced auto-save
     useEffect(() => {
@@ -622,6 +711,7 @@ const generatePDF = async () => {
     const pdfWidth = pdf.internal.pageSize.getWidth();
     const pdfHeight = pdf.internal.pageSize.getHeight();
     const margin = 15;
+    const normalizedTerms = normalizeTechnicalTermList(technicalTerms);
     const displayBetween = caseDetails.between || "Not specified";
 
     // --- COVER PAGE ---
@@ -644,27 +734,42 @@ const generatePDF = async () => {
       pdf.addPage();
     }
 
-    // --- 2. EVIDENCE ---
+    // --- 2. EVIDENCE (Locker) ---
     if (evidenceItems.length > 0) {
       pdf.setFontSize(16);
       pdf.text("2. EVIDENCE", margin, margin);
       pdf.setFontSize(11);
+      let yPos = margin + 10;
       evidenceItems.forEach((ev, idx) => {
-        pdf.text(`2.${idx + 1} ${ev}`, margin, margin + 10 + idx * 8);
+        if (yPos > pdfHeight - 30) { pdf.addPage(); yPos = margin; }
+        pdf.setFontSize(10);
+        pdf.setTextColor(100, 100, 100);
+        pdf.text(`Evidence ID: ${ev.id}`, margin, yPos); yPos += 5;
+        pdf.text(`Date Added: ${new Date(ev.dateAdded).toLocaleDateString()}`, margin, yPos); yPos += 5;
+        pdf.setTextColor(0, 0, 0);
+        pdf.setFontSize(11);
+        const desc = ev.description || "(No description provided)";
+        const splitDesc = pdf.splitTextToSize(`${idx + 1}. ${desc}`, pdfWidth - margin * 2);
+        pdf.text(splitDesc, margin, yPos);
+        yPos += splitDesc.length * 5 + 5;
       });
       pdf.addPage();
     }
 
+
     // --- 3. TECHNICAL TERMS ---
-    if (technicalTerms.length > 0) {
+    if (normalizedTerms.length > 0) {
       pdf.setFontSize(16);
       pdf.text("3. TECHNICAL TERMS", margin, margin);
       pdf.setFontSize(11);
-      technicalTerms.forEach((term, idx) => {
-        pdf.text(`3.${idx + 1} ${term}`, margin, margin + 10 + idx * 8);
+      normalizedTerms.forEach((term, idx) => {
+        const formatted = formatTechnicalTerm(term);
+        if (!formatted) return;
+        pdf.text(`3.${idx + 1} ${formatted}`, margin, margin + 10 + idx * 8);
       });
       pdf.addPage();
     }
+
 
     // --- 4. TRIPS – DATE ---
     const filtered = locations.filter((_, i) => selectedLocations.includes(i));
@@ -756,41 +861,44 @@ const generatePDF = async () => {
   const makeSmall = (text) =>
     new Paragraph({ children: [new TextRun({ text: text || "", size: 18, color: "777777" })], spacing: { after: 120 } });
 
-  const buildReportPayload = () => {
-    const selectedIndices = selectedLocations.slice().sort((a, b) => a - b);
-    const locationsForPayload = locations.map((l, idx) => ({
-      lat: l.lat,
-      lng: l.lng,
-      timestamp: l.timestamp,
-      address: l.address,
-      title: locationTitles[idx] || "",
-      _idx: idx,
-    }));
-    const selectedSnapshotSet = new Set(selectedIndices);
-    const filteredSnapshots = (snapshots || []).filter((s) => s && typeof s.index === "number" && selectedSnapshotSet.has(s.index));
-    return {
-      caseNumber: caseDetails.caseNumber,
-      caseTitle: caseDetails.caseTitle,
-      dateOfIncident: caseDetails.dateOfIncident,
-      region: caseDetails.region,
-      between: caseDetails.between || "Not specified",
-      intro: reportIntro || "",
-      conclusion: reportConclusion || "",
-      locations: locationsForPayload,
-      selectedIndices,
-      snapshots: filteredSnapshots,
-    };
+const buildReportPayload = () => {
+  const selectedIndices = selectedLocations.slice().sort((a, b) => a - b);
+  const locationsForPayload = locations.map((l, idx) => ({
+    lat: l.lat,
+    lng: l.lng,
+    timestamp: l.timestamp,
+    address: l.address,
+    title: locationTitles[idx] || "",
+    _idx: idx,
+  }));
+  const selectedSnapshotSet = new Set(selectedIndices);
+  const filteredSnapshots = (snapshots || []).filter(
+    (s) => s && typeof s.index === "number" && selectedSnapshotSet.has(s.index)
+  );
+  return {
+    caseNumber: caseDetails.caseNumber,
+    caseTitle: caseDetails.caseTitle,
+    dateOfIncident: caseDetails.dateOfIncident,
+    region: caseDetails.region,
+    between: caseDetails.between || "Not specified",
+    intro: reportIntro || "",
+    conclusion: reportConclusion || "",
+    technicalTerms: normalizeTechnicalTermList(technicalTerms),
+    locations: locationsForPayload,
+    selectedIndices,
+    snapshots: filteredSnapshots,
   };
+};
 
-// --- DOCX (with normalization) ---
+
 const generateDOCX = async () => {
   const payload = buildReportPayload();
   const docChildren = [];
+  const normalizedTerms = normalizeTechnicalTermList(payload.technicalTerms || technicalTerms);
   const displayBetween = payload.between || "Not specified";
 
   // --- COVER PAGE ---
   docChildren.push(makeHeading("DIGITAL FORENSIC REPORT", HeadingLevel.TITLE));
-  // Use BETWEEN instead of case title
   docChildren.push(makeText(`Case: ${payload.caseNumber} – ${displayBetween}`));
   docChildren.push(makeText(`Investigator: ${profile?.firstName || ""} ${profile?.surname || ""}`));
   docChildren.push(makeText(`Date of Incident: ${payload.dateOfIncident}`));
@@ -802,19 +910,30 @@ const generateDOCX = async () => {
     docChildren.push(makeText(payload.intro));
   }
 
-  // --- 2. EVIDENCE ---
+  // --- 2. EVIDENCE (Locker) ---
   if (evidenceItems.length > 0) {
     docChildren.push(makeHeading("2. EVIDENCE", HeadingLevel.HEADING_1));
     evidenceItems.forEach((ev, idx) => {
-      docChildren.push(new Paragraph({ text: `2.${idx + 1} ${ev}` }));
+      docChildren.push(
+        new Paragraph({ children: [new TextRun({ text: `Evidence ID: ${ev.id}`, size: 18, color: "666666" })] })
+      );
+      docChildren.push(
+        new Paragraph({ children: [new TextRun({ text: `Date Added: ${new Date(ev.dateAdded).toLocaleDateString()}`, size: 18, color: "666666" })] })
+      );
+      docChildren.push(
+        new Paragraph({ text: `${idx + 1}. ${ev.description || "(No description provided)"}`, spacing: { after: 200 } })
+      );
     });
   }
 
+
   // --- 3. TECHNICAL TERMS ---
-  if (technicalTerms.length > 0) {
+  if (normalizedTerms.length > 0) {
     docChildren.push(makeHeading("3. TECHNICAL TERMS", HeadingLevel.HEADING_1));
-    technicalTerms.forEach((term, idx) => {
-      docChildren.push(new Paragraph({ text: `3.${idx + 1} ${term}` }));
+    normalizedTerms.forEach((term, idx) => {
+      const formatted = formatTechnicalTerm(term);
+      if (!formatted) return;
+      docChildren.push(new Paragraph({ text: `3.${idx + 1} ${formatted}` }));
     });
   }
 
@@ -881,6 +1000,7 @@ const generateDOCX = async () => {
 };
 
 
+
   // --- Google Doc (optional) ---
   const generateGoogleDocOnServer = async () => {
     const payload = buildReportPayload();
@@ -903,141 +1023,143 @@ const generateDOCX = async () => {
   };
 
   // --- generation handler (merged) ---
-  const handleGenerate = async () => {
-    setIsGenerating(true);
-    const newLocal = [...generatedReports];
-    const today = new Date().toISOString().split("T")[0];
-    const base = `_${caseDetails.caseNumber}_${today}`;
+const handleGenerate = async () => {
+  setIsGenerating(true);
+  const newLocal = [...generatedReports];
+  const normalizedTerms = normalizeTechnicalTermList(technicalTerms);
+  const today = new Date().toISOString().split("T")[0];
+  const base = `_${caseDetails.caseNumber}_${today}`;
 
-    try {
-      // DOCX
-      if (generateDocx) {
-        try {
-          const blob = await generateDOCX();
-          const name = `Report${base}.docx`;
-          saveAs(blob, name);
-          newLocal.push({ id: Date.now() + 50, type: "report", name, date: new Date().toISOString(), docx: true });
-          if (currentCaseId) {
-            try {
-              await createReportDocument(
-                currentCaseId,
-                {
-                  reportType: "docx",
-                  fileName: name,
-                  introduction: reportIntro,
-                  conclusion: reportConclusion,
-                  evidence: evidenceItems,
-                  technicalTerms: technicalTerms,
-                },
-                getCurrentUserId()
-              );              
-              const updated = await getCaseReports(currentCaseId);
-              setFirebaseReports(updated || []);
-            } catch (e) {
-              console.warn("Failed to save DOCX report metadata to Firebase:", e);
-            }
-          }
-        } catch (err) {
-          console.error("DOCX generation failed:", err);
-          showError("DOCX generation failed", err, "We couldn't generate the DOCX report. Please try again.");
-        }
-      }
-
-      // Google Doc (optional)
-      if (generateGoogleDoc) {
-        try {
-          const data = await generateGoogleDocOnServer();
-          const name = `${data.title || "Report"}${base}.gdoc`;
-          newLocal.push({
-            id: Date.now() + 100,
-            type: "report",
-            name,
-            date: new Date().toISOString(),
-            googleDoc: true,
-            documentId: data.documentId,
-            webViewLink: data.webViewLink,
-          });
-          if (currentCaseId) {
-            try {
-              await createReportDocument(
-                currentCaseId,
-                {
-                  reportType: "google-doc",
-                  fileName: name,
-                  documentId: data.documentId,
-                  webViewLink: data.webViewLink,
-                  introduction: reportIntro,
-                  conclusion: reportConclusion,
-                },
-                getCurrentUserId()
-              );
-              const updated = await getCaseReports(currentCaseId);
-              setFirebaseReports(updated || []);
-            } catch (e) {
-              console.warn("Failed to save Google Doc metadata to Firebase:", e);
-            }
-          }
-        } catch (err) {
-          console.error("Google Doc generation failed:", err);
-          showError("Google Doc generation failed", err, "We couldn't create the Google Doc. Please try again.");
-        }
-      }
-
-      // PDF
-      if (generateReport) {
-        const pdf = await generatePDF();
-        if (pdf) {
-          const name = `Report${base}.pdf`;
-          pdf.save(name);
-          newLocal.push({ id: Date.now(), type: "report", name, date: new Date().toISOString(), pdf: true });
-          if (currentCaseId) {
-            try {
-              await createReportDocument(
-                currentCaseId,
-                {
-                  reportType: "pdf",
-                  fileName: name,
-                  introduction: reportIntro,
-                  conclusion: reportConclusion,
-                  evidence: evidenceItems,
-                  technicalTerms: technicalTerms,
-                },
-                getCurrentUserId()
-              );              
-              const updated = await getCaseReports(currentCaseId);
-              setFirebaseReports(updated || []);
-            } catch (e) {
-              console.error("Error saving PDF report to Firebase:", e);
-            }
-          }
-        }
-      }
-
-      // Simulation (mock)
-      if (generateSimulation) {
-        const name = `Simulation${base}.mp4`;
-        await new Promise((r) => setTimeout(r, 1500));
-        newLocal.push({ id: Date.now() + 1, type: "simulation", name, date: new Date().toISOString() });
+  try {
+    // DOCX
+    if (generateDocx) {
+      try {
+        const blob = await generateDOCX();
+        const name = `Report${base}.docx`;
+        saveAs(blob, name);
+        newLocal.push({ id: Date.now() + 50, type: "report", name, date: new Date().toISOString(), docx: true });
         if (currentCaseId) {
           try {
-            await createReportDocument(currentCaseId, { reportType: "simulation", fileName: name }, getCurrentUserId());
+            await createReportDocument(
+              currentCaseId,
+              {
+                reportType: "docx",
+                fileName: name,
+                introduction: reportIntro,
+                conclusion: reportConclusion,
+                evidence: evidenceItems,
+                technicalTerms: normalizedTerms,
+              },
+              getCurrentUserId()
+            );
             const updated = await getCaseReports(currentCaseId);
             setFirebaseReports(updated || []);
           } catch (e) {
-            console.warn("Failed to save simulation metadata to Firebase:", e);
+            console.warn("Failed to save DOCX report metadata to Firebase:", e);
+          }
+        }
+      } catch (err) {
+        console.error("DOCX generation failed:", err);
+        showError("DOCX generation failed", err, "We couldn't generate the DOCX report. Please try again.");
+      }
+    }
+
+    // Google Doc (optional)
+    if (generateGoogleDoc) {
+      try {
+        const data = await generateGoogleDocOnServer();
+        const name = `${data.title || "Report"}${base}.gdoc`;
+        newLocal.push({
+          id: Date.now() + 100,
+          type: "report",
+          name,
+          date: new Date().toISOString(),
+          googleDoc: true,
+          documentId: data.documentId,
+          webViewLink: data.webViewLink,
+        });
+        if (currentCaseId) {
+          try {
+            await createReportDocument(
+              currentCaseId,
+              {
+                reportType: "google-doc",
+                fileName: name,
+                documentId: data.documentId,
+                webViewLink: data.webViewLink,
+                introduction: reportIntro,
+                conclusion: reportConclusion,
+              },
+              getCurrentUserId()
+            );
+            const updated = await getCaseReports(currentCaseId);
+            setFirebaseReports(updated || []);
+          } catch (e) {
+            console.warn("Failed to save Google Doc metadata to Firebase:", e);
+          }
+        }
+      } catch (err) {
+        console.error("Google Doc generation failed:", err);
+        showError("Google Doc generation failed", err, "We couldn't create the Google Doc. Please try again.");
+      }
+    }
+
+    // PDF
+    if (generateReport) {
+      const pdf = await generatePDF();
+      if (pdf) {
+        const name = `Report${base}.pdf`;
+        pdf.save(name);
+        newLocal.push({ id: Date.now(), type: "report", name, date: new Date().toISOString(), pdf: true });
+        if (currentCaseId) {
+          try {
+            await createReportDocument(
+              currentCaseId,
+              {
+                reportType: "pdf",
+                fileName: name,
+                introduction: reportIntro,
+                conclusion: reportConclusion,
+                evidence: evidenceItems,
+                technicalTerms: normalizedTerms,
+              },
+              getCurrentUserId()
+            );
+            const updated = await getCaseReports(currentCaseId);
+            setFirebaseReports(updated || []);
+          } catch (e) {
+            console.error("Error saving PDF report to Firebase:", e);
           }
         }
       }
-
-      setGeneratedReports(newLocal);
-      saveToLocalStorage({ generatedReports: newLocal });
-    } catch (e) {
-      console.error("Error in report generation:", e);
-      showError("Report generation failed", e, "There was an error generating the report. Please try again.");
-    } finally {
-      setIsGenerating(false);
     }
-  };
+
+    // Simulation (mock)
+    if (generateSimulation) {
+      const name = `Simulation${base}.mp4`;
+      await new Promise((r) => setTimeout(r, 1500));
+      newLocal.push({ id: Date.now() + 1, type: "simulation", name, date: new Date().toISOString() });
+      if (currentCaseId) {
+        try {
+          await createReportDocument(currentCaseId, { reportType: "simulation", fileName: name }, getCurrentUserId());
+          const updated = await getCaseReports(currentCaseId);
+          setFirebaseReports(updated || []);
+        } catch (e) {
+          console.warn("Failed to save simulation metadata to Firebase:", e);
+        }
+      }
+    }
+
+    setGeneratedReports(newLocal);
+    saveToLocalStorage({ generatedReports: newLocal });
+  } catch (e) {
+    console.error("Error in report generation:", e);
+    showError("Report generation failed", e, "There was an error generating the report. Please try again.");
+  } finally {
+    setIsGenerating(false);
+  }
+};
+
 
   // --- download/open handler (merged) ---
   const handleDownload = async (report) => {
@@ -1189,349 +1311,478 @@ const handleGenerateConclusion = async () => {
       <div className="absolute inset-0 bg-gradient-to-br from-black via-gray-900 to-black -z-10" />
 
       {/* Navbar */}
-      <div className="flex items-center justify-between px-6 py-4 bg-gradient-to-r from-black to-gray-900 shadow-md">
-        <div className="flex items-center space-x-4">
-          <div className="text-3xl cursor-pointer" onClick={() => setShowMenu(!showMenu)}>
+      <nav className="mx-6 mt-6 flex items-center justify-between rounded-3xl border border-white/10 bg-gradient-to-br from-black/85 via-slate-900/70 to-black/80 px-6 py-4 shadow-xl shadow-[0_25px_65px_rgba(8,11,24,0.65)] backdrop-blur-xl">
+        <div className="flex items-center gap-4">
+          <button
+            type="button"
+            onClick={() => setShowMenu(!showMenu)}
+            className="flex h-11 w-11 items-center justify-center rounded-full border border-white/10 bg-white/[0.02] text-xl text-white shadow-inner shadow-white/5 transition hover:bg-white/10"
+            aria-label="Toggle navigation"
+          >
             &#9776;
-          </div>
-          <Link to="/home">
-            <img src={adflogo} alt="Logo" className="h-12 cursor-pointer hover:opacity-80 transition" />
+          </button>
+
+          <Link to="/home" className="hidden sm:block">
+            <img
+              src={adflogo}
+              alt="ADF Logo"
+              className="h-11 w-auto drop-shadow-[0_10px_20px_rgba(59,130,246,0.35)] transition hover:opacity-90"
+            />
           </Link>
-        </div>
 
-        <h1 className="text-xl font-bold text-white">Overview</h1>
-
-        <div className="flex items-center space-x-4">
-          <div className="max-w-sm">
+          <div className="hidden md:flex items-center gap-2 rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-2 text-xs text-gray-200 shadow-inner shadow-white/5">
             <FirebaseStatus />
           </div>
-          <div className="text-sm">
-            {isSaving && <span className="text-yellow-400">Saving...</span>}
-            {saveError && <span className="text-red-400">{saveError}</span>}
-            {lastSaved && !isSaving && !saveError && <span className="text-green-400">Saved {lastSaved}</span>}
-            {currentCaseId && !isSaving && !saveError && <span className="text-xs text-gray-400 block">Cloud sync enabled</span>}
+        </div>
+
+        <div className="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 text-2xl font-semibold tracking-[0.35em] text-white/80 drop-shadow-[0_2px_12px_rgba(15,23,42,0.55)]">
+          OVERVIEW
+        </div>
+
+        <div className="flex items-center gap-4 text-sm text-gray-200">
+          <div className="hidden text-right lg:block">
+            {savingStatus && (
+              <span className={saveError ? "text-rose-300" : isSaving ? "text-amber-300" : "text-emerald-300"}>
+                {savingStatus}
+              </span>
+            )}
+            {currentCaseId && !saveError && !isSaving && (
+              <span className="block text-xs text-gray-400">Cloud sync enabled</span>
+            )}
           </div>
-          <div>
-            <p className="text-sm">{profile ? `${profile.firstName} ${profile.surname}` : "Loading..."}</p>
-            <button onClick={handleSignOut} className="text-red-400 hover:text-red-600 text-xs">
+          <div className="flex flex-col items-end">
+            <span className="text-base font-semibold text-white">
+              {profile ? `${profile.firstName || ""} ${profile.surname || ""}`.trim() || "Loading..." : "Loading..."}
+            </span>
+            <button
+              onClick={handleSignOut}
+              className="text-xs text-gray-400 transition hover:text-white"
+            >
               Sign Out
             </button>
           </div>
+          <div className="rounded-full bg-white/[0.02] px-3 py-1.5 text-xs font-medium text-gray-400 shadow-inner shadow-white/5">
+            {formattedDateTime}
+          </div>
         </div>
-      </div>
+      </nav>
 
       {/* Hamburger Menu */}
       {showMenu && (
-        <div className="absolute top-16 left-0 w-64 rounded-r-3xl border border-white/10 bg-gradient-to-br from-gray-900/95 to-black/90 backdrop-blur-xl p-6 z-30 shadow-2xl space-y-2">
+        <div className="absolute left-6 top-32 z-30 w-64 space-y-2 rounded-3xl border border-white/10 bg-gradient-to-br from-slate-950/85 via-slate-900/78 to-black/78 p-6 shadow-2xl shadow-[0_30px_60px_rgba(30,58,138,0.45)] backdrop-blur-2xl">
           <Link
             to="/home"
-            className="flex items-center gap-3 px-3 py-2 rounded-2xl text-sm font-medium text-gray-200 hover:text-white hover:bg-white/10 transition"
+            className="flex items-center gap-3 rounded-2xl px-3 py-2 text-sm font-medium text-gray-200 transition hover:bg-white/10 hover:text-white"
             onClick={() => setShowMenu(false)}
           >
-            <Home className="w-4 h-4" />
+            <Home className="h-4 w-4" />
             Home
           </Link>
           <Link
             to="/new-case"
-            className="flex items-center gap-3 px-3 py-2 rounded-2xl text-sm font-medium text-gray-200 hover:text-white hover:bg-white/10 transition"
+            className="flex items-center gap-3 rounded-2xl px-3 py-2 text-sm font-medium text-gray-200 transition hover:bg-white/10 hover:text-white"
             onClick={() => setShowMenu(false)}
           >
-            <FilePlus2 className="w-4 h-4" />
+            <FilePlus2 className="h-4 w-4" />
             Create New Case
           </Link>
           <Link
             to="/manage-cases"
-            className="flex items-center gap-3 px-3 py-2 rounded-2xl text-sm font-medium text-gray-200 hover:text-white hover:bg-white/10 transition"
+            className="flex items-center gap-3 rounded-2xl px-3 py-2 text-sm font-medium text-gray-200 transition hover:bg-white/10 hover:text-white"
             onClick={() => setShowMenu(false)}
           >
-            <FolderOpen className="w-4 h-4" />
+            <FolderOpen className="h-4 w-4" />
             Manage Cases
           </Link>
           <Link
             to="/annotations"
-            className="flex items-center gap-3 px-3 py-2 rounded-2xl text-sm font-medium text-gray-200 hover:text-white hover:bg-white/10 transition"
+            className="flex items-center gap-3 rounded-2xl px-3 py-2 text-sm font-medium text-gray-200 transition hover:bg-white/10 hover:text-white"
             onClick={() => setShowMenu(false)}
           >
-            <MapPin className="w-4 h-4" />
+            <MapPin className="h-4 w-4" />
             Annotations
           </Link>
           <Link
             to="/my-cases"
-            className="flex items-center gap-3 px-3 py-2 rounded-2xl text-sm font-medium text-gray-200 hover:text-white hover:bg-white/10 transition"
+            className="flex items-center gap-3 rounded-2xl px-3 py-2 text-sm font-medium text-gray-200 transition hover:bg-white/10 hover:text-white"
             onClick={() => setShowMenu(false)}
           >
-            <Briefcase className="w-4 h-4" />
+            <Briefcase className="h-4 w-4" />
             My Cases
           </Link>
-          <div className="flex items-center gap-3 px-3 py-2 rounded-2xl text-sm font-medium text-white bg-white/10">
-            <FileText className="w-4 h-4" />
+          <div className="flex items-center gap-3 rounded-2xl px-3 py-2 text-sm font-medium text-white bg-white/[0.045] shadow-inner shadow-white/10">
+            <FileText className="h-4 w-4" />
             Overview
           </div>
           {profile?.role === "admin" && (
             <Link
               to="/admin-dashboard"
-              className="flex items-center gap-3 px-3 py-2 rounded-2xl text-sm font-medium text-gray-200 hover:text-white hover:bg-white/10 transition"
+              className="flex items-center gap-3 rounded-2xl px-3 py-2 text-sm font-medium text-gray-200 transition hover:bg-white/10 hover:text-white"
               onClick={() => setShowMenu(false)}
             >
-              <LayoutDashboard className="w-4 h-4" />
+              <LayoutDashboard className="h-4 w-4" />
               Admin Dashboard
             </Link>
           )}
         </div>
       )}
 
-      {/* Tabs */}
-      <div className="flex justify-center space-x-8 bg-gradient-to-r from-black to-gray-900 bg-opacity-80 backdrop-blur-md py-2 text-white text-sm">
-        <Link to="/new-case" className="text-gray-300 hover:text-white">
+      {/* Navigation Tabs */}
+      <div className="mx-6 mt-6 flex justify-center gap-8 rounded-full border border-white/10 bg-white/[0.02] px-6 py-2 text-xs font-semibold text-gray-300 shadow-[0_15px_40px_rgba(15,23,42,0.45)] backdrop-blur-xl">
+        <Link to="/new-case" className="text-gray-400 transition hover:text-white">
           Case Information
         </Link>
-        <Link to="/annotations" className="text-gray-300 hover:text-white">
+        <Link to="/annotations" className="text-gray-400 transition hover:text-white">
           Annotations
         </Link>
-        <span className="inline-flex items-center rounded-full bg-white/15 px-4 py-1.5 font-semibold text-white">
+        <span className="inline-flex items-center rounded-full bg-gradient-to-r from-blue-900/80 to-purple-900/80 px-5 py-1.5 text-white shadow-[0_12px_30px_rgba(15,23,42,0.45)]">
           Overview
         </span>
       </div>
 
-      {/* Case bar */}
-      <div className="bg-gradient-to-r from-black to-gray-900 bg-opacity-80 backdrop-blur-md border-b border-white/10 py-3 px-6">
-        <div className="flex flex-wrap justify-between text-sm text-gray-200">
-          <div className="mr-6 mb-1">
-            <span className="text-gray-400">Case:</span> {caseDetails.caseNumber}
+      <section className="relative mx-auto mt-10 w-full max-w-6xl px-6 pb-24">
+        <div className="relative overflow-hidden rounded-3xl border border-white/10 bg-white/[0.02] px-8 py-8 shadow-[0_35px_90px_rgba(15,23,42,0.55)] backdrop-blur-2xl">
+          <div className="pointer-events-none absolute -top-28 right-6 h-56 w-56 rounded-full bg-blue-900/25 blur-3xl" />
+          <div className="pointer-events-none absolute -bottom-24 left-0 h-48 w-48 rounded-full bg-purple-900/20 blur-3xl" />
+          <div className="relative z-10 flex flex-col gap-8 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.35em] text-gray-400">Case Overview</p>
+              <h1 className="mt-3 text-3xl font-semibold text-white">
+                {caseDetails.caseTitle || "Overview"}
+              </h1>
+              <p className="mt-3 max-w-xl text-sm text-gray-400">
+                Shape the investigative storyline, curate locations, and export polished forensic reports.
+              </p>
+            </div>
+            <div className="grid grid-cols-1 gap-4 text-sm text-gray-300 sm:grid-cols-2">
+              <div>
+                <p className="text-xs uppercase tracking-wide text-gray-500">Case Number</p>
+                <p className="mt-1 text-base font-medium text-white">{caseDetails.caseNumber || "—"}</p>
+              </div>
+              <div>
+                <p className="text-xs uppercase tracking-wide text-gray-500">Incident Date</p>
+                <p className="mt-1 text-base font-medium text-white">{caseDetails.dateOfIncident || "—"}</p>
+              </div>
+              <div>
+                <p className="text-xs uppercase tracking-wide text-gray-500">Region</p>
+                <p className="mt-1 text-base font-medium text-white">{caseDetails.region || "—"}</p>
+              </div>
+              <div>
+                <p className="text-xs uppercase tracking-wide text-gray-500">Between</p>
+                <p className="mt-1 text-base font-medium text-white">{caseDetails.between || "Not specified"}</p>
+              </div>
+            </div>
           </div>
-          <div className="mr-6 mb-1">
-            <span className="text-gray-400">Title:</span> {caseDetails.caseTitle}
-          </div>
-          <div className="mr-6 mb-1">
-            <span className="text-gray-400">Date:</span> {caseDetails.dateOfIncident}
-          </div>
-          <div className="mb-1">
-            <span className="text-gray-400">Region:</span> {caseDetails.region}
+
+          <div className="relative z-10 mt-8 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="group rounded-2xl border border-white/10 bg-white/[0.03] p-4 shadow-[0_18px_40px_rgba(15,23,42,0.45)] transition hover:border-blue-500/40">
+              <div className="flex items-center justify-between text-xs uppercase tracking-wide text-gray-500">
+                Total Locations
+                <MapPin className="h-4 w-4 text-blue-400" />
+              </div>
+              <p className="mt-3 text-2xl font-semibold text-white">{totalLocations}</p>
+              <p className="text-xs text-gray-400">Captured from your dataset.</p>
+            </div>
+            <div className="group rounded-2xl border border-white/10 bg-white/[0.03] p-4 shadow-[0_18px_40px_rgba(15,23,42,0.45)] transition hover:border-indigo-500/40">
+              <div className="flex items-center justify-between text-xs uppercase tracking-wide text-gray-500">
+                Selected For Report
+                <FileText className="h-4 w-4 text-indigo-400" />
+              </div>
+              <p className="mt-3 text-2xl font-semibold text-white">{selectedCount}</p>
+              <p className="text-xs text-gray-400">Choose key waypoints to narrate.</p>
+            </div>
+            <div className="group rounded-2xl border border-white/10 bg-white/[0.03] p-4 shadow-[0_18px_40px_rgba(15,23,42,0.45)] transition hover:border-emerald-500/40">
+              <div className="flex items-center justify-between text-xs uppercase tracking-wide text-gray-500">
+                Snapshots Captured
+                <Camera className="h-4 w-4 text-emerald-400" />
+              </div>
+              <p className="mt-3 text-2xl font-semibold text-white">{snapshotsCapturedCount}</p>
+              <p className="text-xs text-gray-400">Visual context for the report.</p>
+            </div>
+            <div className="group rounded-2xl border border-white/10 bg-white/[0.03] p-4 shadow-[0_18px_40px_rgba(15,23,42,0.45)] transition hover:border-purple-500/40">
+              <div className="flex items-center justify-between text-xs uppercase tracking-wide text-gray-500">
+                Reports Generated
+                <FolderOpen className="h-4 w-4 text-purple-400" />
+              </div>
+              <p className="mt-3 text-2xl font-semibold text-white">{allReports.length}</p>
+              <p className="text-xs text-gray-400">Includes local and cloud exports.</p>
+            </div>
           </div>
         </div>
-      </div>
 
-      {/* Hidden PDF container */}
-      <div className="hidden">
-        <div ref={reportRef} id="report-template" className="bg-white text-black p-8 max-w-[800px]" />
-      </div>
+        <div className="hidden">
+          <div ref={reportRef} id="report-template" className="max-w-[800px] bg-white p-8 text-black" />
+        </div>
 
-      {/* Content */}
-      <div className="max-w-6xl mx-auto px-6 py-8 space-y-8">
+        <div className="mt-10 space-y-8">
         {/* Selected Locations */}
-        <div className="bg-gray-800 p-4 rounded-lg shadow">
-          <h2 className="text-lg font-semibold mb-3">Selected Locations</h2>
-          <div className="space-y-2 max-h-64 overflow-y-auto">
-            {locations.map((location, index) => (
-              <div key={index} className="flex items-center justify-between p-3 rounded bg-gray-700">
-                <div className="flex items-center space-x-2">
-                  <input
-                    type="checkbox"
-                    id={`location-${index}`}
-                    checked={selectedLocations.includes(index)}
-                    onChange={() => toggleLocationSelection(index)}
-                    className="form-checkbox h-5 w-5 text-blue-600 rounded border-gray-600 bg-gray-700 focus:ring-blue-500"
-                  />
-                  <label htmlFor={`location-${index}`} className="flex items-center cursor-pointer">
-                    <MapPin className="h-4 w-4 text-blue-400 mr-2" />
-                    <div className="flex flex-col">
-                      <span>{locationTitles[index] || location.title || getLocationAddress(location)}</span>
-                      {snapshots.find((s) => s && (s.index === index) && (s.mapImage || s.streetViewImage)) && (
-                        <span className="text-xs text-green-400">✓ Snapshot image available</span>
-                      )}
-                    </div>
-                  </label>
-                </div>
-
-                <div className="flex items-center space-x-2">
-                  <input
-                    type="text"
-                    value={locationTitles[index] || ""}
-                    onChange={(e) => handleLocationTitleChange(index, e.target.value)}
-                    placeholder="Add title..."
-                    className="text-sm bg-gray-800 border border-gray-600 rounded px-2 py-1 w-48"
-                  />
-                  <Link
-                    to="/annotations"
-                    className="text-xs text-blue-400 hover:underline"
-                    onClick={() => {
-                      localStorage.setItem("trackxCurrentLocationIndex", index);
-                      saveToLocalStorage();
-                    }}
-                  >
-                    Edit
-                  </Link>
-                </div>
+        <div className="relative overflow-hidden rounded-3xl border border-white/10 bg-white/[0.018] p-6 shadow-[0_25px_70px_rgba(15,23,42,0.45)] backdrop-blur-2xl">
+          <div className="pointer-events-none absolute -top-16 right-0 h-32 w-32 rounded-full bg-blue-900/25 blur-3xl" />
+          <div className="pointer-events-none absolute -bottom-10 left-0 h-24 w-24 rounded-full bg-cyan-900/20 blur-3xl" />
+          <div className="relative z-10">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <h2 className="text-lg font-semibold text-white">Selected Locations</h2>
+                <p className="text-xs text-gray-400">Toggle which key stops appear in your narrative.</p>
               </div>
-            ))}
+              <span className="inline-flex items-center rounded-full bg-white/[0.05] px-3 py-1 text-xs font-medium text-gray-300">
+                {selectedCount} of {totalLocations} selected
+              </span>
+            </div>
+            <div className="mt-5 max-h-72 space-y-3 overflow-y-auto pr-1">
+              {locations.length === 0 ? (
+                <div className="rounded-2xl border border-dashed border-white/15 bg-black/30 p-8 text-center text-sm text-gray-400">
+                  No locations available yet. Import case data to populate this list.
+                </div>
+              ) : (
+                locations.map((location, index) => {
+                  const snapshot = snapshots.find((s) => s && s.index === index && (s.mapImage || s.streetViewImage));
+                  const coordsLine = `${formatCoordinate(location.lat)}, ${formatCoordinate(location.lng)}`;
+                  return (
+                    <div
+                      key={index}
+                      className="group flex flex-col gap-4 rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-4 text-sm text-gray-200 transition hover:border-blue-500/40 sm:flex-row sm:items-center sm:justify-between"
+                    >
+                      <label htmlFor={`location-${index}`} className="flex flex-1 items-start gap-3">
+                        <input
+                          type="checkbox"
+                          id={`location-${index}`}
+                          checked={selectedLocations.includes(index)}
+                          onChange={() => toggleLocationSelection(index)}
+                          className="mt-1 h-5 w-5 rounded-md border border-white/20 bg-black/40 text-blue-500 focus:ring-2 focus:ring-blue-500/60 focus:ring-offset-0"
+                        />
+                        <div>
+                          <p className="font-medium text-white">
+                            {locationTitles[index] || location.title || getLocationAddress(location)}
+                          </p>
+                          <p className="mt-1 text-xs text-gray-500">{coordsLine}</p>
+                          {snapshot && (
+                            <span className="mt-2 inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-0.5 text-[11px] font-medium text-emerald-300">
+                              <Camera className="h-3 w-3" />
+                              Snapshot ready
+                            </span>
+                          )}
+                        </div>
+                      </label>
+                      <div className="flex w-full flex-col gap-2 sm:w-auto sm:items-end">
+                        <input
+                          type="text"
+                          value={locationTitles[index] || ""}
+                          onChange={(e) => handleLocationTitleChange(index, e.target.value)}
+                          placeholder="Add a headline..."
+                          className="w-full rounded-xl border border-white/12 bg-slate-950/50 px-3 py-2 text-sm text-white placeholder-gray-500 focus:border-blue-600/60 focus:outline-none focus:ring-2 focus:ring-blue-600/20 sm:w-48"
+                        />
+                        <Link
+                          to="/annotations"
+                          className="inline-flex items-center justify-center gap-1 rounded-full border border-blue-500/30 bg-blue-500/10 px-3 py-1 text-xs font-medium text-blue-200 transition hover:border-blue-500/60 hover:bg-blue-500/20"
+                          onClick={() => {
+                            localStorage.setItem("trackxCurrentLocationIndex", index);
+                            saveToLocalStorage();
+                          }}
+                        >
+                          <MapPin className="h-3 w-3" />
+                          Edit capture
+                        </Link>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
           </div>
         </div>
 
         {/* Report Intro */}
-        <div className="bg-gray-800 p-4 rounded-lg shadow">
-          <h2 className="text-lg font-semibold mb-3">Report Introduction</h2>
+        <div className="rounded-3xl border border-white/10 bg-white/[0.018] p-6 shadow-[0_25px_70px_rgba(15,23,42,0.45)] backdrop-blur-2xl">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h2 className="text-lg font-semibold text-white">Report Introduction</h2>
+              <p className="text-xs text-gray-400">Set the tone for your findings.</p>
+            </div>
+            <button
+              onClick={handleGenerateIntro}
+              disabled={loadingIntro}
+              className={`inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold transition ${
+                loadingIntro
+                  ? "cursor-not-allowed bg-white/10 text-gray-300"
+                  : "bg-gradient-to-r from-purple-600 to-indigo-600 text-white hover:from-purple-500 hover:to-indigo-500"
+              }`}
+            >
+              {loadingIntro ? (
+                <span className="flex items-center gap-2">
+                  <span className="h-3 w-3 animate-spin rounded-full border-b-2 border-white/70" />
+                  Generating...
+                </span>
+              ) : (
+                "Generate AI Intro"
+              )}
+            </button>
+          </div>
           <textarea
             placeholder="Enter report introduction..."
             value={reportIntro}
             onChange={(e) => setReportIntro(e.target.value)}
             onBlur={() => saveToLocalStorage()}
-            className="w-full h-32 p-3 rounded bg-gray-900 text-white border border-gray-700 resize-none focus:border-blue-500 focus:ring focus:ring-blue-500 focus:ring-opacity-50"
+            className="mt-4 min-h-[140px] w-full rounded-2xl border border-white/10 bg-slate-950/50 px-4 py-3 text-sm text-white placeholder-gray-500 focus:border-purple-500/50 focus:outline-none focus:ring-2 focus:ring-purple-500/30"
           />
-            <button
-    onClick={handleGenerateIntro}
-    disabled={loadingIntro}
-    className="mt-3 px-4 py-2 bg-purple-600 hover:bg-purple-700 rounded text-white text-sm"
-  >
-    {loadingIntro ? "Generating..." : "Generate AI Intro"}
-  </button>
         </div>
 
-        {/* Report Evidence */}
-        <div className="bg-gray-800 p-4 rounded-lg shadow">
-          <h2 className="text-lg font-semibold mb-3">Evidence</h2>
-          {evidenceItems.map((item, idx) => (
-            <div key={idx} className="flex items-center mb-2">
-              <span className="mr-2 text-gray-400">2.{idx + 1}</span>
-              <input
-                type="text"
-                value={item}
-                onChange={(e) => {
-                  const newItems = [...evidenceItems];
-                  newItems[idx] = e.target.value;
-                  setEvidenceItems(newItems);
-                  saveToLocalStorage();
-                }}
-                className="flex-grow bg-gray-900 border border-gray-700 rounded px-2 py-1 text-white"
-              />
-            </div>
-          ))}
-          <button
-            onClick={() => setEvidenceItems([...evidenceItems, ""])}
-            className="mt-2 px-3 py-1 bg-blue-600 hover:bg-blue-700 rounded text-white text-sm"
-          >
-            + Add Evidence
-          </button>
-        </div>
-
-        {/* Technical Terms */}
-        <div className="bg-gray-800 p-4 rounded-lg shadow">
-          <h2 className="text-lg font-semibold mb-3">Technical Terms</h2>
-          {technicalTerms.map((item, idx) => (
-            <div key={idx} className="flex items-center mb-2">
-              <span className="mr-2 text-gray-400">3.{idx + 1}</span>
-              <input
-                type="text"
-                value={item}
-                onChange={(e) => {
-                  const newItems = [...technicalTerms];
-                  newItems[idx] = e.target.value;
-                  setTechnicalTerms(newItems);
-                  saveToLocalStorage();
-                }}
-                className="flex-grow bg-gray-900 border border-gray-700 rounded px-2 py-1 text-white"
-              />
-            </div>
-          ))}
-          <button
-            onClick={() => setTechnicalTerms([...technicalTerms, ""])}
-            className="mt-2 px-3 py-1 bg-blue-600 hover:bg-blue-700 rounded text-white text-sm"
-          >
-            + Add Term
-          </button>
-        </div>
+          <EvidenceLocker
+            evidenceItems={evidenceItems}
+            onChange={(next) => {
+              setEvidenceItems(next);
+              // keep local storage in sync; autosave will handle Firebase
+              saveToLocalStorage({ evidenceItems: next });
+            }}
+            readOnly={isSaving}
+            allowAddRemove={!isSaving}
+            caseNumber={caseDetails.caseNumber}
+          />
 
 
+        <TechnicalTermsSelector
+          value={technicalTerms}
+          onChange={(items) => {
+            const next = normalizeTechnicalTermList(items);
+            setTechnicalTerms(next);
+            saveToLocalStorage({ technicalTerms: next });
+          }}
+          disabled={isSaving}
+        />
         {/* Report Conclusion */}
-        <div className="bg-gray-800 p-4 rounded-lg shadow">
-          <h2 className="text-lg font-semibold mb-3">Report Conclusion</h2>
+        <div className="rounded-3xl border border-white/10 bg-white/[0.018] p-6 shadow-[0_25px_70px_rgba(15,23,42,0.45)] backdrop-blur-2xl">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h2 className="text-lg font-semibold text-white">Report Conclusion</h2>
+              <p className="text-xs text-gray-400">Wrap up the investigation with decisive commentary.</p>
+            </div>
+            <button
+              onClick={handleGenerateConclusion}
+              disabled={loadingConclusion}
+              className={`inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold transition ${
+                loadingConclusion
+                  ? "cursor-not-allowed bg-white/10 text-gray-300"
+                  : "bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white hover:from-violet-500 hover:to-fuchsia-500"
+              }`}
+            >
+              {loadingConclusion ? (
+                <span className="flex items-center gap-2">
+                  <span className="h-3 w-3 animate-spin rounded-full border-b-2 border-white/70" />
+                  Generating...
+                </span>
+              ) : (
+                "Generate AI Conclusion"
+              )}
+            </button>
+          </div>
           <textarea
             placeholder="Enter report conclusion..."
             value={reportConclusion}
             onChange={(e) => setReportConclusion(e.target.value)}
             onBlur={() => saveToLocalStorage()}
-            className="w-full h-32 p-3 rounded bg-gray-900 text-white border border-gray-700 resize-none focus:border-blue-500 focus:ring focus:ring-blue-500 focus:ring-opacity-50"
+            className="mt-4 min-h-[140px] w-full rounded-2xl border border-white/10 bg-slate-950/50 px-4 py-3 text-sm text-white placeholder-gray-500 focus:border-fuchsia-500/50 focus:outline-none focus:ring-2 focus:ring-fuchsia-500/30"
           />
-            <button
-    onClick={handleGenerateConclusion}
-    disabled={loadingConclusion}
-    className="mt-3 px-4 py-2 bg-purple-600 hover:bg-purple-700 rounded text-white text-sm"
-  >
-    {loadingConclusion ? "Generating..." : "Generate AI Conclusion"}
-  </button>
         </div>
 
         {/* Save bar */}
-        <div className="bg-gray-800 p-4 rounded-lg shadow">
-          <div className="flex items-center justify-between">
+        <div className="rounded-3xl border border-white/10 bg-white/[0.018] p-6 shadow-[0_25px_70px_rgba(15,23,42,0.45)] backdrop-blur-2xl">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <h3 className="text-lg font-semibold">Save Progress</h3>
-              <p className="text-sm text-gray-400">
-                Your work is automatically saved every 2 seconds.
-                {currentCaseId ? (
-                  <span className="text-green-400 ml-2">✓ Connected to Firebase (ID: {String(currentCaseId).slice(-8)})</span>
-                ) : (
-                  <span className="text-yellow-400 ml-2">⚠ Using local storage only</span>
-                )}
-              </p>
+              <h3 className="text-lg font-semibold text-white">Save Progress</h3>
+              <p className="text-xs text-gray-400">Your work auto-saves every few seconds.</p>
             </div>
             <button
               onClick={() => saveData()}
               disabled={isSaving}
-              className="bg-green-600 hover:bg-green-700 disabled:bg-gray-600 text-white py-2 px-4 rounded font-medium transition-colors"
+              className={`inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold transition ${
+                isSaving
+                  ? "cursor-not-allowed bg-white/10 text-gray-300"
+                  : "bg-gradient-to-r from-emerald-600 to-teal-600 text-white hover:from-emerald-500 hover:to-teal-500"
+              }`}
             >
               {isSaving ? "Saving..." : "Save Now"}
             </button>
           </div>
+          <div className="mt-4 rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-xs text-gray-400">
+            <p>Changes persist automatically while you craft the report.</p>
+            <p className="mt-1">
+              {currentCaseId ? (
+                <span className="text-emerald-300">✓ Connected to Firebase (ID: {String(currentCaseId).slice(-8)})</span>
+              ) : (
+                <span className="text-amber-300">⚠ Using local storage only</span>
+              )}
+            </p>
+          </div>
         </div>
 
         {/* Generate */}
-        <div className="bg-gray-800 p-4 rounded-lg shadow">
-          <div className="flex flex-wrap items-center justify-between">
-            <div className="space-x-6 mb-4 md:mb-0">
-              <label className="inline-flex items-center">
-                <input
-                  type="checkbox"
-                  checked={generateReport}
-                  onChange={() => setGenerateReport(!generateReport)}
-                  className="form-checkbox h-5 w-5 text-blue-600 rounded border-gray-600 bg-gray-700 focus:ring-blue-500"
-                />
-                <span className="ml-2">Generate PDF</span>
+        <div className="rounded-3xl border border-white/10 bg-white/[0.018] p-6 shadow-[0_25px_70px_rgba(15,23,42,0.45)] backdrop-blur-2xl">
+          <div className="flex flex-col gap-4">
+            <div>
+              <h3 className="text-lg font-semibold text-white">Export & Simulation</h3>
+              <p className="text-xs text-gray-400">Choose the deliverables you want to generate.</p>
+            </div>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <label className="flex items-center justify-between rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm text-gray-200 transition hover:border-blue-500/40">
+                <span>Generate PDF</span>
+                <div className="relative">
+                  <input
+                    type="checkbox"
+                    checked={generateReport}
+                    onChange={() => setGenerateReport(!generateReport)}
+                    className="peer sr-only"
+                  />
+                  <div className="h-5 w-9 rounded-full bg-white/15 transition peer-checked:bg-blue-500/70" />
+                  <div className="absolute top-0.5 left-0.5 h-4 w-4 rounded-full bg-white transition peer-checked:translate-x-4" />
+                </div>
               </label>
-              <label className="inline-flex items-center">
-                <input
-                  type="checkbox"
-                  checked={generateDocx}
-                  onChange={() => setGenerateDocx(!generateDocx)}
-                  className="form-checkbox h-5 w-5 text-indigo-500 rounded border-gray-600 bg-gray-700 focus:ring-indigo-500"
-                />
-                <span className="ml-2">Generate DOCX</span>
+              <label className="flex items-center justify-between rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm text-gray-200 transition hover:border-indigo-500/40">
+                <span>Generate DOCX</span>
+                <div className="relative">
+                  <input
+                    type="checkbox"
+                    checked={generateDocx}
+                    onChange={() => setGenerateDocx(!generateDocx)}
+                    className="peer sr-only"
+                  />
+                  <div className="h-5 w-9 rounded-full bg-white/15 transition peer-checked:bg-indigo-500/70" />
+                  <div className="absolute top-0.5 left-0.5 h-4 w-4 rounded-full bg-white transition peer-checked:translate-x-4" />
+                </div>
               </label>
-              <label className="inline-flex items-center">
-                <input
-                  type="checkbox"
-                  checked={generateGoogleDoc}
-                  onChange={() => setGenerateGoogleDoc(!generateGoogleDoc)}
-                  className="form-checkbox h-5 w-5 text-amber-500 rounded border-gray-600 bg-gray-700 focus:ring-amber-500"
-                />
-                <span className="ml-2">Generate Google Doc</span>
+              <label className="flex items-center justify-between rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm text-gray-200 transition hover:border-amber-500/40">
+                <span>Generate Google Doc</span>
+                <div className="relative">
+                  <input
+                    type="checkbox"
+                    checked={generateGoogleDoc}
+                    onChange={() => setGenerateGoogleDoc(!generateGoogleDoc)}
+                    className="peer sr-only"
+                  />
+                  <div className="h-5 w-9 rounded-full bg-white/15 transition peer-checked:bg-amber-500/70" />
+                  <div className="absolute top-0.5 left-0.5 h-4 w-4 rounded-full bg-white transition peer-checked:translate-x-4" />
+                </div>
               </label>
-              <label className="inline-flex items-center">
-                <input
-                  type="checkbox"
-                  checked={generateSimulation}
-                  onChange={() => setGenerateSimulation(!generateSimulation)}
-                  className="form-checkbox h-5 w-5 text-green-600 rounded border-gray-600 bg-gray-700 focus:ring-green-500"
-                />
-                <span className="ml-2">Generate Simulation</span>
+              <label className="flex items-center justify-between rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm text-gray-200 transition hover:border-emerald-500/40">
+                <span>Generate Simulation</span>
+                <div className="relative">
+                  <input
+                    type="checkbox"
+                    checked={generateSimulation}
+                    onChange={() => setGenerateSimulation(!generateSimulation)}
+                    className="peer sr-only"
+                  />
+                  <div className="h-5 w-9 rounded-full bg-white/15 transition peer-checked:bg-emerald-500/70" />
+                  <div className="absolute top-0.5 left-0.5 h-4 w-4 rounded-full bg-white transition peer-checked:translate-x-4" />
+                </div>
               </label>
             </div>
             <button
-              className={`bg-blue-700 hover:bg-blue-800 text-white px-6 py-2 rounded shadow transition ${
+              className={`inline-flex items-center justify-center gap-2 rounded-full px-6 py-2 text-sm font-semibold transition ${
                 (!generateReport && !generateDocx && !generateGoogleDoc && !generateSimulation) ||
                 isGenerating ||
                 selectedLocations.length === 0
-                  ? "opacity-50 cursor-not-allowed"
-                  : ""
+                  ? "cursor-not-allowed bg-white/10 text-gray-300"
+                  : "bg-gradient-to-r from-blue-600 to-cyan-600 text-white hover:from-blue-500 hover:to-cyan-500"
               }`}
               onClick={handleGenerate}
               disabled={
@@ -1542,10 +1793,10 @@ const handleGenerateConclusion = async () => {
               title={selectedLocations.length === 0 ? "Select at least one location" : ""}
             >
               {isGenerating ? (
-                <div className="flex items-center">
-                  <div className="animate-spin rounded-full h-4 w-4 border-t-2 border-b-2 border-white mr-2"></div>
+                <span className="flex items-center gap-2">
+                  <span className="h-4 w-4 animate-spin rounded-full border-b-2 border-white" />
                   Generating...
-                </div>
+                </span>
               ) : (
                 "Generate"
               )}
@@ -1555,29 +1806,40 @@ const handleGenerateConclusion = async () => {
 
         {/* Reports list (Firebase + local) */}
         {allReports.length > 0 && (
-          <div className="bg-gray-800 p-4 rounded-lg shadow">
-            <h3 className="text-lg font-semibold mb-3">Generated Reports</h3>
-            <div className="space-y-2">
+          <div className="rounded-3xl border border-white/10 bg-white/[0.018] p-6 shadow-[0_25px_70px_rgba(15,23,42,0.45)] backdrop-blur-2xl">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <h3 className="text-lg font-semibold text-white">Generated Reports</h3>
+                <p className="text-xs text-gray-400">Reopen or download exports created for this case.</p>
+              </div>
+              <span className="rounded-full bg-white/[0.05] px-3 py-1 text-xs font-medium text-gray-300">
+                {allReports.length} file{allReports.length === 1 ? "" : "s"}
+              </span>
+            </div>
+            <div className="mt-4 space-y-3">
               {allReports.map((report) => (
-                <div key={report.id} className="flex items-center justify-between bg-gray-700 p-4 rounded">
-                  <div className="flex items-center">
+                <div
+                  key={report.id}
+                  className="flex flex-col gap-4 rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-gray-200 transition hover:border-emerald-500/40 sm:flex-row sm:items-center sm:justify-between"
+                >
+                  <div className="flex items-center gap-3">
                     {report.type === "firebase-report" ? (
-                      <FileText className="h-5 w-5 text-green-400 mr-3" />
+                      <FileText className="h-5 w-5 text-emerald-300" />
                     ) : report.type === "report" ? (
-                      <FileText className="h-5 w-5 text-blue-400 mr-3" />
+                      <FileText className="h-5 w-5 text-blue-300" />
                     ) : (
-                      <div className="h-5 w-5 text-green-400 mr-3">🎬</div>
+                      <span className="text-lg leading-none">🎬</span>
                     )}
                     <div>
-                      <p className="font-medium">{report.name}</p>
+                      <p className="font-medium text-white">{report.name}</p>
                       <p className="text-xs text-gray-400">
                         {new Date(report.date).toLocaleString()}
-                        {report.type === "firebase-report" && <span className="ml-2 text-green-400">• Saved to Firebase</span>}
+                        {report.type === "firebase-report" && <span className="ml-2 text-emerald-300">• Synced to Firebase</span>}
                       </p>
                     </div>
                   </div>
                   <button
-                    className="bg-green-600 hover:bg-green-700 text-white px-4 py-1 rounded transition"
+                    className="inline-flex items-center justify-center rounded-full bg-gradient-to-r from-emerald-500 to-teal-500 px-4 py-1.5 text-sm font-semibold text-white transition hover:from-emerald-400 hover:to-teal-400"
                     onClick={() => handleDownload(report)}
                   >
                     {report.googleDoc ? "Open" : report.type === "simulation" ? "View" : "Download"}
@@ -1589,70 +1851,88 @@ const handleGenerateConclusion = async () => {
         )}
 
         {/* Snapshot Status */}
-        <div className="bg-gray-800 p-4 rounded-lg shadow">
-          <div className="flex items-center justify-between mb-3">
-            <h2 className="text-lg font-semibold">Snapshot Status</h2>
+        <div className="rounded-3xl border border-white/10 bg-white/[0.018] p-6 shadow-[0_25px_70px_rgba(15,23,42,0.45)] backdrop-blur-2xl">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h2 className="text-lg font-semibold text-white">Snapshot Status</h2>
+              <p className="text-xs text-gray-400">Keep map and street imagery aligned with your timeline.</p>
+            </div>
             <button
               onClick={hydrateSnapshots}
-              className="text-xs px-2 py-1 bg-gray-700 hover:bg-gray-600 rounded"
+              className="inline-flex items-center gap-2 rounded-full border border-white/12 bg-white/[0.05] px-3 py-1.5 text-xs font-semibold text-gray-200 transition hover:border-blue-500/40 hover:text-white"
               title="Re-check session/local/Firebase for snapshots"
             >
-              Reload snapshots
+              ↻ Refresh
             </button>
           </div>
-          <div className="bg-gray-700 p-4 rounded">
+          <div className="mt-5 rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-4">
             {snapshotsAvailable ? (
-              <div className="flex items-center text-green-400">
-                <Camera size={18} className="mr-2" />
-                <p>
-                  Snapshot images available ({snapshots.filter((s) => s && (s.mapImage || s.streetViewImage)).length} of{" "}
-                  {locations.length} locations)
-                </p>
+              <div className="flex flex-col gap-2 text-sm text-emerald-300 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex items-center gap-2">
+                  <Camera className="h-4 w-4" />
+                  <span>Snapshot images available ({snapshotsCapturedCount} of {locations.length} locations)</span>
+                </div>
+                <span className="text-xs text-emerald-200">Perfect for rich storytelling.</span>
               </div>
             ) : (
-              <div className="flex items-center text-yellow-400">
-                <Camera size={18} className="mr-2" />
-                <p>No snapshot images available. Please go to the Annotations page to capture them.</p>
+              <div className="flex flex-col gap-2 text-sm text-amber-300 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex items-center gap-2">
+                  <Camera className="h-4 w-4" />
+                  <span>No snapshot images yet. Capture them from the annotations workspace.</span>
+                </div>
+                <span className="text-xs text-amber-200">Add imagery to elevate the report.</span>
               </div>
             )}
-            <div className="mt-4">
-              <Link to="/annotations" className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded inline-flex items-center">
-                <Camera size={16} className="mr-2" />
-                {snapshotsAvailable ? "Edit Snapshots" : "Capture Snapshots"}
+            <div className="mt-4 flex flex-wrap items-center gap-3">
+              <Link
+                to="/annotations"
+                className="inline-flex items-center gap-2 rounded-full border border-blue-500/30 bg-blue-500/10 px-4 py-1.5 text-sm font-medium text-blue-200 transition hover:border-blue-500/60 hover:bg-blue-500/20"
+              >
+                <Camera className="h-4 w-4" />
+                {snapshotsAvailable ? "Manage Snapshots" : "Capture Snapshots"}
               </Link>
+              <span className="text-xs text-gray-500">Last synced: {lastSaved || "moments ago"}</span>
             </div>
           </div>
         </div>
 
         {/* Case Summary */}
-        <div className="bg-gray-800 p-4 rounded-lg shadow">
-          <h2 className="text-lg font-semibold mb-3">Case Summary</h2>
-          <div className="bg-gray-700 p-4 rounded">
-            <p>
-              <span className="font-medium">Case Number:</span> {caseDetails.caseNumber}
-            </p>
-            <p>
-              <span className="font-medium">Title:</span> {caseDetails.caseTitle}
-            </p>
-            <p>
-              <span className="font-medium">Date of Incident:</span> {caseDetails.dateOfIncident}
-            </p>
-            <p>
-              <span className="font-medium">Region:</span> {caseDetails.region}
-            </p>
-            <p>
-              <span className="font-medium">Between:</span> {caseDetails.between}
-            </p>
-            <p className="mt-2">
-              <span className="font-medium">Locations:</span> {locations.length} total, {selectedLocations.length} selected for report
-            </p>
-            <p>
-              <span className="font-medium">Reports:</span> {allReports.length} generated ({firebaseReports.length} in Firebase,{" "}
-              {generatedReports.length} local)
-            </p>
-          </div>
+        <div className="rounded-3xl border border-white/10 bg-white/[0.018] p-6 shadow-[0_25px_70px_rgba(15,23,42,0.45)] backdrop-blur-2xl">
+          <h2 className="text-lg font-semibold text-white">Case Summary</h2>
+          <p className="mt-1 text-xs text-gray-400">Quick reference for collaborative briefings.</p>
+          <dl className="mt-5 grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+              <dt className="text-xs uppercase tracking-wide text-gray-500">Selected for report</dt>
+              <dd className="mt-2 text-lg font-semibold text-white">{selectedCount} / {totalLocations}</dd>
+              <dd className="mt-1 text-xs text-gray-500">Toggle selections above to refine.</dd>
+            </div>
+            <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+              <dt className="text-xs uppercase tracking-wide text-gray-500">Snapshots prepared</dt>
+              <dd className="mt-2 text-lg font-semibold text-white">{snapshotsCapturedCount}</dd>
+              <dd className="mt-1 text-xs text-gray-500">{snapshotsAvailable ? "Ready for export." : "Visit annotations to capture visuals."}</dd>
+            </div>
+            <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+              <dt className="text-xs uppercase tracking-wide text-gray-500">Report tally</dt>
+              <dd className="mt-2 text-lg font-semibold text-white">{allReports.length}</dd>
+              <dd className="mt-1 text-xs text-gray-500">{firebaseReports.length} cloud • {generatedReports.length} local</dd>
+            </div>
+            <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+              <dt className="text-xs uppercase tracking-wide text-gray-500">Sync status</dt>
+              <dd
+                className={`mt-2 text-lg font-semibold ${
+                  saveError ? "text-rose-300" : isSaving ? "text-amber-300" : "text-emerald-300"
+                }`}
+              >
+                {savingStatus || (currentCaseId ? "Connected" : "Idle")}
+              </dd>
+              <dd className="mt-1 text-xs text-gray-500">
+                {currentCaseId ? `Cloud ID • ${String(currentCaseId).slice(-8)}` : "Using local storage"}
+              </dd>
+            </div>
+          </dl>
         </div>
       </div>
+    </section>
 
       <NotificationModal
         isOpen={modalState.isOpen}

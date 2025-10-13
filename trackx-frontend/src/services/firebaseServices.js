@@ -9,20 +9,26 @@ import {
     query, 
     where, 
     getDocs, 
+    orderBy,
+    limit,
     serverTimestamp,
     GeoPoint,
-    deleteDoc 
+    deleteDoc,
+    increment 
   } from 'firebase/firestore';
   import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
   
   // Import your Firebase configuration 
   import { db, storage, auth, getCurrentUserId as getAuthUserId, isAuthenticated } from '../firebase';
+
+  import { normalizeTechnicalTerm } from '../utils/technicalTerms';
   
   // Collection names - proper structure
   const USERS_COLLECTION = 'users';
   const CASES_COLLECTION = 'cases';
   const REPORTS_COLLECTION = 'reports'; // Separate collection for reports
   const LOCATIONS_SUBCOLLECTION = 'locations';
+  const TECHNICAL_TERMS_COLLECTION = 'technicalTerms';
   
   /**
    * Get current user ID with fallbacks
@@ -45,6 +51,176 @@ export const getCurrentUserId = () => {
   } catch (error) {
     console.error('Error getting current user ID:', error);
     return 'fallback_user_' + Date.now();
+  }
+};
+
+export const seedTechnicalTerms = async (terms = []) => {
+  if (!db) {
+    throw new Error('Firebase database not initialized');
+  }
+
+  if (!Array.isArray(terms) || terms.length === 0) {
+    return { created: 0, updated: 0 };
+  }
+
+  const slugify = (value) => {
+    const base = (value || '').toString().toLowerCase();
+    const slug = base.replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+    return slug || `term-${Date.now()}`;
+  };
+
+  let created = 0;
+  let updated = 0;
+
+  for (const entry of terms) {
+    const rawTerm = (entry?.term || entry?.name || '').trim();
+    if (!rawTerm) {
+      continue;
+    }
+
+    const description = (entry?.description || '').trim();
+    const full = (entry?.full || entry?.fullName || '').trim();
+    const docId = slugify(rawTerm);
+    const docRef = doc(db, TECHNICAL_TERMS_COLLECTION, docId);
+    const snapshot = await getDoc(docRef);
+    const existing = snapshot.exists() ? snapshot.data() || {} : {};
+
+    const payload = {
+      term: rawTerm,
+      termLower: rawTerm.toLowerCase(),
+      description: description || existing.description || '',
+      full: full || existing.full || null,
+      updatedAt: serverTimestamp(),
+    };
+
+    if (snapshot.exists()) {
+      if (typeof existing.usageScore === 'number') {
+        payload.usageScore = existing.usageScore;
+      }
+      updated += 1;
+    } else {
+      payload.createdAt = serverTimestamp();
+      payload.usageScore = 0;
+      created += 1;
+    }
+
+    await setDoc(docRef, payload, { merge: true });
+  }
+
+  return { created, updated };
+};
+
+const mapTechnicalTermDoc = (docSnap) => {
+  const data = docSnap.data() || {};
+  const normalized = normalizeTechnicalTerm({
+    ...data,
+    termId: docSnap.id,
+    id: docSnap.id,
+  });
+  if (!normalized) {
+    return null;
+  }
+  return {
+    ...normalized,
+    termId: normalized.termId || docSnap.id,
+    usageScore: typeof normalized.usageScore === 'number' ? normalized.usageScore : 0,
+  };
+};
+
+export const fetchTechnicalTerms = async (limitTo = 200) => {
+  if (!db) {
+    throw new Error('Firebase database not initialized');
+  }
+
+  try {
+    const termsRef = collection(db, TECHNICAL_TERMS_COLLECTION);
+    const constraints = [orderBy('usageScore', 'desc'), orderBy('termLower')];
+    if (limitTo && Number.isFinite(limitTo)) {
+      constraints.push(limit(limitTo));
+    }
+
+    let snapshot;
+    try {
+      snapshot = await getDocs(query(termsRef, ...constraints));
+    } catch (error) {
+      console.warn('Falling back to unsorted technical terms fetch:', error);
+      snapshot = await getDocs(termsRef);
+    }
+
+    return snapshot.docs.map(mapTechnicalTermDoc).filter(Boolean);
+  } catch (error) {
+    console.error('Error fetching technical terms:', error);
+    throw new Error(`Failed to fetch technical terms: ${error.message}`);
+  }
+};
+
+export const addTechnicalTerm = async ({ term, description, full, category }) => {
+  if (!db) {
+    throw new Error('Firebase database not initialized');
+  }
+
+  const trimmedTerm = (term || '').trim();
+  const trimmedDescription = (description || '').trim();
+  const trimmedFull = (full || '').trim();
+  const trimmedCategory = (category || '').trim();
+
+  if (!trimmedTerm) {
+    throw new Error('Technical term is required');
+  }
+  if (!trimmedDescription) {
+    throw new Error('Description is required');
+  }
+
+  try {
+    const termsRef = collection(db, TECHNICAL_TERMS_COLLECTION);
+    const duplicateSnap = await getDocs(
+      query(termsRef, where('termLower', '==', trimmedTerm.toLowerCase()))
+    );
+
+    if (!duplicateSnap.empty) {
+      throw new Error('This technical term already exists.');
+    }
+
+    const payload = {
+      term: trimmedTerm,
+      termLower: trimmedTerm.toLowerCase(),
+      description: trimmedDescription,
+      full: trimmedFull || null,
+      category: trimmedCategory || null,
+      usageScore: 0,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+      lastUsedAt: null,
+    };
+
+    const currentUserId = auth?.currentUser?.uid || null;
+    if (currentUserId) {
+      payload.createdBy = currentUserId;
+    }
+
+    const docRef = await addDoc(termsRef, payload);
+    const docSnap = await getDoc(docRef);
+    const created = mapTechnicalTermDoc(docSnap);
+    return created || normalizeTechnicalTerm({ ...payload, termId: docRef.id });
+  } catch (error) {
+    console.error('Error adding technical term:', error);
+    throw new Error(`Failed to add technical term: ${error.message}`);
+  }
+};
+
+export const incrementTechnicalTermUsage = async (termId) => {
+  if (!db || !termId) {
+    return;
+  }
+
+  try {
+    const termRef = doc(db, TECHNICAL_TERMS_COLLECTION, termId);
+    await updateDoc(termRef, {
+      usageScore: increment(1),
+      lastUsedAt: serverTimestamp(),
+    });
+  } catch (error) {
+    console.warn('Unable to increment technical term usage:', error);
   }
 };
 
@@ -905,6 +1081,12 @@ const fetchCaseDocsForUser = async (userId) => {
       
       const finalUserId = userId || getCurrentUserId();
       
+      const casesQuery = query(
+        collection(db, CASES_COLLECTION),
+        where('userId', '==', finalUserId)
+      );
+      
+      const querySnapshot = await getDocs(casesQuery);
       const stats = {
         totalCases: 0,
         casesWithLocations: 0,

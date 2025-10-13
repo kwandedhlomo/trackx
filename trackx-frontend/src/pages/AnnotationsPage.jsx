@@ -27,9 +27,13 @@ function AnnotationsPage() {
   const { profile } = useAuth();
   const [showMenu, setShowMenu] = useState(false);
   const { modalState, openModal, closeModal } = useNotificationModal();
+  // ADD: interactive Street View
+  const streetViewContainerRef = useRef(null);
+  const panoramaRef = useRef(null);
+  const [isGoogleMapsLoaded, setIsGoogleMapsLoaded] = useState(false);
 
-  // at top of AnnotationsPage.jsx
-const isNum = (v) => typeof v === "number" && !Number.isNaN(v);
+    // at top of AnnotationsPage.jsx
+  const isNum = (v) => typeof v === "number" && !Number.isNaN(v);
 
     
   // Refs for capturing snapshots
@@ -61,6 +65,13 @@ const isNum = (v) => typeof v === "number" && !Number.isNaN(v);
   const [saveError, setSaveError] = useState(null);
 
   const [isGenerating, setIsGenerating] = useState(false);
+  const formattedDateTime = new Date().toLocaleString();
+
+  // ADD: click-away saver
+  const handleBlur = () => {
+    if (!isLoading) saveAllAnnotations();
+  };
+
 
   const generateAIDescription = async () => {
     if (!currentCaseId) {
@@ -109,6 +120,50 @@ const isNum = (v) => typeof v === "number" && !Number.isNaN(v);
 
   // Google Maps API Key 
   const GOOGLE_MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
+
+  // ADD: Load Google Maps JS API
+  useEffect(() => {
+    if (window.google && window.google.maps) {
+      setIsGoogleMapsLoaded(true);
+      return;
+    }
+    const script = document.createElement("script");
+    script.src = `https://maps.googleapis.com/maps/api/js?key=${GOOGLE_MAPS_API_KEY}&libraries=places`;
+    script.async = true;
+    script.defer = true;
+    script.onload = () => setIsGoogleMapsLoaded(true);
+    script.onerror = () => console.error("Failed to load Google Maps API");
+    document.head.appendChild(script);
+  }, [GOOGLE_MAPS_API_KEY]);
+
+  // ADD: Mount/refresh Street View panorama when location changes
+useEffect(() => {
+  if (!isGoogleMapsLoaded || !streetViewContainerRef.current) return;
+  const loc = locations[currentIndex];
+  if (!loc || !isNum(loc.lat) || !isNum(loc.lng)) return;
+
+  const position = { lat: Number(loc.lat), lng: Number(loc.lng) };
+
+  if (!panoramaRef.current) {
+    panoramaRef.current = new window.google.maps.StreetViewPanorama(
+      streetViewContainerRef.current,
+      {
+        position,
+        pov: { heading: 70, pitch: 0 },
+        zoom: 1,
+        addressControl: true,
+        linksControl: true,
+        panControl: true,
+        fullscreenControl: true,
+        motionTracking: true,
+        motionTrackingControl: true,
+      }
+    );
+  } else {
+    panoramaRef.current.setPosition(position);
+  }
+}, [currentIndex, locations, isGoogleMapsLoaded]);
+
 
   // helper
   async function fetchDataUrlViaProxy(rawUrl) {
@@ -267,64 +322,76 @@ const isNum = (v) => typeof v === "number" && !Number.isNaN(v);
     }
   };
   
-  // REPLACE your captureSnapshots with this:
-  const captureSnapshots = async () => {
-    const loc = locations[currentIndex];
-    if (!loc) return;
+// REPLACE your captureSnapshots with POV-aware version
+const captureSnapshots = async () => {
+  const loc = locations[currentIndex];
+  if (!loc) return;
 
-    const mapUrl = getGoogleMapUrl(loc);
-    const svUrl  = getStreetViewUrl(loc);
-    if (!mapUrl && !svUrl) {
-      openModal({
-        variant: "info",
-        title: "Imagery unavailable",
-        description: "We couldn't retrieve map or street view imagery for this location.",
-      });
-      return;
-    }
+  const mapUrl = getGoogleMapUrl(loc);
+  let svUrl = getStreetViewUrl(loc);
 
-    setIsCapturingSnapshot(true);
+  // If interactive panorama exists, snapshot with its current POV/position
+  if (panoramaRef.current) {
     try {
-      const [mapImage, streetViewImage] = await Promise.all([
-        mapUrl ? fetchDataUrlViaProxy(mapUrl) : Promise.resolve(null),
-        svUrl  ? fetchDataUrlViaProxy(svUrl)  : Promise.resolve(null),
-      ]);
-
-      const newSnapshot = {
-        index: currentIndex,
-        mapImage,                // data:image/*;base64,…
-        streetViewImage,         // data:image/*;base64,…
-        title: annotations[currentIndex]?.title || "",
-        description: annotations[currentIndex]?.description || "",
-      };
-
-      const next = [...(snapshots || [])];
-      while (next.length <= currentIndex) next.push(null);
-      next[currentIndex] = newSnapshot;
-
-      setSnapshots(next);
-      setSnapshotCaptured(true);
-      sessionStorage.setItem("locationSnapshots", JSON.stringify(next));
-      console.log("Snapshots captured (via proxy) for location", currentIndex);
-      openModal({
-        variant: "success",
-        title: "Snapshots captured",
-        description: "Map and street view imagery were saved for this location.",
-      });
-    } catch (err) {
-      console.error("Error capturing snapshots via proxy:", err);
-      openModal({
-        variant: "error",
-        title: "Snapshot capture failed",
-        description: getFriendlyErrorMessage(
-          err,
-          "We couldn't capture imagery for this location. Please try again."
-        ),
-      });
-    } finally {
-      setIsCapturingSnapshot(false);
+      const pov = panoramaRef.current.getPov();
+      const pos = panoramaRef.current.getPosition();
+      const lat = typeof pos.lat === "function" ? pos.lat() : pos.lat;
+      const lng = typeof pos.lng === "function" ? pos.lng() : pos.lng;
+      svUrl = `https://maps.googleapis.com/maps/api/streetview?size=600x300&location=${lat},${lng}&fov=80&heading=${Math.round(pov.heading)}&pitch=${Math.round(pov.pitch)}&key=${GOOGLE_MAPS_API_KEY}`;
+    } catch (e) {
+      console.warn("Unable to read panorama POV; falling back to default Street View URL.", e);
     }
-  };
+  }
+
+  if (!mapUrl && !svUrl) {
+    openModal({
+      variant: "info",
+      title: "Imagery unavailable",
+      description: "We couldn't retrieve map or street view imagery for this location.",
+    });
+    return;
+  }
+
+  setIsCapturingSnapshot(true);
+  try {
+    const [mapImage, streetViewImage] = await Promise.all([
+      mapUrl ? fetchDataUrlViaProxy(mapUrl) : Promise.resolve(null),
+      svUrl ? fetchDataUrlViaProxy(svUrl) : Promise.resolve(null),
+    ]);
+
+    const newSnapshot = {
+      index: currentIndex,
+      mapImage,
+      streetViewImage,
+      title: annotations[currentIndex]?.title || "",
+      description: annotations[currentIndex]?.description || "",
+    };
+
+    const next = [...(snapshots || [])];
+    while (next.length <= currentIndex) next.push(null);
+    next[currentIndex] = newSnapshot;
+
+    setSnapshots(next);
+    setSnapshotCaptured(true);
+    sessionStorage.setItem("locationSnapshots", JSON.stringify(next));
+
+    openModal({
+      variant: "success",
+      title: "Snapshots captured",
+      description: "Map and street view imagery were saved for this location.",
+    });
+  } catch (err) {
+    console.error("Error capturing snapshots via proxy:", err);
+    openModal({
+      variant: "error",
+      title: "Snapshot capture failed",
+      description: getFriendlyErrorMessage(err, "We couldn't capture imagery for this location. Please try again."),
+    });
+  } finally {
+    setIsCapturingSnapshot(false);
+  }
+};
+
 
   // Load from localStorage fallback
   const loadFromLocalStorage = async () => {
@@ -553,19 +620,11 @@ useEffect(() => {
     setSnapshotCaptured(!!currentSnapshot);
   }, [currentIndex, snapshots]);
 
-  // FIXED: Auto-save functionality with proper debouncing
-  useEffect(() => {
-    if (!isLoading && annotations.length > 0 && !isSaving && currentCaseId) {
-      const timeoutId = setTimeout(() => {
-        saveAllAnnotations();
-      }, 3000); // Auto-save after 3 seconds of inactivity
-      
-      return () => clearTimeout(timeoutId);
-    }
-  }, [annotations, selectedForReport, isLoading, currentCaseId]);
   
   // Get current location
   const currentLocation = locations[currentIndex] || null;
+  const totalLocations = locations.length;
+  const selectedCount = selectedForReport.length;
   
   // Handle navigation between locations
   const goToPrevious = () => {
@@ -677,9 +736,16 @@ useEffect(() => {
   
   // Check if the current location is selected for the report
   const isCurrentLocationSelected = selectedForReport.includes(currentIndex);
+  const savingStatus = isSaving
+    ? "Saving…"
+    : saveError
+    ? saveError
+    : lastSaved
+    ? `Saved ${lastSaved}`
+    : "";
   
   // Calculate progress indicator
-  const progressText = `Location ${currentIndex + 1} of ${locations.length}`;
+  const progressText = `Location ${currentIndex + 1} of ${totalLocations}`;
   
   // Format coordinate display
   const formatCoordinate = (coord) => {
@@ -708,10 +774,11 @@ useEffect(() => {
   // Show loading state
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-black text-white flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500 mx-auto mb-4"></div>
-          <p className="text-gray-300">Loading location data...</p>
+      <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-gradient-to-br from-black via-gray-900 to-black text-white">
+        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top,_rgba(30,64,175,0.22),_transparent_55%)]" />
+        <div className="relative rounded-3xl border border-white/10 bg-white/[0.03] px-10 py-12 text-center shadow-[0_35px_90px_rgba(15,23,42,0.65)] backdrop-blur-xl">
+          <div className="mx-auto mb-4 h-12 w-12 animate-spin rounded-full border-b-2 border-t-2 border-blue-700" />
+          <p className="text-sm text-gray-300">Loading location data…</p>
         </div>
       </div>
     );
@@ -720,26 +787,38 @@ useEffect(() => {
   // Show error state
   if (error) {
     return (
-      <div className="min-h-screen bg-black text-white flex flex-col items-center justify-center">
-        <AlertTriangle className="text-red-500 w-12 h-12 mb-4" />
-        <h1 className="text-xl font-bold mb-2">Error</h1>
-        <p className="text-gray-400">{error}</p>
-        <Link to="/new-case" className="mt-8 px-4 py-2 bg-blue-700 hover:bg-blue-600 rounded text-white">
-          Go to Case Information
-        </Link>
+      <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-gradient-to-br from-black via-gray-900 to-black text-white">
+        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_bottom,_rgba(88,28,135,0.25),_transparent_60%)]" />
+        <div className="relative flex w-full max-w-md flex-col items-center rounded-3xl border border-white/10 bg-white/[0.03] px-10 py-12 text-center shadow-[0_35px_90px_rgba(15,23,42,0.65)] backdrop-blur-xl">
+          <AlertTriangle className="mb-4 h-12 w-12 text-rose-400" />
+          <h1 className="text-xl font-semibold">Something went wrong</h1>
+          <p className="mt-2 text-sm text-gray-300">{error}</p>
+          <Link
+            to="/new-case"
+            className="mt-8 inline-flex items-center gap-2 rounded-full border border-white/10 bg-gradient-to-r from-blue-900 via-slate-900 to-purple-900 px-5 py-2 text-sm font-semibold text-white shadow-[0_25px_65px_rgba(15,23,42,0.6)] transition hover:-translate-y-0.5"
+          >
+            Return to Case Information
+          </Link>
+        </div>
       </div>
     );
   }
-  
+
   if (locations.length === 0) {
     return (
-      <div className="min-h-screen bg-black text-white flex flex-col items-center justify-center">
-        <AlertTriangle className="text-yellow-500 w-12 h-12 mb-4" />
-        <h1 className="text-xl font-bold mb-2">No Locations Found</h1>
-        <p className="text-gray-400">No stopped vehicle locations were found in your data.</p>
-        <Link to="/new-case" className="mt-8 px-4 py-2 bg-blue-700 hover:bg-blue-600 rounded text-white">
-          Return to Case Information
-        </Link>
+      <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-gradient-to-br from-black via-gray-900 to-black text-white">
+        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top,_rgba(30,64,175,0.2),_transparent_55%)]" />
+        <div className="relative flex w-full max-w-md flex-col items-center rounded-3xl border border-white/10 bg-white/[0.03] px-10 py-12 text-center shadow-[0_35px_90px_rgba(15,23,42,0.65)] backdrop-blur-xl">
+          <AlertTriangle className="mb-4 h-12 w-12 text-amber-300" />
+          <h1 className="text-xl font-semibold">No Locations Found</h1>
+          <p className="mt-2 text-sm text-gray-300">We didn’t detect any stopped vehicle points in your upload.</p>
+          <Link
+            to="/new-case"
+            className="mt-8 inline-flex items-center gap-2 rounded-full border border-white/10 bg-gradient-to-r from-blue-900 via-slate-900 to-purple-900 px-5 py-2 text-sm font-semibold text-white shadow-[0_25px_65px_rgba(15,23,42,0.6)] transition hover:-translate-y-0.5"
+          >
+            Return to Case Information
+          </Link>
+        </div>
       </div>
     );
   }
@@ -755,91 +834,113 @@ useEffect(() => {
       <div className="absolute inset-0 bg-gradient-to-br from-black via-gray-900 to-black -z-10" />
   
       {/* Navbar */}
-      <div className="flex items-center justify-between px-6 py-4 bg-gradient-to-r from-black to-gray-900 shadow-md">
-        <div className="flex items-center space-x-4">
-          <div className="text-3xl cursor-pointer" onClick={() => setShowMenu(!showMenu)}>
+      <nav className="mx-6 mt-6 flex items-center justify-between rounded-3xl border border-white/10 bg-gradient-to-br from-black/85 via-slate-900/70 to-black/80 px-6 py-4 shadow-xl shadow-[0_25px_65px_rgba(8,11,24,0.65)] backdrop-blur-xl">
+        <div className="flex items-center gap-4">
+          <button
+            type="button"
+            onClick={() => setShowMenu(!showMenu)}
+            className="flex h-11 w-11 items-center justify-center rounded-full border border-white/10 bg-white/[0.02] text-xl text-white shadow-inner shadow-white/5 transition hover:bg-white/10"
+            aria-label="Toggle navigation"
+          >
             &#9776;
-          </div>
-          <Link to="/home">
-            <img src={adflogo} alt="Logo" className="h-12 cursor-pointer hover:opacity-80 transition" />
+          </button>
+
+          <Link to="/home" className="hidden sm:block">
+            <img
+              src={adflogo}
+              alt="ADF Logo"
+              className="h-11 w-auto drop-shadow-[0_10px_20px_rgba(59,130,246,0.35)] transition hover:opacity-90"
+            />
           </Link>
         </div>
-  
-        <h1 className="text-xl font-bold text-white">Annotations</h1>
-  
-        <div className="flex items-center space-x-4">
-          <div className="text-sm">
-            {isSaving && <span className="text-yellow-400">Saving...</span>}
-            {saveError && <span className="text-red-400">{saveError}</span>}
-            {lastSaved && !isSaving && !saveError && (
-              <span className="text-green-400">Saved {lastSaved}</span>
+
+        <div className="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 text-2xl font-semibold tracking-[0.35em] text-white/80 drop-shadow-[0_2px_12px_rgba(15,23,42,0.55)]">
+          ANNOTATIONS
+        </div>
+
+        <div className="flex items-center gap-6 text-sm text-gray-200">
+          <div className="hidden text-right sm:block">
+            {savingStatus && (
+              <span className={saveError ? "text-rose-300" : isSaving ? "text-amber-300" : "text-emerald-300"}>
+                {savingStatus}
+              </span>
             )}
-            {currentCaseId && !isSaving && !saveError && (
-              <span className="text-xs text-gray-400 block">Cloud sync enabled</span>
+            {currentCaseId && !saveError && !isSaving && (
+              <span className="block text-xs text-gray-400">Cloud sync enabled</span>
             )}
           </div>
-          <div>
-            <p className="text-sm">{profile ? `${profile.firstName} ${profile.surname}` : "Loading..."}</p>
-            <button onClick={handleSignOut} className="text-red-400 hover:text-red-600 text-xs">Sign Out</button>
+          <div className="flex flex-col items-end">
+            <span className="text-base font-semibold text-white">
+              {profile ? `${profile.firstName || ""} ${profile.surname || ""}`.trim() || "Loading..." : "Loading..."}
+            </span>
+            <button
+              onClick={handleSignOut}
+              className="text-xs text-gray-400 transition hover:text-white"
+            >
+              Sign Out
+            </button>
+          </div>
+          <div className="rounded-full bg-white/[0.02] px-3 py-1.5 text-xs font-medium text-gray-400 shadow-inner shadow-white/5">
+            {formattedDateTime}
           </div>
         </div>
-      </div>
-  
+      </nav>
+
       {/* Hamburger Menu Content */}
       {showMenu && (
-        <div className="absolute top-16 left-0 w-64 rounded-r-3xl border border-white/10 bg-gradient-to-br from-gray-900/95 to-black/90 backdrop-blur-xl p-6 z-30 shadow-2xl space-y-2">
+        <div className="absolute left-6 top-32 z-30 w-64 space-y-2 rounded-3xl border border-white/10 bg-gradient-to-br from-slate-950/85 via-slate-900/78 to-black/78 p-6 shadow-2xl shadow-[0_30px_60px_rgba(30,58,138,0.45)] backdrop-blur-2xl">
           <Link
             to="/home"
-            className="flex items-center gap-3 px-3 py-2 rounded-2xl text-sm font-medium text-gray-200 hover:text-white hover:bg-white/10 transition"
+            className="flex items-center gap-3 rounded-2xl px-3 py-2 text-sm font-medium text-gray-200 transition hover:bg-white/10 hover:text-white"
             onClick={() => setShowMenu(false)}
           >
-            <Home className="w-4 h-4" />
+            <Home className="h-4 w-4" />
             Home
           </Link>
           <Link
             to="/new-case"
-            className="flex items-center gap-3 px-3 py-2 rounded-2xl text-sm font-medium text-gray-200 hover:text-white hover:bg-white/10 transition"
+            className="flex items-center gap-3 rounded-2xl px-3 py-2 text-sm font-medium text-gray-200 transition hover:bg-white/10 hover:text-white"
             onClick={() => setShowMenu(false)}
           >
-            <FilePlus2 className="w-4 h-4" />
+            <FilePlus2 className="h-4 w-4" />
             Create New Case
           </Link>
           <Link
             to="/manage-cases"
-            className="flex items-center gap-3 px-3 py-2 rounded-2xl text-sm font-medium text-gray-200 hover:text-white hover:bg-white/10 transition"
+            className="flex items-center gap-3 rounded-2xl px-3 py-2 text-sm font-medium text-gray-200 transition hover:bg-white/10 hover:text-white"
             onClick={() => setShowMenu(false)}
           >
-            <FolderOpen className="w-4 h-4" />
+            <FolderOpen className="h-4 w-4" />
             Manage Cases
           </Link>
-          <div className="flex items-center gap-3 px-3 py-2 rounded-2xl text-sm font-medium text-white bg-white/10">
-            <MapPin className="w-4 h-4" />
+          <div className="flex items-center gap-3 rounded-2xl px-3 py-2 text-sm font-medium text-white bg-white/[0.045] shadow-inner shadow-white/10">
+            <MapPin className="h-4 w-4" />
             Annotations
           </div>
           <Link
             to="/overview"
-            className="flex items-center gap-3 px-3 py-2 rounded-2xl text-sm font-medium text-gray-200 hover:text-white hover:bg-white/10 transition"
+            className="flex items-center gap-3 rounded-2xl px-3 py-2 text-sm font-medium text-gray-200 transition hover:bg-white/10 hover:text-white"
             onClick={() => setShowMenu(false)}
           >
-            <FileText className="w-4 h-4" />
+            <FileText className="h-4 w-4" />
             Overview
           </Link>
           <Link
             to="/my-cases"
-            className="flex items-center gap-3 px-3 py-2 rounded-2xl text-sm font-medium text-gray-200 hover:text-white hover:bg-white/10 transition"
+            className="flex items-center gap-3 rounded-2xl px-3 py-2 text-sm font-medium text-gray-200 transition hover:bg-white/10 hover:text-white"
             onClick={() => setShowMenu(false)}
           >
-            <Briefcase className="w-4 h-4" />
+            <Briefcase className="h-4 w-4" />
             My Cases
           </Link>
 
           {profile?.role === "admin" && (
             <Link
               to="/admin-dashboard"
-              className="flex items-center gap-3 px-3 py-2 rounded-2xl text-sm font-medium text-gray-200 hover:text-white hover:bg-white/10 transition"
+              className="flex items-center gap-3 rounded-2xl px-3 py-2 text-sm font-medium text-gray-200 transition hover:bg-white/10 hover:text-white"
               onClick={() => setShowMenu(false)}
             >
-              <LayoutDashboard className="w-4 h-4" />
+              <LayoutDashboard className="h-4 w-4" />
               Admin Dashboard
             </Link>
           )}
@@ -847,296 +948,349 @@ useEffect(() => {
       )}
 
       {/* Nav Tabs */}
-      <div className="flex justify-center space-x-8 bg-gradient-to-r from-black to-gray-900 bg-opacity-80 backdrop-blur-md py-2 text-white text-sm">
-        <Link to="/new-case" className="text-gray-300 hover:text-white">
+      <div className="mx-6 mt-6 flex justify-center gap-8 rounded-full border border-white/10 bg-white/[0.02] px-6 py-2 text-xs font-semibold text-gray-300 shadow-[0_15px_40px_rgba(15,23,42,0.45)] backdrop-blur-xl">
+        <Link to="/new-case" className="text-gray-400 transition hover:text-white">
           Case Information
         </Link>
-        <span className="inline-flex items-center rounded-full bg-white/15 px-4 py-1.5 font-semibold text-white">
+        <span className="inline-flex items-center rounded-full bg-gradient-to-r from-blue-900/85 to-purple-900/85 px-5 py-1.5 text-white shadow-[0_12px_30px_rgba(15,23,42,0.45)]">
           Annotations
         </span>
         <Link
           to="/overview"
-          onClick={(e) => { e.preventDefault(); saveAllAnnotations().then(() => navigate("/overview")); }}
-          className="text-gray-300 hover:text-white"
+          onClick={(e) => {
+            e.preventDefault();
+            saveAllAnnotations().then(() => navigate("/overview"));
+          }}
+          className="text-gray-400 transition hover:text-white"
         >
           Overview
         </Link>
       </div>
-
-      {/* Case Information Bar */}
-      <div className="bg-gradient-to-r from-black to-gray-900 bg-opacity-80 backdrop-blur-md border-b border-white/10 py-3 px-6">
-        <div className="flex flex-wrap justify-between text-sm text-gray-200">
-          <div className="mr-6 mb-1">
-            <span className="text-gray-400">Case:</span> {caseDetails.caseNumber}
-          </div>
-          <div className="mr-6 mb-1">
-            <span className="text-gray-400">Title:</span> {caseDetails.caseTitle}
-          </div>
-          <div className="mr-6 mb-1">
-            <span className="text-gray-400">Date:</span> {caseDetails.dateOfIncident}
-          </div>
-          <div className="mb-1">
-            <span className="text-gray-400">Region:</span> {caseDetails.region}
-          </div>
-        </div>
-      </div>
-
-      {/* Main Content */}
+      
       {currentLocation && (
-        <div className="max-w-6xl mx-auto px-6 py-8">
-          {/* Location Info and Include in Report Checkbox */}
-          <div className="mb-6 flex justify-between items-center">
-            <div className="flex items-center space-x-2">
-              <MapPin className="text-blue-500" />
-              <h2 className="text-xl font-semibold">{getLocationAddress(currentLocation)}</h2>
-            </div>
-            <div className="flex items-center space-x-4">
-              <div className="text-gray-400">{progressText}</div>
-              <div className="flex items-center">
-                <input
-                  type="checkbox"
-                  id="includeInReport"
-                  checked={isCurrentLocationSelected}
-                  onChange={toggleLocationSelection}
-                  className="form-checkbox h-5 w-5 text-blue-600 rounded border-gray-600 bg-gray-700 focus:ring-blue-500"
-                />
-                <label htmlFor="includeInReport" className="ml-2 text-sm text-gray-300">
-                  Include in Report
-                </label>
+        <div className="relative mx-auto mt-10 w-full max-w-6xl px-6 pb-20">
+          <section className="relative z-10 mb-8 space-y-6 overflow-hidden rounded-3xl border border-white/10 bg-white/[0.02] px-8 py-8 shadow-[0_35px_90px_rgba(15,23,42,0.55)] backdrop-blur-2xl">
+            <div className="pointer-events-none absolute -top-24 right-0 h-48 w-48 rounded-full bg-blue-900/20 blur-3xl" />
+            <div className="pointer-events-none absolute -bottom-28 left-4 h-56 w-56 rounded-full bg-purple-900/20 blur-3xl" />
+            <div className="relative z-10 flex flex-col gap-6 lg:flex-row lg:items-start lg:justify-between">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.35em] text-gray-400">Case Overview</p>
+                <h2 className="mt-2 text-2xl font-semibold text-white">{caseDetails.caseTitle || "Untitled Case"}</h2>
+                <div className="mt-4 grid grid-cols-1 gap-3 text-sm text-gray-300 sm:grid-cols-2">
+                  <div>
+                    <span className="text-gray-400">Case #</span>
+                    <p className="font-medium text-white">{caseDetails.caseNumber || "N/A"}</p>
+                  </div>
+                  <div>
+                    <span className="text-gray-400">Date</span>
+                    <p className="font-medium text-white">{caseDetails.dateOfIncident || "N/A"}</p>
+                  </div>
+                  <div>
+                    <span className="text-gray-400">Region</span>
+                    <p className="font-medium text-white">{caseDetails.region || "Not specified"}</p>
+                  </div>
+                  <div>
+                    <span className="text-gray-400">Between</span>
+                    <p className="font-medium text-white">{caseDetails.between || "Not specified"}</p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex flex-col gap-3">
+                <div className="rounded-2xl border border-white/10 bg-white/[0.045] px-4 py-3 text-sm text-gray-300 shadow-inner shadow-white/10">
+                  <div className="flex items-center justify-between">
+                    <span className="font-medium text-white">Progress</span>
+                    {savingStatus && (
+                      <span className={`text-xs uppercase tracking-wide ${
+                        saveError ? "text-rose-300" : isSaving ? "text-amber-300" : "text-emerald-300"
+                      }`}>
+                        {savingStatus}
+                      </span>
+                    )}
+                  </div>
+                  <div className="mt-3 flex items-center justify-between text-xs text-gray-300">
+                    <span className="rounded-full border border-white/10 bg-white/[0.06] px-3 py-1 text-white">{progressText}</span>
+                    <div className="flex items-center gap-2">
+                      <span className="rounded-full border border-white/10 bg-white/[0.06] px-3 py-1 text-white">{selectedCount} selected</span>
+                      <span className="rounded-full border border-white/10 bg-white/[0.06] px-3 py-1 text-gray-300">{totalLocations} total</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between rounded-2xl border border-white/10 bg-white/[0.02] px-4 py-3 text-sm text-gray-300 shadow-inner shadow-white/5">
+                  <span>Include this location in report</span>
+                  <label className="inline-flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      id="includeInReport"
+                      checked={isCurrentLocationSelected}
+                      onChange={toggleLocationSelection}
+                      className="h-5 w-5 rounded border-white/20 bg-black/40 text-blue-600 focus:ring-blue-500"
+                    />
+                    <span className="text-xs text-gray-300">{isCurrentLocationSelected ? "Selected" : "Excluded"}</span>
+                  </label>
+                </div>
               </div>
             </div>
-          </div>
+          </section>
 
-          {/* Auto-save Status */}
-          <div className="mb-4 p-3 rounded bg-gray-800 bg-opacity-50">
-            <div className="flex items-center justify-between">
-              <div className="text-sm text-gray-400">
-                Annotations are automatically saved every 3 seconds
-                {currentCaseId && (
-                  <span className="text-green-400 ml-2">✓ Cloud sync enabled</span>
-                )}
-                {!currentCaseId && (
-                  <span className="text-yellow-400 ml-2">⚠ Local storage only</span>
+          <section className="relative z-10 space-y-8 rounded-3xl border border-white/10 bg-white/[0.02] px-6 py-8 shadow-[0_35px_90px_rgba(15,23,42,0.55)] backdrop-blur-2xl">
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+              <div className="flex items-center gap-2 text-lg font-semibold text-white">
+                <MapPin className="h-5 w-5 text-blue-400" />
+                {getLocationAddress(currentLocation)}
+              </div>
+              <div className="flex flex-wrap items-center gap-3 text-sm text-gray-300">
+                {currentCaseId ? (
+                  <span className="rounded-full border border-emerald-400/30 bg-emerald-500/10 px-3 py-1 text-emerald-200">
+                    ✓ Cloud sync enabled
+                  </span>
+                ) : (
+                  <span className="rounded-full border border-amber-400/30 bg-amber-500/10 px-3 py-1 text-amber-200">
+                    ⚠ Local storage only
+                  </span>
                 )}
               </div>
-              <button
-                onClick={saveAllAnnotations}
-                disabled={isSaving}
-                className="px-3 py-1 bg-green-600 hover:bg-green-700 disabled:bg-gray-600 text-white text-sm rounded transition-colors"
-              >
-                {isSaving ? 'Saving...' : 'Save Now'}
-              </button>
             </div>
-          </div>
 
-          {/* FIXED: Snapshot Status Indicator - Manual capture only */}
-          <div className={`mb-4 p-3 rounded flex items-center ${snapshotCaptured ? 'bg-green-900 bg-opacity-30' : 'bg-gray-800 bg-opacity-50'}`}>
-            <div className={`mr-3 p-1 rounded-full ${snapshotCaptured ? 'bg-green-500' : 'bg-gray-500'}`}>
-              <Camera size={18} className="text-white" />
-            </div>
-            <div className="flex-grow">
-              <p className={snapshotCaptured ? 'text-green-400' : 'text-gray-400'}>
-                {snapshotCaptured 
-                  ? "Snapshots have been captured for this location" 
-                  : "No snapshots captured. Click 'Capture Snapshots' to save map and street view images."}
-              </p>
-            </div>
-            <div className="flex space-x-2">
-              <button
-                onClick={captureSnapshots}
-                disabled={isCapturingSnapshot}
-                className={`px-4 py-2 rounded text-white ${
-                  isCapturingSnapshot 
-                    ? 'bg-gray-700 cursor-not-allowed' 
-                    : (snapshotCaptured ? 'bg-green-700 hover:bg-green-600' : 'bg-blue-700 hover:bg-blue-600')
-                }`}
-              >
-                {isCapturingSnapshot 
-                  ? 'Capturing...' 
-                  : (snapshotCaptured ? 'Recapture Snapshots' : 'Capture Snapshots')}
-              </button>
-              {snapshotCaptured && (
+            <div className="flex flex-col gap-3 rounded-2xl border border-white/10 bg-white/[0.02] px-4 py-3 text-sm text-gray-300 shadow-inner shadow-white/5">
+              <span>Annotations auto-save every 3 seconds.</span>
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <span className="text-xs text-gray-400">
+                  Work through each stop to build a compelling movement report for investigators and prosecutors.
+                </span>
                 <button
-                  onClick={deleteSnapshot}
-                  className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded"
+                  onClick={saveAllAnnotations}
+                  disabled={isSaving}
+                  className={`inline-flex items-center gap-2 rounded-full border border-white/10 px-4 py-2 text-xs font-semibold text-white transition ${
+                    isSaving
+                      ? "bg-white/[0.05] text-gray-400 cursor-not-allowed"
+                      : "bg-gradient-to-r from-emerald-800 to-teal-700 shadow-[0_15px_35px_rgba(15,23,42,0.55)] hover:-translate-y-0.5"
+                  }`}
                 >
-                  Delete Snapshots
+                  {isSaving ? "Saving…" : "Save Now"}
                 </button>
-              )}
+              </div>
             </div>
-          </div>
 
-          {/* Map Views and Annotation Form */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-            {/* Map Images */}
-            <div className="space-y-6">
-              {/* Google Maps View */}
-              <div className="bg-gray-800 rounded-lg overflow-hidden">
-                <div className="bg-gray-700 py-2 px-4 text-sm font-medium">Google Maps View</div>
-                <div className="h-64 bg-gray-900 flex items-center justify-center">
+            <div className={`flex flex-col gap-3 rounded-2xl border border-white/10 px-4 py-3 text-sm transition ${
+              snapshotCaptured
+                ? "bg-emerald-500/10 text-emerald-200 shadow-[0_18px_45px_rgba(16,185,129,0.35)]"
+                : "bg-white/[0.02] text-gray-300 shadow-inner shadow-white/5"
+            }`}>
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <div className={`flex h-8 w-8 items-center justify-center rounded-full border ${
+                    snapshotCaptured ? "border-emerald-500/50 bg-emerald-500/20" : "border-white/10 bg-white/[0.04]"
+                  }`}>
+                    <Camera size={18} className={snapshotCaptured ? "text-emerald-300" : "text-gray-300"} />
+                  </div>
+                  <div>
+                    <p className="font-semibold text-white">
+                      {snapshotCaptured ? "Imagery captured" : "Capture supporting imagery"}
+                    </p>
+                    <p className="text-xs text-gray-400">
+                      Save static map and street view snapshots to enrich your contextual notes.
+                    </p>
+                  </div>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    onClick={captureSnapshots}
+                    disabled={isCapturingSnapshot}
+                    className={`rounded-full border border-white/10 px-4 py-2 text-xs font-semibold text-white transition ${
+                      isCapturingSnapshot
+                        ? "bg-white/[0.05] text-gray-400 cursor-not-allowed"
+                        : "bg-gradient-to-r from-blue-900 via-slate-900 to-indigo-900 shadow-[0_15px_35px_rgba(15,23,42,0.55)] hover:-translate-y-0.5"
+                    }`}
+                  >
+                    {isCapturingSnapshot ? "Capturing…" : snapshotCaptured ? "Recapture Imagery" : "Capture Imagery"}
+                  </button>
+                  {snapshotCaptured && (
+                    <button
+                      onClick={deleteSnapshot}
+                      className="rounded-full border border-white/10 px-4 py-2 text-xs font-semibold text-white transition bg-gradient-to-r from-rose-900 to-red-900 shadow-[0_15px_35px_rgba(127,29,29,0.55)] hover:-translate-y-0.5"
+                    >
+                      Delete Snapshot
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            <div className="grid gap-6 lg:grid-cols-2">
+              <div className="overflow-hidden rounded-2xl border border-white/10 bg-white/[0.02] shadow-[0_18px_45px_rgba(15,23,42,0.45)]">
+                <div className="border-b border-white/10 bg-white/[0.04] px-4 py-3 text-sm font-medium text-gray-200">
+                  Map View
+                </div>
+                <div className="flex h-64 items-center justify-center bg-black/30">
                   {getGoogleMapUrl(currentLocation) ? (
-                    <img 
+                    <img
                       ref={mapImageRef}
-                      src={getGoogleMapUrl(currentLocation)} 
-                      alt="Map view of location" 
-                      className="w-full h-full object-cover"
+                      src={getGoogleMapUrl(currentLocation)}
+                      alt="Map view of location"
+                      className="h-full w-full object-cover"
                       onError={(e) => {
                         e.target.onerror = null;
                         e.target.src = "https://placehold.co/600x300?text=Map+View+Not+Available";
                       }}
-                      crossOrigin="anonymous" 
+                      crossOrigin="anonymous"
                     />
                   ) : (
-                    <div className="text-center text-gray-500">
+                    <div className="px-6 text-center text-sm text-gray-400">
                       <p className="mb-2">Unable to load map view</p>
                       <p className="text-xs">Coordinates: {formatCoordinate(currentLocation.lat)}, {formatCoordinate(currentLocation.lng)}</p>
                     </div>
                   )}
                 </div>
               </div>
+
               
-              {/* Street View */}
-              <div className="bg-gray-800 rounded-lg overflow-hidden">
-                <div className="bg-gray-700 py-2 px-4 text-sm font-medium">Google Street View</div>
-                <div className="h-64 bg-gray-900 flex items-center justify-center">
-                  {getStreetViewUrl(currentLocation) ? (
-                    <img 
-                      ref={streetViewImageRef}
-                      src={getStreetViewUrl(currentLocation)} 
-                      alt="Street view of location" 
-                      className="w-full h-full object-cover"
-                      onError={(e) => {
-                        e.target.onerror = null;
-                        e.target.src = "https://placehold.co/600x300?text=Street+View+Not+Available";
-                      }}
-                      crossOrigin="anonymous" 
-                    />
+              <div className="overflow-hidden rounded-2xl border border-white/10 bg-white/[0.02] shadow-[0_18px_45px_rgba(15,23,42,0.45)]">
+                <div className="border-b border-white/10 bg-white/[0.04] px-4 py-3 text-sm font-medium text-gray-200">
+                  Street View — Interactive 360°
+                </div>
+                <div className="flex h-64 items-center justify-center bg-black/30">
+                  {isGoogleMapsLoaded && isNum(currentLocation?.lat) && isNum(currentLocation?.lng) ? (
+                    <div ref={streetViewContainerRef} className="h-full w-full" />
                   ) : (
-                    <div className="text-center text-gray-500">
-                      <p className="mb-2">Street view not available for this location</p>
-                      <p className="text-xs">Street view may not be available in all areas</p>
-                    </div>
+                    // Fallback to static image or message if API not ready
+                    getStreetViewUrl(currentLocation) ? (
+                      <img
+                        ref={streetViewImageRef}
+                        src={getStreetViewUrl(currentLocation)}
+                        alt="Street view of location"
+                        className="h-full w-full object-cover"
+                        onError={(e) => {
+                          e.target.onerror = null;
+                          e.target.src = "https://placehold.co/600x300?text=Street+View+Not+Available";
+                        }}
+                        crossOrigin="anonymous"
+                      />
+                    ) : (
+                      <div className="px-6 text-center text-sm text-gray-400">
+                        <p className="mb-2">Street view not available for this location</p>
+                        <p className="text-xs">Street view may not be available in all areas</p>
+                      </div>
+                    )
                   )}
                 </div>
               </div>
             </div>
-            
-            {/* Annotation Form */}
-            <div className="bg-gray-800 rounded-lg overflow-hidden">
-              <div className="bg-gray-700 py-2 px-4 text-sm font-medium">Add Location Context</div>
-              <div className="p-4 space-y-4">
-                {/* Title */}
+
+            <div className="space-y-6 rounded-2xl border border-white/10 bg-white/[0.02] px-6 py-6 shadow-[0_18px_45px_rgba(15,23,42,0.45)]">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-baseline sm:justify-between">
                 <div>
-                  <label htmlFor="locationTitle" className="block text-sm font-medium text-gray-300 mb-1">
+                  <h3 className="text-lg font-semibold text-white">Add Location Context</h3>
+                  <p className="text-xs text-gray-400">Craft concise, prosecutable insights for this stop.</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={generateAIDescription}
+                  disabled={isGenerating}
+                  className={`inline-flex items-center gap-2 rounded-full border border-white/10 px-4 py-2 text-xs font-semibold text-white transition ${
+                    isGenerating
+                      ? "bg-white/[0.05] text-gray-400 cursor-not-allowed"
+                      : "bg-gradient-to-r from-purple-900 via-indigo-900 to-blue-900 shadow-[0_15px_35px_rgba(15,23,42,0.55)] hover:-translate-y-0.5"
+                  }`}
+                >
+                  {isGenerating ? "Generating…" : "Generate AI Description"}
+                </button>
+              </div>
+
+              <div className="space-y-4">
+                <div>
+                  <label htmlFor="locationTitle" className="mb-1 block text-sm font-medium text-gray-300">
                     Location Title
                   </label>
                   <input
                     type="text"
                     id="locationTitle"
                     placeholder="e.g. Suspect's Home, Fuel Station, etc."
-                    value={annotations[currentIndex]?.title || ''}
-                    onChange={(e) => updateAnnotation('title', e.target.value)}
-                    className="w-full p-2 bg-gray-900 border border-gray-700 rounded text-white"
+                    value={annotations[currentIndex]?.title || ""}
+                    onChange={(e) => updateAnnotation("title", e.target.value)}
+                    onBlur={handleBlur}
+                    className="w-full rounded-xl border border-white/10 bg-white/[0.02] px-3 py-2 text-sm text-white placeholder-gray-500 focus:border-blue-700/50 focus:outline-none focus:ring-2 focus:ring-blue-700/30"
                   />
                 </div>
-                
-                {/* FIXED: Description - always starts blank */}
+
                 <div>
-                  <label htmlFor="locationDescription" className="block text-sm font-medium text-gray-300 mb-1">
+                  <label htmlFor="locationDescription" className="mb-1 block text-sm font-medium text-gray-300">
                     Description
                   </label>
-
-                  <div className="mb-2">
-                    <button
-                      type="button"
-                      onClick={generateAIDescription}
-                      disabled={isGenerating}
-                      className={`px-3 py-2 rounded text-white ${isGenerating ? 'bg-gray-700' : 'bg-purple-700 hover:bg-purple-600'} text-sm`}
-                    >
-                      {isGenerating ? 'Generating…' : 'Generate AI Description'}
-                    </button>
-                  </div>
-
                   <textarea
                     id="locationDescription"
                     placeholder="Provide details about the significance of this location..."
-                    value={annotations[currentIndex]?.description || ''}
-                    onChange={(e) => updateAnnotation('description', e.target.value)}
-                    className="w-full p-2 bg-gray-900 border border-gray-700 rounded text-white h-64 resize-none"
+                    value={annotations[currentIndex]?.description || ""}
+                    onChange={(e) => updateAnnotation("description", e.target.value)}
+                    onBlur={handleBlur}
+                    className="h-56 w-full resize-none rounded-xl border border-white/10 bg-white/[0.02] px-3 py-3 text-sm text-white placeholder-gray-500 focus:border-blue-700/50 focus:outline-none focus:ring-2 focus:ring-blue-700/30"
                   />
                 </div>
 
-                
-                {/* Location Info Panel - FIXED: Show metadata separately */}
-                <div className="p-3 bg-gray-900 rounded border border-gray-700">
-                  <div className="grid grid-cols-2 gap-2 text-sm">
-                    <div>
-                      <p className="text-gray-400">
-                        <span className="font-semibold">Time:</span> {extractTimeFromLocation(currentLocation)}
-                      </p>
-                    </div>
-                    <div>
-                      <p className="text-gray-400">
-                        <span className="font-semibold">Status:</span> {currentLocation.ignitionStatus || "Unknown"}
-                      </p>
-                    </div>
-                    <div className="col-span-2 mt-2">
-                      <p className="text-gray-400">
-                        <span className="font-semibold">Coordinates:</span> {formatCoordinate(currentLocation.lat)}, {formatCoordinate(currentLocation.lng)}
-                      </p>
-                    </div>
-                    
-                    {/* Original CSV/PDF Data - kept separate from user annotations */}
-                    {currentLocation.originalData && (
-                      <div className="col-span-2 mt-2">
-                        <details className="text-xs">
-                          <summary className="text-blue-400 cursor-pointer">View original data from file</summary>
-                          <div className="mt-2 p-2 bg-gray-800 rounded max-h-32 overflow-y-auto">
-                            {currentLocation.originalData.csvDescription && (
-                              <div className="mb-2">
-                                <span className="text-gray-400">Original description:</span>
-                                <span className="text-white ml-2">{currentLocation.originalData.csvDescription}</span>
-                              </div>
-                            )}
-                            {currentLocation.originalData.rawData && Object.entries(currentLocation.originalData.rawData)
-                              .filter(([key]) => key !== 'annotation')
+                <div className="rounded-2xl border border-white/10 bg-white/[0.02] px-4 py-4 text-sm text-gray-300 shadow-inner shadow-white/5">
+                  <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                    <p>
+                      <span className="text-gray-400">Time:</span> <span className="text-white">{extractTimeFromLocation(currentLocation)}</span>
+                    </p>
+                    <p>
+                      <span className="text-gray-400">Status:</span> <span className="text-white">{currentLocation.ignitionStatus || "Unknown"}</span>
+                    </p>
+                    <p className="md:col-span-2">
+                      <span className="text-gray-400">Coordinates:</span> <span className="text-white">{formatCoordinate(currentLocation.lat)}, {formatCoordinate(currentLocation.lng)}</span>
+                    </p>
+                  </div>
+                  {currentLocation.originalData && (
+                    <div className="mt-4">
+                      <details className="text-xs text-gray-300">
+                        <summary className="cursor-pointer text-blue-300">View original data from file</summary>
+                        <div className="mt-2 max-h-36 overflow-y-auto rounded-xl border border-white/10 bg-white/[0.02] p-3">
+                          {currentLocation.originalData.csvDescription && (
+                            <div className="mb-2">
+                              <span className="text-gray-400">Original description:</span>
+                              <span className="ml-2 text-white">{currentLocation.originalData.csvDescription}</span>
+                            </div>
+                          )}
+                          {currentLocation.originalData.rawData &&
+                            Object.entries(currentLocation.originalData.rawData)
+                              .filter(([key]) => key !== "annotation")
                               .map(([key, value]) => (
                                 <div key={key} className="mb-1">
-                                  <span className="text-gray-400">{key}:</span> 
-                                  <span className="text-white ml-2">{String(value)}</span>
+                                  <span className="text-gray-400">{key}:</span>
+                                  <span className="ml-2 text-white">{String(value)}</span>
                                 </div>
                               ))}
-                          </div>
-                        </details>
-                      </div>
-                    )}
-                  </div>
+                        </div>
+                      </details>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
-          </div>
-          
-          {/* Navigation Buttons */}
-          <div className="flex justify-between mt-8">
-            <button
-              onClick={goToPrevious}
-              disabled={currentIndex === 0}
-              className={`flex items-center px-4 py-2 rounded ${
-                currentIndex === 0 ? 'bg-gray-800 text-gray-500 cursor-not-allowed' : 'bg-gray-700 text-white hover:bg-gray-600'
-              }`}
-            >
-              <ArrowLeft className="mr-2 h-4 w-4" />
-              Previous Location
-            </button>
-            
-            <button
-              onClick={goToNext}
-              className="flex items-center px-4 py-2 bg-blue-700 hover:bg-blue-600 rounded text-white"
-            >
-              {currentIndex < locations.length - 1 ? 'Next Location' : 'Continue to Overview'}
-              <ArrowRight className="ml-2 h-4 w-4" />
-            </button>
-          </div>
+
+            <div className="flex flex-wrap items-center justify-between gap-4">
+              <button
+                onClick={goToPrevious}
+                disabled={currentIndex === 0}
+                className={`inline-flex items-center gap-2 rounded-full px-5 py-2 text-sm font-semibold transition ${
+                  currentIndex === 0
+                    ? "border border-white/10 bg-white/[0.04] text-gray-500 cursor-not-allowed"
+                    : "border border-white/10 bg-gradient-to-r from-slate-900 to-blue-900 text-white shadow-[0_20px_45px_rgba(15,23,42,0.55)] hover:-translate-y-0.5"
+                }`}
+              >
+                <ArrowLeft className="h-4 w-4" />
+                Previous Location
+              </button>
+
+              <button
+                onClick={goToNext}
+                className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-gradient-to-r from-blue-900 via-indigo-900 to-purple-900 px-5 py-2 text-sm font-semibold text-white shadow-[0_20px_45px_rgba(15,23,42,0.6)] transition hover:-translate-y-0.5"
+              >
+                {currentIndex < totalLocations - 1 ? "Next Location" : "Continue to Overview"}
+                <ArrowRight className="h-4 w-4" />
+              </button>
+            </div>
+          </section>
         </div>
       )}
 
