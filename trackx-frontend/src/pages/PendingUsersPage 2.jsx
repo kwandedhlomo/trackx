@@ -14,6 +14,10 @@ import { Link, useNavigate } from "react-router-dom";
 import adfLogo from "../assets/image-removebg-preview.png";
 import trackxLogo from "../assets/trackx-logo-removebg-preview.png";
 import { motion } from "framer-motion";
+import NotificationModal from "../components/NotificationModal";
+import useNotificationModal from "../hooks/useNotificationModal";
+import { getFriendlyErrorMessage } from "../utils/errorMessages";
+import { Home, FilePlus2, FolderOpen, Briefcase, LayoutDashboard, Users } from "lucide-react";
 
 function PendingUsersPage() {
   const [pendingUsers, setPendingUsers] = useState([]);
@@ -21,6 +25,7 @@ function PendingUsersPage() {
   const [showMenu, setShowMenu] = useState(false);
   const [profile, setProfile] = useState(null);
   const navigate = useNavigate();
+  const { modalState, openModal, closeModal } = useNotificationModal();
 
   useEffect(() => {
     fetchPendingUsers();
@@ -55,10 +60,19 @@ function PendingUsersPage() {
   const approveUser = async (userId) => {
     try {
       await updateDoc(doc(db, "users", userId), { isApproved: true });
-      alert("User approved.");
+      openModal({
+        variant: "success",
+        title: "User approved",
+        description: "The user has been approved successfully.",
+      });
       fetchPendingUsers();
     } catch (err) {
       console.error("Error approving user:", err);
+      openModal({
+        variant: "error",
+        title: "Approval failed",
+        description: getFriendlyErrorMessage(err, "We couldn't approve the user. Please try again."),
+      });
     }
   };
 
@@ -97,7 +111,13 @@ function PendingUsersPage() {
           >
             &#9776;
           </div>
-          <img src={adfLogo} alt="ADF Logo" className="h-10 w-auto" />
+          <Link to="/home" className="inline-flex">
+            <img
+              src={adfLogo}
+              alt="ADF Logo"
+              className="h-10 w-auto cursor-pointer hover:opacity-80 transition"
+            />
+          </Link>
         </div>
 
         <div className="absolute left-1/2 transform -translate-x-1/2 text-3xl font-extrabold text-white font-sans flex items-center space-x-2">
@@ -120,11 +140,51 @@ function PendingUsersPage() {
 
       {/* Side Menu */}
       {showMenu && (
-        <div className="absolute top-16 left-0 bg-black bg-opacity-90 backdrop-blur-md text-white w-64 p-6 z-30 space-y-4 border-r border-gray-700 shadow-lg">
-          <Link to="/home" className="block hover:text-blue-400" onClick={() => setShowMenu(false)}>🏠 Home</Link>
-          <Link to="/new-case" className="block hover:text-blue-400" onClick={() => setShowMenu(false)}>📝 Create New Case / Report</Link>
-          <Link to="/manage-cases" className="block hover:text-blue-400" onClick={() => setShowMenu(false)}>📁 Manage Cases</Link>
-          <Link to="/admin-dashboard" className="block hover:text-blue-400" onClick={() => setShowMenu(false)}>🛠️ Admin Dashboard</Link>
+        <div className="absolute top-16 left-0 w-64 rounded-r-3xl border border-white/10 bg-gradient-to-br from-gray-900/95 to-black/90 backdrop-blur-xl p-6 z-30 shadow-2xl space-y-2">
+          <Link
+            to="/home"
+            className="flex items-center gap-3 px-3 py-2 rounded-2xl text-sm font-medium text-gray-200 hover:text-white hover:bg-white/10 transition"
+            onClick={() => setShowMenu(false)}
+          >
+            <Home className="w-4 h-4" />
+            Home
+          </Link>
+          <Link
+            to="/new-case"
+            className="flex items-center gap-3 px-3 py-2 rounded-2xl text-sm font-medium text-gray-200 hover:text-white hover:bg-white/10 transition"
+            onClick={() => setShowMenu(false)}
+          >
+            <FilePlus2 className="w-4 h-4" />
+            Create New Case
+          </Link>
+          <Link
+            to="/manage-cases"
+            className="flex items-center gap-3 px-3 py-2 rounded-2xl text-sm font-medium text-gray-200 hover:text-white hover:bg-white/10 transition"
+            onClick={() => setShowMenu(false)}
+          >
+            <FolderOpen className="w-4 h-4" />
+            Manage Cases
+          </Link>
+          <Link
+            to="/my-cases"
+            className="flex items-center gap-3 px-3 py-2 rounded-2xl text-sm font-medium text-gray-200 hover:text-white hover:bg-white/10 transition"
+            onClick={() => setShowMenu(false)}
+          >
+            <Briefcase className="w-4 h-4" />
+            My Cases
+          </Link>
+          <div className="flex items-center gap-3 px-3 py-2 rounded-2xl text-sm font-medium text-white bg-white/10">
+            <Users className="w-4 h-4" />
+            Pending Users
+          </div>
+          <Link
+            to="/admin-dashboard"
+            className="flex items-center gap-3 px-3 py-2 rounded-2xl text-sm font-medium text-gray-200 hover:text-white hover:bg-white/10 transition"
+            onClick={() => setShowMenu(false)}
+          >
+            <LayoutDashboard className="w-4 h-4" />
+            Admin Dashboard
+          </Link>
         </div>
       )}
 
@@ -139,11 +199,18 @@ function PendingUsersPage() {
           <p className="text-gray-400">No pending users found.</p>
         )}
       </div>
+
+      <NotificationModal
+        isOpen={modalState.isOpen}
+        title={modalState.title}
+        description={modalState.description}
+        variant={modalState.variant}
+        onClose={closeModal}
+        primaryAction={modalState.primaryAction}
+        secondaryAction={modalState.secondaryAction}
+      />
     </motion.div>
   );
 }
 
 export default PendingUsersPage;
-
-
-

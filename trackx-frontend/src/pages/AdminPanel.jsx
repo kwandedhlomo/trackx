@@ -1,15 +1,30 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import axios from "axios";
 import { useAuth } from "../context/AuthContext";
 import { useNavigate, Link } from "react-router-dom";
+import { motion } from "framer-motion";
 import adfLogo from "../assets/image-removebg-preview.png";
 import trackxLogo from "../assets/trackx-logo-removebg-preview.png";
 import { signOut } from "firebase/auth";
 import { auth } from "../firebase";
-import { Home, FilePlus2, FolderOpen, Briefcase, LayoutDashboard, Users, UserPlus, X } from "lucide-react";
+import {
+  Home,
+  FilePlus2,
+  FolderOpen,
+  Briefcase,
+  LayoutDashboard,
+  Users,
+  UserPlus,
+  X,
+  ShieldCheck,
+  Search,
+  UserCircle,
+  Target,
+} from "lucide-react";
 import NotificationModal from "../components/NotificationModal";
 import useNotificationModal from "../hooks/useNotificationModal";
 import { getFriendlyErrorMessage } from "../utils/errorMessages";
+import AnimatedMap from "../components/AnimatedMap";
 
 
 function AdminPanel() {
@@ -365,366 +380,582 @@ const handleDeleteUser = async (userId, skipConfirmation = false) => {
     ? cases.find((caseItem) => caseItem.id === selectedCaseId)
     : null;
 
-  return (
-    <div className="relative flex flex-col min-h-screen">
-      <div className="absolute inset-0 w-full min-h-full bg-gradient-to-br from-black via-gray-900 to-black -z-20" />
+  const approvedUsers = users.filter((user) => user.isApproved).length;
+  const pendingUsers = users.filter(
+    (user) => !user.isApproved && user.status !== "rejected"
+  ).length;
+  const rejectedUsers = users.filter((user) => user.status === "rejected").length;
+  const adminCount = useMemo(
+    () => users.filter((user) => user.role === "admin").length,
+    [users]
+  );
 
-      {/* Navbar */}
-      <nav className="flex justify-between items-center bg-gradient-to-r from-black to-gray-900 bg-opacity-80 backdrop-blur-md p-4 relative font-sans z-20">
-        <div className="flex items-center space-x-4">
-          <div
-            className="text-white text-3xl cursor-pointer"
-            onClick={() => setShowMenu(!showMenu)}
-          >
-            &#9776;
-          </div>
-          <Link to="/home" className="inline-flex">
+  const totalPages = Math.max(1, Math.ceil((totalUsers || 0) / pageSize));
+  const rangeStart = users.length ? (page - 1) * pageSize + 1 : 0;
+  const rangeEnd = users.length ? rangeStart + users.length - 1 : 0;
+
+  const now = new Date();
+  const formattedDate = now.toLocaleDateString(undefined, {
+    weekday: "long",
+    month: "long",
+    day: "numeric",
+  });
+  const formattedTime = now.toLocaleTimeString(undefined, {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+
+  return (
+    <div className="relative flex flex-col min-h-screen font-sans bg-gradient-to-br from-black via-gray-900 to-gray-800">
+      {/* Optionally keep the AnimatedMap overlay if desired */}
+      <div className="absolute inset-0 -z-20 pointer-events-none opacity-55">
+        <AnimatedMap />
+      </div>
+
+      <div className="relative z-10 flex flex-col flex-1">
+        <nav className="mx-6 mt-6 flex items-center justify-between rounded-3xl border border-white/10 bg-gradient-to-br from-black/80 via-slate-900/75 to-black/85 px-6 py-4 shadow-xl shadow-[0_25px_65px_rgba(8,11,24,0.6)] backdrop-blur-2xl">
+          <div className="flex items-center gap-4">
+            <button
+              type="button"
+              onClick={() => setShowMenu(!showMenu)}
+              className="flex h-11 w-11 items-center justify-center rounded-full border border-white/10 bg-white/[0.02] text-xl text-white shadow-inner shadow-white/5 transition hover:bg-white/10"
+              aria-label="Toggle navigation"
+            >
+              &#9776;
+            </button>
             <img
               src={adfLogo}
               alt="ADF Logo"
-              className="h-10 w-auto cursor-pointer hover:opacity-80 transition"
+              className="h-10 w-auto drop-shadow-[0_10px_20px_rgba(59,130,246,0.35)]"
             />
-          </Link>
-        </div>
-
-        <div className="absolute left-1/2 transform -translate-x-1/2 text-3xl font-extrabold text-white font-sans flex items-center space-x-2">
-          <img src={trackxLogo} alt="TrackX Logo Left" className="h-8 w-auto" />
-          <span>TRACKX</span>
-          <img src={trackxLogo} alt="TrackX Logo Right" className="h-8 w-auto" />
-        </div>
-
-        <div className="flex items-center space-x-6 text-white font-sans">
-          <Link to="/home" className="hover:text-white">Home</Link>
-          <div className="flex flex-col text-right">
-            <span className="text-white">{profile ? profile.firstName : "Loading..."}</span>
-            <button onClick={handleSignOut} className="text-sm text-white hover:text-white">Sign Out</button>
           </div>
-          <div className="text-sm text-white">
-            {new Date().toLocaleString()}
-          </div>
-        </div>
-      </nav>
 
-      {showMenu && (
-        <div className="absolute top-16 left-0 w-64 rounded-r-3xl border border-white/10 bg-gradient-to-br from-gray-900/95 to-black/90 backdrop-blur-xl p-6 z-30 shadow-2xl space-y-2">
-          <Link
-            to="/home"
-            className="flex items-center gap-3 px-3 py-2 rounded-2xl text-sm font-medium text-gray-200 hover:text-white hover:bg-white/10 transition"
-            onClick={() => setShowMenu(false)}
-          >
-            <Home className="w-4 h-4" />
-            Home
-          </Link>
-          <Link
-            to="/new-case"
-            className="flex items-center gap-3 px-3 py-2 rounded-2xl text-sm font-medium text-gray-200 hover:text-white hover:bg-white/10 transition"
-            onClick={() => setShowMenu(false)}
-          >
-            <FilePlus2 className="w-4 h-4" />
-            Create New Case
-          </Link>
-          <Link
-            to="/manage-cases"
-            className="flex items-center gap-3 px-3 py-2 rounded-2xl text-sm font-medium text-gray-200 hover:text-white hover:bg-white/10 transition"
-            onClick={() => setShowMenu(false)}
-          >
-            <FolderOpen className="w-4 h-4" />
-            Manage Cases
-          </Link>
-          <Link
-            to="/my-cases"
-            className="flex items-center gap-3 px-3 py-2 rounded-2xl text-sm font-medium text-gray-200 hover:text-white hover:bg-white/10 transition"
-            onClick={() => setShowMenu(false)}
-          >
-            <Briefcase className="w-4 h-4" />
-            My Cases
-          </Link>
-          <Link
-            to="/pending-users"
-            className="flex items-center gap-3 px-3 py-2 rounded-2xl text-sm font-medium text-gray-200 hover:text-white hover:bg-white/10 transition"
-            onClick={() => setShowMenu(false)}
-          >
-            <Users className="w-4 h-4" />
-            Pending Users
-          </Link>
-          <div className="flex items-center gap-3 px-3 py-2 rounded-2xl text-sm font-medium text-white bg-white/10">
-            <LayoutDashboard className="w-4 h-4" />
-            Admin Dashboard
-          </div>
-        </div>
-      )}
-
-      <div className="text-center text-white text-lg tracking-wide mt-4 font-sans z-10">
-        <h1 className="text-3xl font-bold text-white-500">Admin Panel</h1>
-      </div>
-
-      <div className="flex-grow z-10 p-8">
-        <div className="flex flex-col md:flex-row md:items-center justify-between mb-4 space-y-4 md:space-y-0">
-          <div className="relative w-full md:w-1/3">
-            <input
-              type="text"
-              placeholder="Search by name or email"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="p-2 rounded bg-white bg-opacity-10 border border-gray-700 text-white border border-gray-600 w-full pr-10"
+          <div className="pointer-events-none absolute left-1/2 top-1/2 flex -translate-x-1/2 -translate-y-1/2 items-center gap-2 text-3xl font-extrabold">
+            <img
+              src={trackxLogo}
+              alt="TrackX Logo Left"
+              className="h-8 w-auto opacity-90"
             />
-            {search && (
-              <button
-                onClick={() => setSearch("")}
-                className="absolute right-2 top-1/2 transform -translate-y-1/2 text-xl text-white hover:text-white"
-              >
-                ✕
-              </button>
-            )}
+            <span className="tracking-[0.2em] text-white/75 drop-shadow-[0_2px_12px_rgba(15,23,42,0.55)]">
+              TRACKX
+            </span>
+            <img
+              src={trackxLogo}
+              alt="TrackX Logo Right"
+              className="h-8 w-auto opacity-90"
+            />
           </div>
 
-          <select
-            value={roleFilter}
-            onChange={(e) => setRoleFilter(e.target.value)}
-            className="p-2 rounded bg-white bg-opacity-10 border border-gray-700 text-white border border-gray-600 [&>option]:text-black"
-          >
-            <option value="all">All Roles</option>
-            <option value="admin">Admins</option>
-            <option value="user">Users</option>
-          </select>
-        </div>
-
-        {loading ? (
-          <p className="text-center text-white">Loading users...</p>
-        ) : users.length === 0 ? (
-          <p className="text-center text-white">No users found.</p>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full table-auto border border-gray-700">
-              <thead className="bg-white bg-opacity-10 border border-gray-700">
-                <tr>
-                  <th className="p-3 text-left text-white">Name</th>
-                  <th className="p-3 text-left text-white">Email</th>
-                  <th className="p-3 text-left text-white">Role</th>
-                  <th className="p-3 text-left text-white">Action</th>
-                </tr>
-              </thead>
-              <tbody>
-                {users.map((user) => (
-                  <tr key={user.id} className="border-b border-gray-700 hover:bg-white/10">
-                  <td className="p-3 text-white">{user.name}</td>
-                  <td className="p-3 text-white">{user.email}</td>
-                  <td className="p-3 text-white">
-                    <span
-                      className={`px-2 py-1 rounded-full text-xs font-bold tracking-wide uppercase ${
-                        user.role === "admin"
-                          ? "bg-blue-600 text-white"
-                          : "bg-gray-600 text-white"
-                      }`}
-                    >
-                      {user.role}
-                    </span>
-                  </td>
-                  <td className="p-3 text-white flex justify-between items-center space-x-2 relative">
-                    {/* Toggle Role Button */}
-                    <button
-                      onClick={() => toggleRole(user.id, user.role)}
-                      className={`px-4 py-2 rounded text-sm transition-colors duration-200 ${
-                        user.role === "admin"
-                          ? "bg-red-700 hover:bg-red-600"
-                          : "bg-blue-700 hover:bg-blue-600"
-                      }`}
-                    >
-                      {user.role === "admin" ? "Revoke Admin" : "Make Admin"}
-                    </button>
-
-                    {/* Delete Dropdown on Far Right */}
-                    <div className="relative ml-auto">
-                      <button
-                        className="text-xl px-2 py-1 hover:bg-gray-700 rounded"
-                        onClick={() =>
-                          setOpenMenuUserId((prev) => (prev === user.id ? null : user.id))
-                        }
-                      >
-                        ⋮
-                      </button>
-
-                      {openMenuUserId === user.id && (
-                        <div className="absolute right-0 mt-1 bg-black bg-opacity-90 border border-gray-600 rounded shadow-lg z-50">
-                          <button
-                            onClick={() => handleDeleteUser(user.id)}
-                            className="block w-full px-4 py-2 text-sm text-red-500 hover:bg-gray-700"
-                          >
-                            Delete User
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  </td>
-                </tr>
-
-                ))}
-              </tbody>
-            </table>
-
-            <div className="flex justify-between items-center mt-4">
+          <div className="flex items-center gap-6 text-sm text-gray-200">
+            <Link
+              to="/home"
+              className="rounded-full bg-white/[0.02] px-3 py-1.5 font-medium text-white transition hover:bg-white/15"
+            >
+              Home
+            </Link>
+            <div className="flex flex-col items-end">
+              <span className="text-base font-semibold text-white">
+                {profile ? profile.firstName : "Loading..."}
+              </span>
               <button
-                onClick={() => setPage((prev) => Math.max(prev - 1, 1))}
-                disabled={page === 1}
-                className="px-4 py-2 bg-white bg-opacity-10 border border-gray-600 text-white rounded disabled:opacity-50"
+                onClick={handleSignOut}
+                className="text-xs text-gray-400 transition hover:text-white"
               >
-                Prev
-              </button>
-              <span className="text-sm text-white">Page {page}</span>
-              <button
-                onClick={() => setPage((prev) => prev + 1)}
-                disabled={users.length < pageSize}
-                className="px-4 py-2 bg-white bg-opacity-10 border border-gray-600 text-white rounded disabled:opacity-50"
-              >
-                Next
+                Sign Out
               </button>
             </div>
+            <div className="flex flex-col items-end rounded-2xl border border-white/10 bg-white/[0.04] px-3 py-1.5 text-xs font-medium text-gray-400 shadow-inner shadow-white/5">
+              <span>{formattedDate}</span>
+              <span className="text-sm text-white">{formattedTime}</span>
+            </div>
           </div>
+        </nav>
+
+        {showMenu && (
+          <motion.div
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.25, ease: "easeOut" }}
+            className="absolute left-4 top-32 z-30 w-64 space-y-2 rounded-3xl border border-white/10 bg-gradient-to-br from-slate-950/85 via-slate-900/78 to-black/78 p-6 shadow-2xl shadow-[0_30px_60px_rgba(30,58,138,0.45)] backdrop-blur-2xl"
+          >
+            <div className="flex items-center gap-3 rounded-2xl bg-white/[0.018] px-3 py-2 text-sm font-medium text-white">
+              <LayoutDashboard className="h-4 w-4" />
+              Admin Panel
+            </div>
+            <Link
+              to="/home"
+              className="flex items-center gap-3 rounded-2xl px-3 py-2 text-sm font-medium text-gray-200 transition hover:bg-white/10 hover:text-white"
+              onClick={() => setShowMenu(false)}
+            >
+              <Home className="h-4 w-4" />
+              Home
+            </Link>
+            <Link
+              to="/new-case"
+              className="flex items-center gap-3 rounded-2xl px-3 py-2 text-sm font-medium text-gray-200 transition hover:bg-white/10 hover:text-white"
+              onClick={() => setShowMenu(false)}
+            >
+              <FilePlus2 className="h-4 w-4" />
+              Create New Case
+            </Link>
+            <Link
+              to="/manage-cases"
+              className="flex items-center gap-3 rounded-2xl px-3 py-2 text-sm font-medium text-gray-200 transition hover:bg-white/10 hover:text-white"
+              onClick={() => setShowMenu(false)}
+            >
+              <FolderOpen className="h-4 w-4" />
+              Manage Cases
+            </Link>
+            <Link
+              to="/my-cases"
+              className="flex items-center gap-3 rounded-2xl px-3 py-2 text-sm font-medium text-gray-200 transition hover:bg-white/10 hover:text-white"
+              onClick={() => setShowMenu(false)}
+            >
+              <Briefcase className="h-4 w-4" />
+              My Cases
+            </Link>
+            <Link
+              to="/pending-users"
+              className="flex items-center gap-3 rounded-2xl px-3 py-2 text-sm font-medium text-gray-200 transition hover:bg-white/10 hover:text-white"
+              onClick={() => setShowMenu(false)}
+            >
+              <Users className="h-4 w-4" />
+              Pending Users
+            </Link>
+          </motion.div>
         )}
 
-        <div className="mt-10 bg-gray-900 bg-opacity-70 border border-gray-700 rounded-2xl p-6 space-y-4">
-          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+        <main className="relative z-10 flex-1 px-6 pb-12 pt-8">
+          <header className="mb-8 flex flex-col gap-4 text-white lg:flex-row lg:items-center lg:justify-between">
             <div>
-              <h2 className="text-lg font-semibold text-white">Case Access Management</h2>
-              <p className="text-sm text-gray-400">Assign or remove investigators on existing cases.</p>
+              <h1 className="text-3xl font-semibold tracking-tight drop-shadow-[0_12px_30px_rgba(15,23,42,0.45)]">
+                Admin Command Center
+              </h1>
+              <p className="text-sm text-gray-300">
+                Oversee accounts, manage access, and keep investigations on track.
+              </p>
             </div>
-            <div className="flex items-center gap-3">
-              <input
-                type="text"
-                value={caseSearch}
-                onChange={(e) => setCaseSearch(e.target.value)}
-                placeholder="Search cases"
-                className="px-3 py-2 rounded-lg bg-gray-800 border border-gray-700 text-white text-sm placeholder-gray-500"
-              />
-              <button
-                type="button"
-                onClick={fetchCases}
-                className="px-3 py-2 rounded-lg bg-blue-700 hover:bg-blue-600 text-white text-sm"
-              >
-                Refresh
-              </button>
-            </div>
-          </div>
-
-          <div className="grid gap-3 md:grid-cols-2">
-            <select
-              value={selectedCaseId}
-              onChange={(e) => handleSelectCase(e.target.value)}
-              className="px-3 py-2 rounded-lg bg-gray-800 border border-gray-700 text-white text-sm"
-            >
-              <option value="">Select a case</option>
-              {filteredCases.map((caseItem) => (
-                <option key={caseItem.id} value={caseItem.id}>
-                  {caseItem.caseNumber || caseItem.id} — {caseItem.caseTitle || 'Untitled'}
-                </option>
-              ))}
-            </select>
-            {selectedCase && (
-              <div className="text-sm text-gray-400">
-                <p><span className="text-gray-500">Case number:</span> {selectedCase.caseNumber || 'N/A'}</p>
-                <p><span className="text-gray-500">Title:</span> {selectedCase.caseTitle || 'Untitled'}</p>
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.05] px-4 py-2 text-xs font-semibold uppercase tracking-[0.18em] text-gray-200 shadow-lg shadow-[0_12px_32px_rgba(30,64,175,0.35)]">
+                <ShieldCheck className="h-4 w-4 text-blue-400" />
+                <span>
+                  {profile?.role ? `${String(profile.role).toUpperCase()} ACCESS` : "Admin Access"}
+                </span>
               </div>
-            )}
-          </div>
+            </div>
+          </header>
 
-          {isFetchingCases ? (
-            <p className="text-sm text-gray-400">Loading cases...</p>
-          ) : selectedCaseId && !selectedCase ? (
-            <p className="text-sm text-gray-400">Case not found.</p>
-          ) : selectedCaseId ? (
-            <div className="space-y-4">
-              <div>
-                <h3 className="text-sm font-semibold text-white mb-2">Assigned Investigators</h3>
-                <div className="flex flex-wrap gap-2">
-                  {selectedCaseUsers.map((user) => (
-                    <span
-                      key={user.id}
-                      className="inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-1 text-xs text-white"
-                    >
-                      <span className="font-medium">{user.name || user.email || user.id}</span>
+          <section className="mb-8 grid gap-5 md:grid-cols-2 xl:grid-cols-4">
+            <div className="relative overflow-hidden rounded-2xl border border-white/10 bg-white/[0.03] p-6 shadow-lg shadow-[0_20px_45px_rgba(15,23,42,0.42)] backdrop-blur-xl">
+              <div className="pointer-events-none absolute -top-16 right-0 h-32 w-32 rounded-full bg-blue-900/25 blur-3xl" />
+              <div className="flex items-start justify-between">
+                <div>
+                  <p className="text-xs uppercase tracking-[0.3em] text-gray-400">Total Accounts</p>
+                  <p className="mt-3 text-3xl font-semibold text-white">{totalUsers || users.length || 0}</p>
+                  <p className="text-xs text-gray-400">All registered users</p>
+                </div>
+                <div className="flex h-12 w-12 items-center justify-center rounded-full bg-white/10 text-white">
+                  <Users className="h-5 w-5" />
+                </div>
+              </div>
+            </div>
+
+            <div className="relative overflow-hidden rounded-2xl border border-white/10 bg-white/[0.03] p-6 shadow-lg shadow-[0_20px_45px_rgba(15,23,42,0.42)] backdrop-blur-xl">
+              <div className="pointer-events-none absolute -bottom-16 left-0 h-32 w-32 rounded-full bg-indigo-900/25 blur-3xl" />
+              <div className="flex items-start justify-between">
+                <div>
+                  <p className="text-xs uppercase tracking-[0.3em] text-gray-400">Admin Seats</p>
+                  <p className="mt-3 text-3xl font-semibold text-white">{adminCount}</p>
+                  <p className="text-xs text-gray-400">Admins in current view</p>
+                </div>
+                <div className="flex h-12 w-12 items-center justify-center rounded-full bg-white/10 text-white">
+                  <ShieldCheck className="h-5 w-5 text-blue-300" />
+                </div>
+              </div>
+            </div>
+
+            <div className="relative overflow-hidden rounded-2xl border border-white/10 bg-white/[0.03] p-6 shadow-lg shadow-[0_20px_45px_rgba(15,23,42,0.42)] backdrop-blur-xl">
+              <div className="pointer-events-none absolute -top-12 left-6 h-28 w-28 rounded-full bg-emerald-900/20 blur-3xl" />
+              <div className="flex items-start justify-between">
+                <div>
+                  <p className="text-xs uppercase tracking-[0.3em] text-gray-400">Approved Users</p>
+                  <p className="mt-3 text-3xl font-semibold text-white">{approvedUsers}</p>
+                  <p className="text-xs text-gray-400">Visible in this page</p>
+                </div>
+                <div className="flex h-12 w-12 items-center justify-center rounded-full bg-white/10 text-white">
+                  <UserCircle className="h-5 w-5 text-emerald-300" />
+                </div>
+              </div>
+            </div>
+
+            <div className="relative overflow-hidden rounded-2xl border border-white/10 bg-white/[0.03] p-6 shadow-lg shadow-[0_20px_45px_rgba(15,23,42,0.42)] backdrop-blur-xl">
+              <div className="pointer-events-none absolute -bottom-14 right-4 h-28 w-28 rounded-full bg-amber-900/25 blur-3xl" />
+              <div className="flex items-start justify-between">
+                <div>
+                  <p className="text-xs uppercase tracking-[0.3em] text-gray-400">Review Queue</p>
+                  <p className="mt-3 text-3xl font-semibold text-white">{pendingUsers}</p>
+                  <p className="text-xs text-amber-200">Pending (this page)</p>
+                  <p className="text-xs text-rose-300">Rejected: {rejectedUsers}</p>
+                </div>
+                <div className="flex h-12 w-12 items-center justify-center rounded-full bg-white/10 text-white">
+                  <Target className="h-5 w-5 text-amber-300" />
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section className="grid gap-8 xl:grid-cols-[1.85fr,1.15fr]">
+            <div className="relative overflow-hidden rounded-3xl border border-white/10 bg-white/[0.03] p-6 shadow-lg shadow-[0_22px_45px_rgba(8,11,24,0.55)] backdrop-blur-2xl">
+              <div className="pointer-events-none absolute -top-28 right-10 h-44 w-44 rounded-full bg-blue-950/20 blur-3xl" />
+              <div className="pointer-events-none absolute -bottom-20 left-12 h-40 w-40 rounded-full bg-slate-900/25 blur-3xl" />
+              <div className="flex flex-col gap-6">
+                <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="flex h-12 w-12 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.04] text-white shadow-inner shadow-white/5">
+                      <Users className="h-5 w-5 text-blue-300" />
+                    </div>
+                    <div>
+                      <h2 className="text-lg font-semibold text-white">User Directory</h2>
+                      <p className="text-sm text-gray-300">Manage visibility, roles, and enrolment.</p>
+                    </div>
+                  </div>
+                  <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.05] px-3 py-1.5 text-xs text-gray-300 shadow-inner shadow-white/5">
+                    Showing
+                    <span className="font-semibold text-white">{users.length ? `${rangeStart}-${rangeEnd}` : "0"}</span>
+                    of
+                    <span className="font-semibold text-white">{totalUsers || "-"}</span>
+                  </div>
+                </div>
+
+                <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:gap-6">
+                  <label className="relative w-full lg:max-w-sm">
+                    <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">
+                      <Search className="h-4 w-4" />
+                    </span>
+                    <input
+                      type="text"
+                      placeholder="Search by name or email"
+                      value={search}
+                      onChange={(e) => setSearch(e.target.value)}
+                      className="w-full rounded-full border border-white/10 bg-white/[0.05] px-9 py-2.5 text-sm text-white placeholder-gray-500 shadow-inner shadow-white/5 focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-500/40"
+                    />
+                    {search && (
                       <button
                         type="button"
-                        onClick={() => handleRemoveCaseUser(user.id)}
-                        className="text-gray-300 hover:text-red-300"
+                        onClick={() => setSearch("")}
+                        className="absolute right-3 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-full bg-white/10 text-white transition hover:bg-white/20"
+                        aria-label="Clear search"
                       >
-                        <X className="w-3 h-3" />
+                        <X className="h-4 w-4" />
                       </button>
+                    )}
+                  </label>
+
+                  <select
+                    value={roleFilter}
+                    onChange={(e) => setRoleFilter(e.target.value)}
+                    className="w-full rounded-2xl border border-white/10 bg-white/[0.05] px-4 py-2.5 text-sm text-white shadow-inner shadow-white/5 focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-500/40 lg:w-40 [&>option]:text-black"
+                  >
+                    <option value="all">All Roles</option>
+                    <option value="admin">Admins</option>
+                    <option value="user">Users</option>
+                  </select>
+                </div>
+
+                {loading ? (
+                  <p className="py-10 text-center text-sm text-gray-300">Loading users...</p>
+                ) : users.length === 0 ? (
+                  <p className="py-10 text-center text-sm text-gray-300">No users matched your filters.</p>
+                ) : (
+                  <div className="overflow-hidden rounded-2xl border border-white/10 bg-white/[0.02]">
+                    <table className="min-w-full border-collapse text-left text-sm text-gray-200">
+                      <thead className="bg-white/[0.04] text-xs uppercase tracking-[0.2em] text-gray-400">
+                        <tr>
+                          <th className="px-4 py-3 font-medium">User</th>
+                          <th className="px-4 py-3 font-medium">Email</th>
+                          <th className="px-4 py-3 font-medium">Role</th>
+                          <th className="px-4 py-3 font-medium text-right">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {users.map((user) => (
+                          <tr
+                            key={user.id}
+                            className="border-b border-white/5 bg-transparent transition hover:bg-white/5"
+                          >
+                            <td className="px-4 py-4 text-white">
+                              <div className="flex flex-col gap-1">
+                                <span className="font-semibold text-white">{user.name || "Unnamed"}</span>
+                                <span className="text-xs text-gray-400">ID: {user.id}</span>
+                              </div>
+                            </td>
+                            <td className="px-4 py-4 text-gray-300">{user.email || "No email"}</td>
+                            <td className="px-4 py-4">
+                              <span
+                                className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-wide ${
+                                  user.role === "admin"
+                                    ? "bg-blue-600/80 text-white shadow-[0_8px_20px_rgba(30,64,175,0.45)]"
+                                    : "bg-slate-700/80 text-white/90"
+                                }`}
+                              >
+                                {user.role}
+                              </span>
+                            </td>
+                            <td className="px-4 py-4">
+                              <div className="flex items-center justify-end gap-3">
+                                <button
+                                  onClick={() => toggleRole(user.id, user.role)}
+                                  className={`inline-flex items-center gap-2 rounded-full border border-white/10 px-4 py-2 text-xs font-medium text-white shadow-lg transition ${
+                                    user.role === "admin"
+                                      ? "bg-rose-600/80 hover:bg-rose-500/80"
+                                      : "bg-blue-600/80 hover:bg-blue-500/80"
+                                  }`}
+                                >
+                                  {user.role === "admin" ? "Revoke Admin" : "Make Admin"}
+                                </button>
+
+                                <div className="relative">
+                                  <button
+                                    className="flex h-9 w-9 items-center justify-center rounded-full border border-white/10 bg-white/[0.05] text-lg text-white/80 transition hover:bg-white/15 hover:text-white"
+                                    onClick={() =>
+                                      setOpenMenuUserId((prev) => (prev === user.id ? null : user.id))
+                                    }
+                                    aria-label="More actions"
+                                  >
+                                    ⋮
+                                  </button>
+
+                                  {openMenuUserId === user.id && (
+                                    <motion.div
+                                      initial={{ opacity: 0, y: 6 }}
+                                      animate={{ opacity: 1, y: 0 }}
+                                      transition={{ duration: 0.18, ease: "easeOut" }}
+                                      className="absolute right-0 top-11 w-44 rounded-2xl border border-white/10 bg-slate-950/95 p-2 shadow-xl shadow-[0_20px_45px_rgba(8,11,24,0.55)] backdrop-blur-xl"
+                                    >
+                                      <button
+                                        onClick={() => handleDeleteUser(user.id)}
+                                        className="flex w-full items-center justify-between rounded-xl px-3 py-2 text-sm text-rose-300 transition hover:bg-white/10 hover:text-rose-200"
+                                      >
+                                        Delete User
+                                        <span className="text-lg leading-none">x</span>
+                                      </button>
+                                    </motion.div>
+                                  )}
+                                </div>
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+
+                <div className="flex flex-col gap-3 pt-4 text-xs text-gray-300 sm:flex-row sm:items-center sm:justify-between">
+                  <span>
+                    Showing
+                    <span className="px-1 font-semibold text-white">{users.length ? `${rangeStart}-${rangeEnd}` : "0"}</span>
+                    of
+                    <span className="px-1 font-semibold text-white">{totalUsers || "-"}</span>
+                    results
+                  </span>
+                  <div className="flex items-center gap-3">
+                    <button
+                      onClick={() => setPage((prev) => Math.max(prev - 1, 1))}
+                      disabled={page === 1}
+                      className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-4 py-2 text-sm text-gray-200 transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      Prev
+                    </button>
+                    <span className="rounded-full border border-white/10 bg-white/[0.06] px-4 py-2 text-sm font-medium text-white">
+                      Page {page} of {totalPages}
                     </span>
-                  ))}
-                  {selectedCaseUsers.length === 0 && (
-                    <span className="text-xs text-gray-500">No users assigned.</span>
-                  )}
+                    <button
+                      onClick={() => setPage((prev) => prev + 1)}
+                      disabled={users.length < pageSize}
+                      className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-4 py-2 text-sm text-gray-200 transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      Next
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="relative overflow-hidden rounded-3xl border border-white/10 bg-white/[0.03] p-6 shadow-lg shadow-[0_22px_45px_rgba(8,11,24,0.55)] backdrop-blur-2xl">
+              <div className="pointer-events-none absolute -top-24 left-8 h-40 w-40 rounded-full bg-emerald-900/22 blur-3xl" />
+              <div className="pointer-events-none absolute -bottom-20 right-6 h-44 w-44 rounded-full bg-blue-900/18 blur-3xl" />
+              <div className="flex items-start gap-3">
+                <div className="flex h-12 w-12 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.04] text-white shadow-inner shadow-white/5">
+                  <Target className="h-5 w-5 text-emerald-300" />
+                </div>
+                <div>
+                  <h2 className="text-lg font-semibold text-white">Case Access Management</h2>
+                  <p className="text-sm text-gray-300">Assign or remove investigators on active cases.</p>
                 </div>
               </div>
 
-              <div className="flex flex-col sm:flex-row sm:items-center gap-3">
-                <input
-                  type="text"
-                  value={caseUserSearchTerm}
-                  onChange={(e) => setCaseUserSearchTerm(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      e.preventDefault();
-                      handleCaseUserSearch();
-                    }
-                  }}
-                  placeholder="Search users to add"
-                  className="flex-1 rounded-lg bg-gray-800 border border-gray-700 text-white px-3 py-2 text-sm placeholder-gray-500"
-                />
-                <button
-                  type="button"
-                  onClick={handleCaseUserSearch}
-                  className="inline-flex items-center gap-2 px-4 py-2 bg-blue-700 hover:bg-blue-600 rounded-lg text-sm text-white"
-                >
-                  <UserPlus className="w-4 h-4" />
-                  Search
-                </button>
-              </div>
+              <div className="mt-6 space-y-6">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <label className="relative w-full sm:max-w-xs">
+                    <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">
+                      <Search className="h-4 w-4" />
+                    </span>
+                    <input
+                      type="text"
+                      value={caseSearch}
+                      onChange={(e) => setCaseSearch(e.target.value)}
+                      placeholder="Search cases"
+                      className="w-full rounded-full border border-white/10 bg-white/[0.05] px-9 py-2.5 text-sm text-white placeholder-gray-500 shadow-inner shadow-white/5 focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-500/40"
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    onClick={fetchCases}
+                    className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-blue-600/80 px-4 py-2 text-sm font-medium text-white shadow-lg shadow-[0_18px_35px_rgba(37,99,235,0.35)] transition hover:bg-blue-500/80"
+                  >
+                    Refresh
+                  </button>
+                </div>
 
-              <div className="space-y-2">
-                {caseUserResults.length > 0 ? (
-                  caseUserResults.map((user) => (
-                    <div
-                      key={user.id}
-                      className="flex items-center justify-between bg-gray-800 bg-opacity-60 border border-gray-700 rounded-lg px-3 py-2 text-xs"
-                    >
-                      <div>
-                        <p className="text-white font-medium">{user.name || user.email || user.id}</p>
-                        <p className="text-gray-400">{user.email}</p>
+                <div className="grid gap-3 sm:grid-cols-[1fr,minmax(0,0.9fr)]">
+                  <select
+                    value={selectedCaseId}
+                    onChange={(e) => handleSelectCase(e.target.value)}
+                    className="w-full rounded-2xl border border-white/10 bg-white/[0.05] px-4 py-3 text-sm text-white shadow-inner shadow-white/5 focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-500/40 [&>option]:text-black"
+                  >
+                    <option value="">Select a case</option>
+                    {filteredCases.map((caseItem) => (
+                      <option key={caseItem.id} value={caseItem.id}>
+                        {`${caseItem.caseNumber || caseItem.id} - ${caseItem.caseTitle || "Untitled"}`}
+                      </option>
+                    ))}
+                  </select>
+
+                  {selectedCase && (
+                    <div className="rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 text-xs text-gray-300 shadow-inner shadow-white/5">
+                      <p className="font-medium text-white/80">
+                        Case number:
+                        <span className="ml-1 text-gray-300">{selectedCase.caseNumber || "N/A"}</span>
+                      </p>
+                      <p className="mt-1 text-white/80">
+                        Title:
+                        <span className="ml-1 text-gray-300">{selectedCase.caseTitle || "Untitled"}</span>
+                      </p>
+                    </div>
+                  )}
+                </div>
+
+                {isFetchingCases ? (
+                  <p className="text-sm text-gray-300">Loading cases...</p>
+                ) : selectedCaseId && !selectedCase ? (
+                  <p className="text-sm text-gray-300">Case not found.</p>
+                ) : selectedCaseId ? (
+                  <div className="space-y-5">
+                    <div>
+                      <h3 className="mb-2 text-sm font-semibold text-white">Assigned Investigators</h3>
+                      <div className="flex flex-wrap gap-2">
+                        {selectedCaseUsers.map((user) => (
+                          <span
+                            key={user.id}
+                            className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.08] px-3 py-1 text-xs text-white shadow-sm shadow-[0_8px_20px_rgba(15,23,42,0.25)]"
+                          >
+                            <span className="font-medium">{user.name || user.email || user.id}</span>
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveCaseUser(user.id)}
+                              className="flex h-5 w-5 items-center justify-center rounded-full bg-white/10 text-white transition hover:bg-white/20"
+                              aria-label="Remove user"
+                            >
+                              <X className="h-3 w-3" />
+                            </button>
+                          </span>
+                        ))}
+                        {selectedCaseUsers.length === 0 && (
+                          <span className="text-xs text-gray-400">No users assigned.</span>
+                        )}
                       </div>
+                    </div>
+
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+                      <label className="relative flex-1">
+                        <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">
+                          <Search className="h-4 w-4" />
+                        </span>
+                        <input
+                          type="text"
+                          value={caseUserSearchTerm}
+                          onChange={(e) => setCaseUserSearchTerm(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") {
+                              e.preventDefault();
+                              handleCaseUserSearch();
+                            }
+                          }}
+                          placeholder="Search users to add"
+                          className="w-full rounded-full border border-white/10 bg-white/[0.05] px-9 py-2.5 text-sm text-white placeholder-gray-500 shadow-inner shadow-white/5 focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-500/40"
+                        />
+                      </label>
                       <button
                         type="button"
-                        onClick={() => handleAddCaseUser(user)}
-                        className="inline-flex items-center gap-1 px-3 py-1 bg-green-600 hover:bg-green-500 rounded-full text-white"
+                        onClick={handleCaseUserSearch}
+                        className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-emerald-600/80 px-4 py-2 text-sm font-medium text-white shadow-lg shadow-[0_18px_35px_rgba(16,185,129,0.35)] transition hover:bg-emerald-500/80"
                       >
-                        <UserPlus className="w-3 h-3" /> Add
+                        <UserPlus className="h-4 w-4" />
+                        Search
                       </button>
                     </div>
-                  ))
-                ) : caseUserSearchTerm ? (
-                  <p className="text-xs text-gray-500">No users found.</p>
+
+                    <div className="space-y-2">
+                      {caseUserResults.length > 0 ? (
+                        caseUserResults.map((user) => (
+                          <div
+                            key={user.id}
+                            className="flex items-center justify-between rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 text-xs text-white shadow-inner shadow-white/5"
+                          >
+                            <div>
+                              <p className="font-medium">{user.name || user.email || user.id}</p>
+                              {user.email && <p className="text-gray-400">{user.email}</p>}
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => handleAddCaseUser(user)}
+                              className="inline-flex items-center gap-1 rounded-full border border-white/10 bg-emerald-600/80 px-3 py-1 text-xs font-medium text-white transition hover:bg-emerald-500/80"
+                            >
+                              <UserPlus className="h-3 w-3" />
+                              Add
+                            </button>
+                          </div>
+                        ))
+                      ) : caseUserSearchTerm ? (
+                        <p className="text-xs text-gray-400">No users found.</p>
+                      ) : (
+                        <p className="text-xs text-gray-400">Search to find users to assign.</p>
+                      )}
+                    </div>
+
+                    <div className="flex justify-end">
+                      <button
+                        type="button"
+                        onClick={handleSaveAssignments}
+                        disabled={isAssigningUsers}
+                        className={`inline-flex items-center gap-2 rounded-full border border-white/10 px-5 py-2.5 text-sm font-medium text-white shadow-lg shadow-[0_18px_35px_rgba(37,99,235,0.35)] transition ${
+                          isAssigningUsers
+                            ? "bg-blue-900/60 cursor-not-allowed opacity-60"
+                            : "bg-blue-600/80 hover:bg-blue-500/80"
+                        }`}
+                      >
+                        {isAssigningUsers ? "Saving..." : "Update Assignments"}
+                      </button>
+                    </div>
+                  </div>
                 ) : (
-                  <p className="text-xs text-gray-500">Search to find users to assign.</p>
+                  <p className="text-sm text-gray-400">Select a case to manage user access.</p>
                 )}
               </div>
-
-              <div className="flex justify-end">
-                <button
-                  type="button"
-                  onClick={handleSaveAssignments}
-                  disabled={isAssigningUsers}
-                  className={`inline-flex items-center gap-2 px-5 py-2 rounded-lg text-sm text-white ${
-                    isAssigningUsers ? 'bg-blue-900 cursor-not-allowed opacity-60' : 'bg-blue-700 hover:bg-blue-600'
-                  }`}
-                >
-                  {isAssigningUsers ? 'Saving...' : 'Update Assignments'}
-                </button>
-              </div>
             </div>
-          ) : (
-            <p className="text-sm text-gray-500">Select a case to manage user access.</p>
-          )}
-        </div>
+          </section>
+        </main>
       </div>
 
       <NotificationModal
@@ -741,3 +972,4 @@ const handleDeleteUser = async (userId, skipConfirmation = false) => {
 }
 
 export default AdminPanel;
+

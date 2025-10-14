@@ -1185,4 +1185,3 @@ const fetchCaseDocsForUser = async (userId) => {
     throw new Error("Unsupported image source");
   };
   
-

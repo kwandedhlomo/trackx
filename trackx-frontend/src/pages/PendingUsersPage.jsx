@@ -10,8 +10,13 @@ import {
 import { signOut } from "firebase/auth";
 import { Link, useNavigate } from "react-router-dom";
 import adfLogo from "../assets/image-removebg-preview.png";
-import trackxLogo from "../assets/trackx-logo-removebg-preview.png";
+import { motion } from "framer-motion";
+import AnimatedMap from "../components/AnimatedMap";
 import emailjs from "@emailjs/browser";
+import NotificationModal from "../components/NotificationModal";
+import useNotificationModal from "../hooks/useNotificationModal";
+import { getFriendlyErrorMessage } from "../utils/errorMessages";
+import { Home, FilePlus2, FolderOpen, Briefcase, LayoutDashboard, Users, UserCheck, UserX } from "lucide-react";
 
 function PendingUsersPage() {
   const [allUsers, setAllUsers] = useState([]);
@@ -19,10 +24,9 @@ function PendingUsersPage() {
   const [showMenu, setShowMenu] = useState(false);
   const [profile, setProfile] = useState(null);
   const [filter, setFilter] = useState("pending");
-  const [page, setPage] = useState(1);
-  const pageSize = 10;
-
   const navigate = useNavigate();
+  const { modalState, openModal, closeModal } = useNotificationModal();
+  const formattedDateTime = new Date().toLocaleString();
 
   useEffect(() => {
     fetchUsers();
@@ -123,295 +127,277 @@ function PendingUsersPage() {
     return true;
   });
 
-  // Pagination slice
-  const paginatedUsers = filteredUsers.slice(
-    (page - 1) * pageSize,
-    page * pageSize
-  );
+  const pendingCount = allUsers.filter((user) => user.isApproved === false && user.status !== "rejected").length;
+  const approvedCount = allUsers.filter((user) => user.isApproved === true).length;
+  const rejectedCount = allUsers.filter((user) => user.status === "rejected").length;
+  const filterOptions = [
+    {
+      value: "pending",
+      label: "Pending",
+      description: "Awaiting review",
+      accent: "from-blue-500/70 to-indigo-500/70",
+    },
+    {
+      value: "approved",
+      label: "Approved",
+      description: "Active investigators",
+      accent: "from-emerald-500/70 to-teal-500/70",
+    },
+    {
+      value: "rejected",
+      label: "Rejected",
+      description: "Previously declined",
+      accent: "from-rose-500/70 to-orange-500/70",
+    },
+  ];
+
+  const renderUserCard = (user) => {
+    const accent = user.status === "rejected"
+      ? "from-rose-500/60 via-rose-500/30"
+      : user.isApproved
+      ? "from-emerald-500/60 via-emerald-500/30"
+      : "from-blue-500/60 via-indigo-500/30";
+
+    return (
+      <div
+        key={user.id}
+        className="group relative overflow-hidden rounded-3xl border border-white/10 bg-white/[0.025] p-6 text-left shadow-[0_18px_45px_rgba(15,23,42,0.45)] backdrop-blur-2xl transition hover:border-white/25"
+      >
+        <div className={`absolute inset-0 -z-10 bg-gradient-to-br ${accent} opacity-0 transition group-hover:opacity-60`} />
+        <div className="flex flex-col gap-4 text-sm text-gray-200">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p className="text-base font-semibold text-white">
+                {user.firstName} {user.surname}
+              </p>
+              <p className="text-xs text-gray-300">{user.email}</p>
+            </div>
+            <span className="rounded-full border border-white/20 bg-black/30 px-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-gray-200">
+              {user.role || "User"}
+            </span>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-3 text-xs text-gray-300">
+            <span className="rounded-full border border-white/15 bg-white/[0.05] px-3 py-1">
+              Status: {user.status || (user.isApproved ? "approved" : "pending")}
+            </span>
+            <span className="rounded-full border border-white/15 bg-white/[0.05] px-3 py-1">
+              UID: {user.id}
+            </span>
+          </div>
+
+          <div className={`grid gap-3 ${filter === "pending" ? "sm:grid-cols-2" : ""}`}>
+            {filter === "pending" && (
+              <>
+                <button
+                  onClick={() => approveUser(user.id)}
+                  className="inline-flex items-center justify-center rounded-full bg-gradient-to-r from-emerald-500 to-teal-500 px-4 py-2 text-xs font-semibold text-white shadow-lg shadow-emerald-500/20 transition hover:from-emerald-400 hover:to-teal-400"
+                >
+                  Approve
+                </button>
+                <button
+                  onClick={() => rejectUser(user.id)}
+                  className="inline-flex items-center justify-center rounded-full bg-gradient-to-r from-rose-500 to-orange-500 px-4 py-2 text-xs font-semibold text-white shadow-lg shadow-rose-500/20 transition hover:from-rose-400 hover:to-orange-400"
+                >
+                  Reject
+                </button>
+              </>
+            )}
+            {filter === "rejected" && (
+              <button
+                onClick={() => approveUser(user.id, true)}
+                className="inline-flex items-center justify-center rounded-full bg-gradient-to-r from-amber-500 to-yellow-500 px-4 py-2 text-xs font-semibold text-white shadow-lg shadow-amber-500/20 transition hover:from-amber-400 hover:to-yellow-400"
+              >
+                Approve User
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  };
 
   return (
-    <div className="relative flex flex-col min-h-screen">
-      <div className="absolute inset-0 w-full min-h-full bg-gradient-to-br from-black via-gray-900 to-black -z-20" />
-
-      {/* Navbar */}
-      <nav className="flex justify-between items-center bg-gradient-to-r from-black to-gray-900 bg-opacity-80 backdrop-blur-md p-4 relative font-sans z-20">
-        <div className="flex items-center space-x-4">
-          <div
-            className="text-white text-3xl cursor-pointer"
-            onClick={() => setShowMenu(!showMenu)}
-          >
-            &#9776;
-          </div>
-          <img src={adfLogo} alt="ADF Logo" className="h-10 w-auto" />
-        </div>
-
-        <div className="absolute left-1/2 transform -translate-x-1/2 text-3xl font-extrabold text-white font-sans flex items-center space-x-2">
-          <img src={trackxLogo} alt="TrackX Logo Left" className="h-8 w-auto" />
-          <span>TRACKX</span>
+    <>
+      <motion.div
+        initial={{ opacity: 0, y: 18 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.8 }}
+        className="relative min-h-screen overflow-hidden bg-gradient-to-br from-black via-gray-900 to-black font-sans text-white"
+      >
+    <div className="absolute inset-0 -z-20">
+      <AnimatedMap />
+    </div>
+    <div className="pointer-events-none absolute inset-0 -z-10 bg-[radial-gradient(circle_at_top,rgba(59,130,246,0.18),transparent_55%)]" />
+    <div className="pointer-events-none absolute inset-0 -z-10 bg-[radial-gradient(circle_at_bottom,rgba(129,140,248,0.14),transparent_60%)]" />
+  
+    <nav className="mx-6 mt-6 flex items-center justify-between rounded-3xl border border-white/10 bg-gradient-to-br from-black/85 via-slate-900/70 to-black/80 px-6 py-4 shadow-xl shadow-[0_25px_65px_rgba(8,11,24,0.65)] backdrop-blur-xl">
+      <div className="flex items-center gap-4">
+        <button
+          type="button"
+          onClick={() => setShowMenu(!showMenu)}
+          className="flex h-11 w-11 items-center justify-center rounded-full border border-white/10 bg-white/[0.02] text-xl text-white shadow-inner shadow-white/5 transition hover:bg-white/10"
+          aria-label="Toggle navigation"
+        >
+          &#9776;
+        </button>
+        <Link to="/home" className="hidden sm:block">
           <img
-            src={trackxLogo}
-            alt="TrackX Logo Right"
-            className="h-8 w-auto"
+            src={adfLogo}
+            alt="ADF Logo"
+            className="h-11 w-auto drop-shadow-[0_10px_20px_rgba(59,130,246,0.35)] transition hover:opacity-90"
           />
+        </Link>
+      </div>
+  
+      <div className="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 text-2xl font-semibold tracking-[0.35em] text-white/80 drop-shadow-[0_2px_12px_rgba(15,23,42,0.55)]">
+        USER ADMIN
+      </div>
+  
+      <div className="flex items-center gap-4 text-sm text-gray-200">
+        <span className="hidden text-right md:block">
+          <span className="block text-xs text-gray-400">Pending • {pendingCount}</span>
+          <span>{formattedDateTime}</span>
+        </span>
+      </div>
+    </nav>
+  
+    {showMenu && (
+      <div className="absolute left-6 top-32 z-30 w-64 space-y-2 rounded-3xl border border-white/10 bg-gradient-to-br from-slate-950/85 via-slate-900/78 to-black/78 p-6 shadow-2xl shadow-[0_30px_60px_rgba(30,58,138,0.45)] backdrop-blur-2xl">
+        <Link
+          to="/home"
+          className="flex items-center gap-3 rounded-2xl px-3 py-2 text-sm font-medium text-gray-200 transition hover:bg-white/10 hover:text-white"
+          onClick={() => setShowMenu(false)}
+        >
+          <Home className="h-4 w-4" />
+          Home
+        </Link>
+        <Link
+          to="/new-case"
+          className="flex items-center gap-3 rounded-2xl px-3 py-2 text-sm font-medium text-gray-200 transition hover:bg-white/10 hover:text-white"
+          onClick={() => setShowMenu(false)}
+        >
+          <FilePlus2 className="h-4 w-4" />
+          Create New Case
+        </Link>
+        <Link
+          to="/manage-cases"
+          className="flex items-center gap-3 rounded-2xl px-3 py-2 text-sm font-medium text-gray-200 transition hover:bg-white/10 hover:text-white"
+          onClick={() => setShowMenu(false)}
+        >
+          <FolderOpen className="h-4 w-4" />
+          Manage Cases
+        </Link>
+        <Link
+          to="/my-cases"
+          className="flex items-center gap-3 rounded-2xl px-3 py-2 text-sm font-medium text-gray-200 transition hover:bg-white/10 hover:text-white"
+          onClick={() => setShowMenu(false)}
+        >
+          <Briefcase className="h-4 w-4" />
+          My Cases
+        </Link>
+        <div className="flex items-center gap-3 rounded-2xl px-3 py-2 text-sm font-medium text-white bg-white/[0.045] shadow-inner shadow-white/10">
+          <Users className="h-4 w-4" />
+          Pending Users
         </div>
-
-        <div className="flex items-center space-x-6 text-white font-sans">
-          <Link to="/admin-dashboard" className="hover:text-white">
-            Admin
-          </Link>
-          <div className="flex flex-col text-right">
-            <span>{profile ? profile.firstName : "Loading..."}</span>
-            <button
-              onClick={handleSignOut}
-              className="text-sm text-white hover:text-white"
-            >
-              Sign Out
-            </button>
+        <Link
+          to="/admin-dashboard"
+          className="flex items-center gap-3 rounded-2xl px-3 py-2 text-sm font-medium text-gray-200 transition hover:bg-white/10 hover:text-white"
+          onClick={() => setShowMenu(false)}
+        >
+          <LayoutDashboard className="h-4 w-4" />
+          Admin Dashboard
+        </Link>
+      </div>
+    )}
+  
+    <main className="mx-auto flex w-full max-w-6xl flex-col gap-8 px-6 pb-24 pt-16">
+      <section className="relative overflow-hidden rounded-3xl border border-white/10 bg-white/[0.03] px-8 py-8 shadow-[0_35px_90px_rgba(15,23,42,0.55)] backdrop-blur-2xl">
+        <div className="pointer-events-none absolute -top-24 right-0 h-48 w-48 rounded-full bg-blue-900/25 blur-3xl" />
+        <div className="pointer-events-none absolute -bottom-20 left-0 h-40 w-40 rounded-full bg-purple-900/20 blur-3xl" />
+        <div className="relative z-10 grid gap-6 lg:grid-cols-4">
+          <div className="lg:col-span-2">
+            <h1 className="text-3xl font-semibold text-white">User Management Console</h1>
+            <p className="mt-3 text-sm text-gray-300">
+              Approve incoming investigators, keep tabs on rejected requests, and audit the active roster. Use the filters below to pivot between cohorts.
+            </p>
           </div>
-          <div className="text-sm text-white">{new Date().toLocaleString()}</div>
-        </div>
-      </nav>
-
-      {/* Sidebar Menu */}
-      {showMenu && (
-        <div className="absolute top-16 left-0 bg-black bg-opacity-90 backdrop-blur-md text-white w-64 p-6 z-30 space-y-4 border-r border-gray-700 shadow-lg">
-          <Link
-            to="/home"
-            className="block hover:text-blue-400"
-            onClick={() => setShowMenu(false)}
-          >
-            🏠 Home
-          </Link>
-          <Link
-            to="/new-case"
-            className="block hover:text-blue-400"
-            onClick={() => setShowMenu(false)}
-          >
-            📝 Create New Case / Report
-          </Link>
-          <Link
-            to="/manage-cases"
-            className="block hover:text-blue-400"
-            onClick={() => setShowMenu(false)}
-          >
-            📁 Manage Cases
-          </Link>
-          <Link
-            to="/admin-dashboard"
-            className="block hover:text-blue-400"
-            onClick={() => setShowMenu(false)}
-          >
-            🛠️ Admin Dashboard
-          </Link>
-        </div>
-      )}
-
-      <div className="text-center text-white text-lg tracking-wide mt-4 font-sans z-10">
-        <h1 className="text-3xl font-bold text-white-500">User Management</h1>
-      </div>
-
-      {/* Filters */}
-      <div className="flex justify-center space-x-4 mt-6">
-        <button
-          onClick={() => {
-            setFilter("pending");
-            setPage(1);
-          }}
-          className={`px-4 py-2 rounded ${
-            filter === "pending" ? "bg-blue-600" : "bg-gray-700"
-          }`}
-        >
-          Pending
-        </button>
-        <button
-          onClick={() => {
-            setFilter("approved");
-            setPage(1);
-          }}
-          className={`px-4 py-2 rounded ${
-            filter === "approved" ? "bg-green-600" : "bg-gray-700"
-          }`}
-        >
-          Approved
-        </button>
-        <button
-          onClick={() => {
-            setFilter("rejected");
-            setPage(1);
-          }}
-          className={`px-4 py-2 rounded ${
-            filter === "rejected" ? "bg-red-600" : "bg-gray-700"
-          }`}
-        >
-          Rejected
-        </button>
-        <button
-          onClick={() => {
-            setFilter("revoked");
-            setPage(1);
-          }}
-          className={`px-4 py-2 rounded ${
-            filter === "revoked" ? "bg-gray-600" : "bg-gray-700"
-          }`}
-        >
-          Revoked
-        </button>
-      </div>
-
-      {/* Table View */}
-      <div className="flex-grow z-10 p-8">
-        {loading ? (
-          <p className="text-center text-white">Loading users...</p>
-        ) : paginatedUsers.length === 0 ? (
-          <p className="text-center text-white">No users found.</p>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full table-auto border border-gray-700">
-              <thead className="bg-white bg-opacity-10 border border-gray-700">
-                <tr>
-                  <th className="p-3 text-left text-white">Name</th>
-                  <th className="p-3 text-left text-white">Email</th>
-                  <th className="p-3 text-left text-white">Role</th>
-                  <th className="p-3 text-left text-white">Status</th>
-                  <th className="p-3 text-left text-white">Action</th>
-                </tr>
-              </thead>
-              <tbody>
-                {paginatedUsers.map((user) => (
-                  <tr
-                    key={user.id}
-                    className="border-b border-gray-700 hover:bg-white/10"
-                  >
-                    <td className="p-3 text-white">
-                      {user.firstName} {user.surname}
-                    </td>
-                    <td className="p-3 text-white">{user.email}</td>
-                    <td className="p-3 text-white">{user.role}</td>
-                    <td className="p-3 text-white">
-                      <span
-                        className={`px-2 py-1 rounded-full text-xs font-bold tracking-wide uppercase ${
-                          user.status === "approved"
-                            ? "bg-green-600 text-white"
-                            : user.status === "rejected"
-                            ? "bg-red-600 text-white"
-                            : user.status === "revoked"
-                            ? "bg-gray-600 text-white"
-                            : "bg-yellow-600 text-white"
-                        }`}
-                      >
-                        {user.status || "pending"}
-                      </span>
-                    </td>
-                    <td className="p-3 text-white space-x-2">
-                      {filter === "pending" && (
-                        <>
-                          <button
-                            onClick={() => approveUser(user.id)}
-                            className="px-3 py-1 bg-green-600 hover:bg-green-700 rounded"
-                          >
-                            Approve
-                          </button>
-                          <button
-                            onClick={() => rejectUser(user.id)}
-                            className="px-3 py-1 bg-red-600 hover:bg-red-700 rounded"
-                          >
-                            Reject
-                          </button>
-                        </>
-                      )}
-
-                      {filter === "approved" && (
-                        <button
-                          onClick={async () => {
-                            try {
-                              const userRef = doc(db, "users", user.id);
-                              await updateDoc(userRef, {
-                                isApproved: false,
-                                status: "revoked",
-                              });
-                              alert("User access revoked.");
-                              setAllUsers((prev) =>
-                                prev.map((u) =>
-                                  u.id === user.id
-                                    ? { ...u, isApproved: false, status: "revoked" }
-                                    : u
-                                )
-                              );
-                            } catch (err) {
-                              console.error("Error revoking user:", err);
-                              alert("Error revoking user.");
-                            }
-                          }}
-                          className="px-3 py-1 bg-red-600 hover:bg-red-700 rounded"
-                        >
-                          Revoke Access
-                        </button>
-                      )}
-
-                      {filter === "rejected" && (
-                        <button
-                          onClick={() => approveUser(user.id, true)}
-                          className="px-3 py-1 bg-green-600 hover:bg-green-700 rounded"
-                        >
-                          Approve Rejected User
-                        </button>
-                      )}
-
-                      {filter === "revoked" && (
-                        <button
-                          onClick={async () => {
-                            try {
-                              const userRef = doc(db, "users", user.id);
-                              await updateDoc(userRef, {
-                                isApproved: true,
-                                status: "approved",
-                              });
-                              alert("User access restored.");
-                              setAllUsers((prev) =>
-                                prev.map((u) =>
-                                  u.id === user.id
-                                    ? { ...u, isApproved: true, status: "approved" }
-                                    : u
-                                )
-                              );
-                            } catch (err) {
-                              console.error("Error restoring user:", err);
-                              alert("Error restoring user.");
-                            }
-                          }}
-                          className="px-3 py-1 bg-blue-600 hover:bg-blue-700 rounded"
-                        >
-                          Restore Access
-                        </button>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-
-            {/* Pagination */}
-            <div className="flex justify-between items-center mt-4">
-              <button
-                onClick={() => setPage((prev) => Math.max(prev - 1, 1))}
-                disabled={page === 1}
-                className="px-4 py-2 bg-white bg-opacity-10 border border-gray-600 text-white rounded disabled:opacity-50"
-              >
-                Prev
-              </button>
-              <span className="text-sm text-white">Page {page}</span>
-              <button
-                onClick={() => setPage((prev) => prev + 1)}
-                disabled={paginatedUsers.length < pageSize}
-                className="px-4 py-2 bg-white bg-opacity-10 border border-gray-600 text-white rounded disabled:opacity-50"
-              >
-                Next
-              </button>
+          <div className="grid gap-4 text-sm text-gray-200 sm:grid-cols-3 lg:col-span-2">
+            <div className="rounded-2xl border border-white/10 bg-white/[0.05] p-4">
+              <p className="text-xs uppercase tracking-wide text-gray-400">Pending</p>
+              <p className="mt-2 text-xl font-semibold text-white">{pendingCount}</p>
+              <p className="text-[11px] text-gray-400">Awaiting decision</p>
+            </div>
+            <div className="rounded-2xl border border-white/10 bg-white/[0.05] p-4">
+              <p className="text-xs uppercase tracking-wide text-gray-400">Approved</p>
+              <p className="mt-2 text-xl font-semibold text-emerald-300">{approvedCount}</p>
+              <p className="text-[11px] text-gray-400">Active accounts</p>
+            </div>
+            <div className="rounded-2xl border border-white/10 bg-white/[0.05] p-4">
+              <p className="text-xs uppercase tracking-wide text-gray-400">Rejected</p>
+              <p className="mt-2 text-xl font-semibold text-rose-300">{rejectedCount}</p>
+              <p className="text-[11px] text-gray-400">Require follow-up</p>
             </div>
           </div>
-        )}
+        </div>
+      </section>
+  
+      <section className="rounded-3xl border border-white/10 bg-white/[0.018] p-6 shadow-[0_25px_70px_rgba(15,23,42,0.45)] backdrop-blur-2xl">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <h2 className="text-lg font-semibold text-white">Filter by status</h2>
+          <p className="text-xs text-gray-400">Switch between cohorts to focus on the approvals that matter right now.</p>
+        </div>
+      <div className="mt-5 grid gap-3 sm:grid-cols-3">
+        {filterOptions.map(({ value, label, description, accent }) => (
+          <button
+            key={value}
+            onClick={() => setFilter(value)}
+            className={`group relative overflow-hidden rounded-2xl border px-4 py-4 text-left transition ${
+              filter === value
+                ? `border-white/30 text-white`
+                : `border-white/10 text-gray-300 hover:border-white/20`
+            }`}
+          >
+            <div
+              className={`absolute inset-0 -z-10 bg-gradient-to-br ${accent} transition ${
+                filter === value ? 'opacity-70' : 'opacity-0 group-hover:opacity-40'
+              }`}
+            />
+            <p className="text-sm font-semibold">{label}</p>
+            <p className="mt-1 text-xs text-gray-200">{description}</p>
+          </button>
+        ))}
       </div>
-    </div>
+      </section>
+  
+      <section className="rounded-3xl border border-white/10 bg-white/[0.02] p-6 shadow-[0_25px_70px_rgba(15,23,42,0.45)] backdrop-blur-2xl">
+       {loading ? (
+         <div className="py-12 text-center text-gray-300">
+            <div className="flex items-center justify-center gap-3">
+              <span className="h-5 w-5 animate-spin rounded-full border-b-2 border-t-2 border-blue-500" />
+              Loading users...
+            </div>
+          </div>
+        ) : filteredUsers.length > 0 ? (
+          <div className="grid gap-4 md:grid-cols-2">
+            {filteredUsers.map(renderUserCard)}
+          </div>
+        ) : (
+          <p className="text-sm text-gray-400">No users match the selected filter.</p>
+        )}
+      </section>
+    </main>
+      </motion.div>
+      <NotificationModal
+        isOpen={modalState.isOpen}
+        title={modalState.title}
+        description={modalState.description}
+        variant={modalState.variant}
+        onClose={closeModal}
+        primaryAction={modalState.primaryAction}
+        secondaryAction={modalState.secondaryAction}
+      />
+    </>
   );
 }
 

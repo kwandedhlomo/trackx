@@ -65,80 +65,76 @@ const handleSignIn = async (e) => {
 };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-black via-gray-900 to-black p-4">
-      <div className="w-full max-w-md space-y-8">
-        <h2 className="text-center text-3xl font-extrabold text-white">Sign In to TrackX</h2>
-
-        <form onSubmit={handleSignIn} className="mt-8 space-y-6">
-          <div className="rounded-md shadow-sm space-y-4">
-            <div>
-              <input
-                id="email"
-                type="email"
-                required
-                placeholder="Email address"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                className="appearance-none rounded relative block w-full px-3 py-2 bg-gray-800 text-white placeholder-gray-400 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
-              />
+    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-black via-gray-900 to-black p-6">
+      <div className="w-full max-w-md">
+  <div className="relative rounded-2xl border border-white/10 bg-white/5 backdrop-blur-lg p-6 shadow-[0_30px_60px_rgba(2,6,23,0.7)]">
+          <div className="absolute -inset-0.5 rounded-2xl bg-gradient-to-r from-white/5 to-transparent blur opacity-60" />
+          <div className="relative z-10 space-y-6">
+            <div className="flex items-center justify-center gap-3">
+              <h2 className="text-center text-2xl font-extrabold text-white">Sign In to TrackX</h2>
             </div>
 
-            <div className="relative">
-              <input
-                id="password"
-                type={showPassword ? "text" : "password"}
-                required
-                placeholder="Password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className="appearance-none rounded relative block w-full px-3 py-2 bg-gray-800 text-white placeholder-gray-400 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
-              />
-              <div
-                className="absolute top-1/2 right-3 transform -translate-y-1/2 cursor-pointer text-gray-400"
-                onClick={() => setShowPassword(!showPassword)}
-              >
-                {showPassword ? <EyeOff size={20} /> : <Eye size={20} />}
+            <form onSubmit={handleSignIn} className="space-y-4">
+              <div className="space-y-3">
+                <label className="sr-only" htmlFor="email">Email</label>
+                <input
+                  id="email"
+                  type="email"
+                  required
+                  placeholder="Email address"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  className="w-full rounded-xl px-3 py-2 bg-transparent text-white placeholder-gray-400 border border-white/8 focus:outline-none focus:ring-2 focus:ring-blue-600"
+                />
               </div>
-            </div>
-          </div>
 
-          {/* Error Message */}
-          {errorMessage && (
-            <p className="text-sm text-red-500 text-center">{errorMessage}</p>
-          )}
-
-          {/* Sign In Button */}
-          <div>
-            <button
-              type="submit"
-              disabled={isLoading}
-              className={`group relative w-full flex justify-center py-2 px-4 text-sm font-medium rounded-md text-white bg-blue-700 hover:bg-blue-800 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-opacity duration-300 ${
-                isLoading ? "opacity-70 cursor-not-allowed" : ""
-              }`}
-            >
-              {isLoading ? (
-                <div className="flex items-center justify-center gap-2">
-                  <Loader2 className="animate-spin w-5 h-5" />
-                  <span>Signing in...</span>
+              <div className="relative">
+                <label className="sr-only" htmlFor="password">Password</label>
+                <input
+                  id="password"
+                  type={showPassword ? "text" : "password"}
+                  required
+                  placeholder="Password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className="w-full rounded-xl px-3 py-2 bg-transparent text-white placeholder-gray-400 border border-white/8 focus:outline-none focus:ring-2 focus:ring-blue-600"
+                />
+                <div
+                  className="absolute top-1/2 right-3 transform -translate-y-1/2 cursor-pointer text-gray-300"
+                  onClick={() => setShowPassword(!showPassword)}
+                >
+                  {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
                 </div>
-              ) : (
-                "Sign In"
+              </div>
+
+              {/* Error Message */}
+              {errorMessage && (
+                <p className="text-sm text-red-400 text-center">{errorMessage}</p>
               )}
-            </button>
-          </div>
 
-          <div className="text-center text-sm mt-2">
-            <Link to="/forgot-password" className="text-blue-400 hover:text-blue-300">
-              Forgot your password?
-            </Link>
-          </div>
-        </form>
+              <div>
+                <button
+                  type="submit"
+                  disabled={isLoading}
+                  className={`w-full inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold text-white bg-gradient-to-r from-blue-900 via-indigo-900 to-purple-900 border border-white/10 shadow-[0_18px_40px_rgba(15,23,42,0.6)] transition ${isLoading ? "opacity-70 cursor-not-allowed" : ""}`}
+                >
+                  {isLoading ? (
+                    <>
+                      <Loader2 className="animate-spin w-5 h-5" />
+                      <span>Signing in...</span>
+                    </>
+                  ) : (
+                    "Sign In"
+                  )}
+                </button>
+              </div>
 
-        <div className="text-center text-sm text-gray-400">
-          Don't have an account?{" "}
-          <Link to="/register" className="font-medium text-blue-400 hover:text-blue-300">
-            Register
-          </Link>
+              <div className="flex items-center justify-between text-sm">
+                <Link to="/forgot-password" className="bg-gradient-to-r from-blue-300 via-indigo-400 to-purple-300 bg-clip-text text-transparent font-medium hover:underline">Forgot password?</Link>
+                <Link to="/register" className="bg-gradient-to-r from-blue-300 via-indigo-400 to-purple-300 bg-clip-text text-transparent font-medium hover:underline">Register</Link>
+              </div>
+            </form>
+          </div>
         </div>
       </div>
     </div>

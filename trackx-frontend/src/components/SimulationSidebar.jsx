@@ -1,3 +1,5 @@
+// SimulationSidebar.jsx — MERGED (your UI + Jon’s unified events/timeline logic)
+
 import { useEffect, useMemo, useState } from "react";
 import { db } from "../firebase";
 import {
@@ -15,13 +17,13 @@ import * as Cesium from "cesium";
 import { Pencil, Trash2 } from "lucide-react";
 import "../css/Sidebar.css";
 
+import NotificationModal from "./NotificationModal";
+import useNotificationModal from "../hooks/useNotificationModal";
+import { getFriendlyErrorMessage } from "../utils/errorMessages";
+
 /** -------------------- DEBUG + helpers -------------------- **/
-
-const DEBUG = true; // set false to quiet logs
-const SA_TZ = "Africa/Johannesburg"; // only for human-friendly logs
-
-
-
+const DEBUG = false; // set true to inspect ordering/jumps in console
+const SA_TZ = "Africa/Johannesburg";
 
 const fmtMs = (ms, tz = "UTC") =>
   ms == null
@@ -37,7 +39,7 @@ const fmtMs = (ms, tz = "UTC") =>
         second: "2-digit",
       });
 
-/** Get CSV-ish time string from a location doc */
+/** Prefer CSV-ish/ingested strings; fall back to timestamp if present */
 function extractCsvTime(loc) {
   return (
     loc?.csvDescription ||
@@ -48,7 +50,7 @@ function extractCsvTime(loc) {
   );
 }
 
-/** Parse HH:MM:SS from any string → {h,m,s} or null */
+/** Parse HH:MM:SS → {h,m,s} or null */
 function parseTOD(csvLike) {
   if (!csvLike) return null;
   const m = String(csvLike).match(/(\d{2}):(\d{2}):(\d{2})/);
@@ -68,7 +70,7 @@ function parseTOD(csvLike) {
   return { h, m: mi, s };
 }
 
-/** Viewer’s start day at UTC midnight → epoch ms */
+/** Viewer CZML start day → UTC midnight (ms) */
 function getViewerStartDayUtcMs(viewerRef) {
   const v = viewerRef?.current?.cesiumElement;
   if (!v?.clock?.startTime) return null;
@@ -84,7 +86,7 @@ function getViewerStartDayUtcMs(viewerRef) {
   );
 }
 
-/** Place a {h,m,s} on the viewer’s current start day (UTC) */
+/** Place a {h,m,s} on viewer’s start day (UTC) → ms */
 function todOnViewerStartUTC(viewerRef, tod) {
   const v = viewerRef?.current?.cesiumElement;
   if (!v?.clock?.startTime || !tod) return null;
@@ -100,14 +102,14 @@ function todOnViewerStartUTC(viewerRef, tod) {
   );
 }
 
-/** Seconds since UTC midnight for any ms timestamp */
+/** Seconds since UTC midnight for a given ms timestamp */
 function secondsSinceMidnightUTC(ms) {
   if (ms == null) return null;
   const d = new Date(ms);
   return d.getUTCHours() * 3600 + d.getUTCMinutes() * 60 + d.getUTCSeconds();
 }
 
-/** Fallback: if no time parsed, space by 'order' from sim-day midnight (5s per step) */
+/** Fallback spacing if no time-of-day parse: position by order (5s steps) */
 function orderFallbackMs(order, baseDayUtcMs) {
   if (baseDayUtcMs == null) return null;
   const offsetSec = Number.isFinite(order) ? order * 5 : 0;
@@ -120,32 +122,33 @@ const badgeFor = (source) =>
 /** ----------------------------------------------------------- **/
 
 export default function SimulationSidebar({ viewerRef, disabled = false }) {
+  // UI
   const [collapsed, setCollapsed] = useState(false);
   const [activeIndex, setActiveIndex] = useState(null);
+  const [flashingIndex, setFlashingIndex] = useState(null);
+  const [expanded, setExpanded] = useState({}); // key: `${source}:${id}` → bool
+  const toggleExpand = (key, e) => {
+    e.stopPropagation();
+    setExpanded((prev) => ({ ...prev, [key]: !prev[key] }));
+  };
 
   // data
   const [caseId, setCaseId] = useState(null);
-  const [flaggedPoints, setFlaggedPoints] = useState([]); // UTC timestamps
-  const [locations, setLocations] = useState([]); // CSV text → TOD
+  const [flaggedPoints, setFlaggedPoints] = useState([]); // Firestore flags (UTC timestamps)
+  const [locations, setLocations] = useState([]); // Stops/annotations
 
-  // base sim day at UTC midnight (for display/sort); we still recompute on click
+  // sim-day anchor
   const [baseDayUtcMs, setBaseDayUtcMs] = useState(null);
 
-  // edit modal
+  // edit modal state
   const [editingPoint, setEditingPoint] = useState(null);
   const [editTitle, setEditTitle] = useState("");
   const [editNote, setEditNote] = useState("");
-  const [flashingIndex, setFlashingIndex] = useState(null);
 
-  // Track which cards are expanded (keyed by "source:id")
-const [expanded, setExpanded] = useState({});
-const toggleExpand = (key, e) => {
-  e.stopPropagation(); // don't trigger the card's onClick jump
-  setExpanded(prev => ({ ...prev, [key]: !prev[key] }));
-};
+  // notifications
+  const { modalState, openModal, closeModal } = useNotificationModal();
 
-
-  // caseId from localStorage
+  /** ---------- bootstrap: caseId ---------- **/
   useEffect(() => {
     try {
       const str = localStorage.getItem("trackxCaseData");
@@ -154,12 +157,12 @@ const toggleExpand = (key, e) => {
     } catch {}
   }, []);
 
-  // Keep base day synced to the viewer’s clock (updates if CZML startTime changes)
+  /** ---------- keep baseDay synced to viewer CZML ---------- **/
   useEffect(() => {
     const tick = () => {
       const ms = getViewerStartDayUtcMs(viewerRef);
       setBaseDayUtcMs((prev) => (ms != null && ms !== prev ? ms : prev));
-      if (DEBUG && ms != null && ms !== baseDayUtcMs) {
+      if (DEBUG && ms != null) {
         console.debug(
           "[SIM-DAY sync] baseDay UTC:",
           fmtMs(ms, "UTC"),
@@ -170,12 +173,12 @@ const toggleExpand = (key, e) => {
       }
     };
     tick();
-    const id = setInterval(tick, 500); // lightweight, only sets if changed
+    const id = setInterval(tick, 500);
     return () => clearInterval(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [viewerRef]);
 
-  /* ---------- flagged points: realtime (already UTC) ---------- */
+  /** ---------- flags: realtime ---------- **/
   useEffect(() => {
     if (!caseId) return;
     const ref = collection(db, `cases/${caseId}/interpolatedPoints`);
@@ -193,19 +196,6 @@ const toggleExpand = (key, e) => {
             (b.timestamp?.seconds ? b.timestamp.seconds * 1000 : 0);
           return aMs - bMs;
         });
-        if (DEBUG) {
-          console.debug(
-            "[FLAGS] sample:",
-            pts.slice(0, 3).map((p) => ({
-              id: p.id,
-              utc: fmtMs(
-                p.timestamp?.toMillis?.() ??
-                  (p.timestamp?.seconds ? p.timestamp.seconds * 1000 : null),
-                "UTC"
-              ),
-            }))
-          );
-        }
         setFlaggedPoints(pts);
       },
       (err) => console.error("flags listener error:", err)
@@ -213,7 +203,7 @@ const toggleExpand = (key, e) => {
     return () => unsub();
   }, [caseId]);
 
-  /* ---------- locations: one-time fetch → store TOD ---------- */
+  /** ---------- stops/locations: one-time load ---------- **/
   useEffect(() => {
     if (!caseId) return;
     (async () => {
@@ -221,18 +211,6 @@ const toggleExpand = (key, e) => {
         const ref = collection(db, `cases/${caseId}/locations`);
         const snap = await getDocs(query(ref, orderBy("order", "asc")));
         const locs = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-        if (DEBUG) {
-          console.debug(
-            "[LOCS] loaded",
-            locs.length,
-            locs.map((l) => ({
-              id: l.id,
-              title: l.title,
-              order: l.order,
-              csv: extractCsvTime(l),
-            }))
-          );
-        }
         setLocations(locs);
       } catch (e) {
         console.error("fetch locations failed:", e);
@@ -240,18 +218,16 @@ const toggleExpand = (key, e) => {
     })();
   }, [caseId]);
 
-  /** ---------- normalize to a single, day-agnostic timeline ---------- */
+  /** ---------- normalize to a single, day-agnostic timeline ---------- **/
 
-  // Flags: real UTC jump time; plus a **day-agnostic sortKeyMs** so they interleave with stops
+  // Flags: have true UTC; derive a day-anchored sortKey so they interleave with stops
   const flagItems = useMemo(() => {
     return flaggedPoints.map((p) => {
       const utcMs =
         p.timestamp?.toMillis?.() ??
         (p.timestamp?.seconds ? p.timestamp.seconds * 1000 : null);
 
-      // seconds-of-day from the flag's timestamp
       const todSec = secondsSinceMidnightUTC(utcMs);
-      // anchor to viewer day for **sorting only**
       const sortKeyMs =
         baseDayUtcMs != null && todSec != null
           ? baseDayUtcMs + todSec * 1000
@@ -264,15 +240,15 @@ const toggleExpand = (key, e) => {
         note: p.note || "",
         lat: p.lat,
         lng: p.lng,
-        timestampMs: utcMs,      // for jump/display (true UTC)
-        sortKeyMs,               // for ordering (viewer day)
+        timestampMs: utcMs, // display/jump uses true UTC
+        sortKeyMs, // used only for ordering
         raw: p,
         debug: { chosenVia: "flag-utc", todSec },
       };
     });
   }, [flaggedPoints, baseDayUtcMs]);
 
-  // Stops/annotations: parse HH:MM:SS → place on current base day (UTC)
+  // Stops: parse CSV HH:MM:SS → place on current viewer day (UTC)
   const stopItems = useMemo(() => {
     return locations.map((loc) => {
       const csvStr = extractCsvTime(loc);
@@ -283,7 +259,7 @@ const toggleExpand = (key, e) => {
           ? baseDayUtcMs + (tod.h * 3600 + tod.m * 60 + tod.s) * 1000
           : orderFallbackMs(loc.order, baseDayUtcMs);
 
-      const sortKeyMs = chosenMs; // for stops, chosenMs is already viewer-day based
+      const sortKeyMs = chosenMs;
       const chosenVia = tod ? "csv-tod+simday-utc" : "order-fallback";
 
       if (DEBUG) {
@@ -291,10 +267,8 @@ const toggleExpand = (key, e) => {
           id: loc.locationId || loc.id,
           title: loc.title,
           csvRaw: csvStr,
-          tod: tod ? `${tod.h}:${String(tod.m).padStart(2, "0")}:${String(tod.s).padStart(2, "0")}` : null,
           baseDayUTC: fmtMs(baseDayUtcMs, "UTC"),
           chosenUTC: fmtMs(chosenMs, "UTC"),
-          chosenSAST: fmtMs(chosenMs, SA_TZ),
           via: chosenVia,
         });
       }
@@ -306,8 +280,8 @@ const toggleExpand = (key, e) => {
         note: loc.description || "",
         lat: loc.lat,
         lng: loc.lng,
-        timestampMs: chosenMs,  // used for display (UTC time on viewer day)
-        sortKeyMs,              // used for ordering
+        timestampMs: chosenMs, // (UTC on viewer day)
+        sortKeyMs,
         order: loc.order ?? 0,
         raw: loc,
         debug: { chosenVia, tod },
@@ -315,43 +289,26 @@ const toggleExpand = (key, e) => {
     });
   }, [locations, baseDayUtcMs]);
 
-  // Merge + **order by sortKeyMs** (NOT absolute timestamp)
+  // Merge + order (stops first on ties; then order; then id)
   const items = useMemo(() => {
     const merged = [...stopItems, ...flagItems];
-
     merged.sort((a, b) => {
       const at = a.sortKeyMs ?? Number.POSITIVE_INFINITY;
       const bt = b.sortKeyMs ?? Number.POSITIVE_INFINITY;
       if (at !== bt) return at - bt;
-
-      // ties: stops first, then flags
       if (a.source !== b.source) return a.source === "stop" ? -1 : 1;
-
       const ao = a.order ?? 0,
         bo = b.order ?? 0;
       if (ao !== bo) return ao - bo;
-
       return String(a.id).localeCompare(String(b.id));
     });
-
-    if (DEBUG) {
-      console.debug(
-        "[MERGED ORDER / DAY-AGNOSTIC]",
-        merged.map((it) => ({
-          src: it.source,
-          id: it.id,
-          title: it.title,
-          via: it.debug?.chosenVia,
-          sortKeyUTC: fmtMs(it.sortKeyMs, "UTC"),
-          displayUTC: fmtMs(it.timestampMs, "UTC"),
-        }))
-      );
-    }
-
+    try {
+      localStorage.setItem("flaggedSidebarFlash", JSON.stringify(merged));
+    } catch {}
     return merged;
   }, [stopItems, flagItems]);
 
-  // Flash support
+  /** ---------- flash support (external) ---------- **/
   useEffect(() => {
     const listener = (e) => {
       const idx = e.detail;
@@ -362,14 +319,9 @@ const toggleExpand = (key, e) => {
     return () => window.removeEventListener("flashSidebarItem", listener);
   }, []);
 
-  useEffect(() => {
-    try {
-      localStorage.setItem("flaggedSidebarFlash", JSON.stringify(items));
-    } catch {}
-  }, [items]);
-
-  /** ---------- JUMP (recompute stop on click so day never mismatches) ---------- **/
+  /** ---------- jump (recompute stop times on current sim day) ---------- **/
   function logJumpRequest(it, idx, viewer) {
+    if (!DEBUG) return;
     const startMs = viewer?.clock
       ? Cesium.JulianDate.toDate(viewer.clock.startTime).getTime()
       : null;
@@ -401,41 +353,59 @@ const toggleExpand = (key, e) => {
     const viewer = viewerRef?.current?.cesiumElement;
     if (!viewer?.clock) return;
 
-    // Pre-log (what we *thought* we'd jump to)
     logJumpRequest(it, idx, viewer);
 
-    // For stops, recompute from TOD on the current viewer day (absolutely day-agnostic)
+    // For stops, recompute from TOD on the current viewer day (day-agnostic)
     let targetMs = timestampMs;
     if (it.source === "stop" && it.debug?.tod) {
       const recomputed = todOnViewerStartUTC(viewerRef, it.debug.tod);
-      if (recomputed != null) {
-        if (DEBUG) {
-          console.debug("[JUMP] recomputed on viewer day:", {
-            oldUTC: fmtMs(targetMs, "UTC"),
-            newUTC: fmtMs(recomputed, "UTC"),
-          });
-        }
-        targetMs = recomputed;
-      }
+      if (recomputed != null) targetMs = recomputed;
     }
 
     const target = Cesium.JulianDate.fromDate(new Date(targetMs));
     const start = viewer.clock.startTime;
     const stop = viewer.clock.stopTime;
 
-    const startMs = Cesium.JulianDate.toDate(start).getTime();
-    const stopMs = Cesium.JulianDate.toDate(stop).getTime();
-
-    let outcome = "INSIDE_RANGE";
     if (Cesium.JulianDate.lessThan(target, start)) {
       viewer.clock.currentTime = Cesium.JulianDate.clone(start);
-      outcome = "CLAMPED_TO_START";
     } else if (Cesium.JulianDate.greaterThan(target, stop)) {
       viewer.clock.currentTime = Cesium.JulianDate.clone(stop);
-      outcome = "CLAMPED_TO_STOP";
     } else {
       viewer.clock.currentTime = target;
-      outcome = "TARGET_SET";
+    }
+    viewer.clock.shouldAnimate = false;
+  };
+
+  /** ---------- delete (with your NotificationModal) ---------- **/
+  const deleteFlaggedPoint = async (point) => {
+    closeModal();
+    if (!caseId || !point?.id) {
+      openModal({
+        variant: "error",
+        title: "Delete failed",
+        description:
+          "We couldn't identify which point to delete. Please try again.",
+      });
+      return;
+    }
+    try {
+      const pointRef = doc(db, `cases/${caseId}/interpolatedPoints`, point.id);
+      await deleteDoc(pointRef);
+      openModal({
+        variant: "success",
+        title: "Flag removed",
+        description: "The flagged point has been deleted.",
+      });
+    } catch (err) {
+      console.error("Error deleting point:", err);
+      openModal({
+        variant: "error",
+        title: "Delete failed",
+        description: getFriendlyErrorMessage(
+          err,
+          "We couldn't delete the flagged point. Please try again."
+        ),
+      });
     }
     viewer.clock.shouldAnimate = false;
 
@@ -467,226 +437,233 @@ const toggleExpand = (key, e) => {
     console.groupEnd();
   };
 
-  const handleDelete = (point) => {
-    if (window.confirm("Are you sure you want to delete this flagged point?")) {
-      const pointRef = doc(db, `cases/${caseId}/interpolatedPoints`, point.id);
-      deleteDoc(pointRef).catch((err) =>
-        console.error("Error deleting point:", err)
-      );
-    }
+  const confirmDelete = (point) => {
+    openModal({
+      variant: "warning",
+      title: "Delete flagged point?",
+      description:
+        "Are you sure you want to remove this flagged point? This action cannot be undone.",
+      primaryAction: {
+        label: "Delete point",
+        closeOnClick: false,
+        onClick: () => deleteFlaggedPoint(point),
+      },
+      secondaryAction: { label: "Cancel" },
+    });
   };
 
   /** -------------------- UI -------------------- **/
-
   return (
-    <div
-      style={{
-        position: "absolute",
-        top: "24px",
-        left: "24px",
-        width: collapsed ? "64px" : "300px",
-        backgroundColor: "#1e1e1e",
-        color: "#f1f5f9",
-        padding: "20px",
-        borderRadius: "16px",
-        boxShadow:
-          "0 0 24px rgba(0, 0, 0, 0.6), 0 0 12px rgba(100, 100, 100, 0.3)",
-        zIndex: 999,
-        transition: "all 0.4s ease",
-        overflow: "hidden",
-      }}
-    >
-      {/* Collapse Button */}
+    <>
       <div
         style={{
-          display: "flex",
-          justifyContent: "flex-end",
-          marginBottom: collapsed ? "0" : "16px",
+          position: "absolute",
+          top: "24px",
+          left: "24px",
+          width: collapsed ? "64px" : "300px",
+          backgroundColor: "#1e1e1e",
+          color: "#f1f5f9",
+          padding: "20px",
+          borderRadius: "16px",
+          boxShadow:
+            "0 0 24px rgba(0, 0, 0, 0.6), 0 0 12px rgba(100, 100, 100, 0.3)",
+          zIndex: 999,
+          transition: "all 0.4s ease",
+          overflow: "hidden",
         }}
       >
-        <button
-          onClick={() => setCollapsed(!collapsed)}
+        {/* Collapse Button */}
+        <div
           style={{
-            background: "none",
-            color: "#38bdf8",
-            border: "none",
-            cursor: "pointer",
-            fontSize: "1.8rem",
-            transform: collapsed ? "rotate(90deg)" : "rotate(0deg)",
-            transition: "transform 0.4s ease",
+            display: "flex",
+            justifyContent: "flex-end",
+            marginBottom: collapsed ? "0" : "16px",
           }}
-          title={collapsed ? "Expand menu" : "Collapse menu"}
         >
-          ☰
-        </button>
-      </div>
-
-      {!collapsed && (
-        <>
-          <h2
+          <button
+            onClick={() => setCollapsed(!collapsed)}
             style={{
-              fontSize: "1.2rem",
-              fontWeight: "bold",
-              marginBottom: "12px",
+              background: "none",
+              color: "#38bdf8",
+              border: "none",
+              cursor: "pointer",
+              fontSize: "1.8rem",
+              transform: collapsed ? "rotate(90deg)" : "rotate(0deg)",
+              transition: "transform 0.4s ease",
             }}
+            title={collapsed ? "Expand menu" : "Collapse menu"}
           >
-            Events
-          </h2>
+            ☰
+          </button>
+        </div>
 
-          <div style={{ position: "relative", paddingLeft: "24px" }}>
-            {/* Vertical Line */}
-            <div
+        {!collapsed && (
+          <>
+            <h2
               style={{
-                position: "absolute",
-                top: 0,
-                left: "10px",
-                width: "2px",
-                height: "100%",
-                backgroundColor: "#4b5563",
-                zIndex: 0,
-              }}
-            />
-
-            {/* Scrollable Items */}
-            <div
-              aria-disabled={disabled}
-              style={{
-                display: "flex",
-                flexDirection: "column",
-                gap: "18px",
-                zIndex: 1,
-                maxHeight: "60vh",
-                overflowY: "auto",
-                paddingRight: "6px",
-                pointerEvents: disabled ? "none" : "auto",
-                opacity: disabled ? 0.5 : 1,
-                filter: disabled ? "grayscale(60%)" : "none",
+                fontSize: "1.2rem",
+                fontWeight: "bold",
+                marginBottom: "12px",
               }}
             >
-              {items.length === 0 ? (
-                <p style={{ color: "#94a3b8", fontSize: "0.85rem" }}>
-                  No events yet.
-                </p>
-              ) : (
-                items.map((it, idx) => (
-                  <div
-                    key={`${it.source}-${it.id}-${idx}`}
-                    onClick={() => {
-                      if (disabled) return;
-                      if (it.timestampMs) {
-                        jumpTo(it.timestampMs, idx, it);
-                        setActiveIndex(idx);
-                        setFlashingIndex(idx);
-                        setTimeout(() => setFlashingIndex(null), 1000);
-                      } else {
-                        console.warn("No timestamp for item; cannot jump:", it);
-                      }
-                    }}
-                    style={{
-                      backgroundColor:
-                        flashingIndex === idx
-                          ? "#67e8f9"
-                          : activeIndex === idx
-                          ? "#ffffff"
-                          : "#111827",
-                      color: activeIndex === idx ? "#000" : "#f1f5f9",
-                      padding: "10px 14px",
-                      borderRadius: "10px",
-                      fontSize: "0.95rem",
-                      fontWeight: "500",
-                      transition: "background-color 0.3s ease",
-                      boxShadow:
-                        flashingIndex === idx
-                          ? "0 0 12px rgba(103, 232, 249, 0.8)"
-                          : activeIndex === idx
-                          ? "0 0 8px rgba(255,255,255,0.4)"
-                          : "inset 0 0 0 1px rgba(255,255,255,0.05)",
-                      position: "relative",
-                      cursor:
-                        disabled ? "default" : it.timestampMs ? "pointer" : "default",
-                    }}
-                  >
-                    {/* Dot Marker */}
-                    <div
-                      style={{
-                        position: "absolute",
-                        top: "50%",
-                        left: "-18px",
-                        transform: "translateY(-50%)",
-                        width: "10px",
-                        height: "10px",
-                        borderRadius: "999px",
-                        backgroundColor:
-                          it.source === "flag" ? "#f59e0b" : "#38bdf8",
-                        border: "2px solid #1e1e1e",
-                      }}
-                    />
+              Events
+            </h2>
 
-                    <div>
+            <div style={{ position: "relative", paddingLeft: "24px" }}>
+              {/* Vertical Line */}
+              <div
+                style={{
+                  position: "absolute",
+                  top: 0,
+                  left: "10px",
+                  width: "2px",
+                  height: "100%",
+                  backgroundColor: "#4b5563",
+                  zIndex: 0,
+                }}
+              />
+
+              {/* Scrollable Items */}
+              <div
+                aria-disabled={disabled}
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "18px",
+                  zIndex: 1,
+                  maxHeight: "60vh",
+                  overflowY: "auto",
+                  paddingRight: "6px",
+                  pointerEvents: disabled ? "none" : "auto",
+                  opacity: disabled ? 0.5 : 1,
+                  filter: disabled ? "grayscale(60%)" : "none",
+                }}
+              >
+                {items.length === 0 ? (
+                  <p style={{ color: "#94a3b8", fontSize: "0.85rem" }}>
+                    No events yet.
+                  </p>
+                ) : (
+                  items.map((it, idx) => {
+                    const key = `${it.source}:${it.id}`;
+                    const isActive = activeIndex === idx;
+                    const isFlashing = flashingIndex === idx;
+                    const noteText = it.note || "(no note)";
+                    const isExpanded = !!expanded[key];
+                    const tooLong = noteText.length > 180;
+
+                    return (
                       <div
+                        key={`${it.source}-${it.id}-${idx}`}
+                        onClick={() => {
+                          if (disabled) return;
+                          if (it.timestampMs) {
+                            jumpTo(it.timestampMs, idx, it);
+                            setActiveIndex(idx);
+                            setFlashingIndex(idx);
+                            setTimeout(() => setFlashingIndex(null), 1000);
+                          }
+                        }}
                         style={{
-                          display: "flex",
-                          justifyContent: "space-between",
-                          alignItems: "center",
+                          backgroundColor: isFlashing
+                            ? "#67e8f9"
+                            : isActive
+                            ? "#ffffff"
+                            : "#111827",
+                          color: isActive ? "#000" : "#f1f5f9",
+                          padding: "10px 14px",
+                          borderRadius: "10px",
+                          fontSize: "0.95rem",
+                          fontWeight: "500",
+                          transition: "background-color 0.3s ease",
+                          boxShadow: isFlashing
+                            ? "0 0 12px rgba(103, 232, 249, 0.8)"
+                            : isActive
+                            ? "0 0 8px rgba(255,255,255,0.4)"
+                            : "inset 0 0 0 1px rgba(255,255,255,0.05)",
+                          position: "relative",
+                          cursor:
+                            disabled ? "default" : it.timestampMs ? "pointer" : "default",
                         }}
                       >
-                        <p
+                        {/* Dot Marker */}
+                        <div
                           style={{
-                            fontWeight: "600",
-                            fontSize: "0.95rem",
-                            color: "#38bdf8",
-                            wordWrap: "break-word",
-                            whiteSpace: "normal",
-                            maxWidth: "200px",
-                          }}
-                        >
-                          {it.title || "Untitled"}
-                        </p>
-                        <span
-                          style={{
-                            fontSize: "11px",
-                            padding: "2px 8px",
+                            position: "absolute",
+                            top: "50%",
+                            left: "-18px",
+                            transform: "translateY(-50%)",
+                            width: "10px",
+                            height: "10px",
                             borderRadius: "999px",
-                            border: "1px solid #334155",
-                            color: "#cbd5e1",
+                            backgroundColor:
+                              it.source === "flag" ? "#f59e0b" : "#38bdf8",
+                            border: "2px solid #1e1e1e",
                           }}
-                        >
-                          {badgeFor(it.source)}
-                        </span>
-                      </div>
+                        />
 
-                      {/* Note (collapsible) */}
-                      {(() => {
-                        const key = `${it.source}:${it.id}`;
-                        const noteText = it.note || "(no note)";
-                        const isExpanded = !!expanded[key];
-                        const tooLong = noteText.length > 180; // threshold for showing toggle
+                        <div>
+                          <div
+                            style={{
+                              display: "flex",
+                              justifyContent: "space-between",
+                              alignItems: "center",
+                            }}
+                          >
+                            <p
+                              style={{
+                                fontWeight: "600",
+                                fontSize: "0.95rem",
+                                color: "#38bdf8",
+                                wordWrap: "break-word",
+                                whiteSpace: "normal",
+                                maxWidth: "200px",
+                              }}
+                            >
+                              {it.title || "Untitled"}
+                            </p>
+                            <span
+                              style={{
+                                fontSize: "11px",
+                                padding: "2px 8px",
+                                borderRadius: "999px",
+                                border: "1px solid #334155",
+                                color: "#cbd5e1",
+                              }}
+                            >
+                              {badgeFor(it.source)}
+                            </span>
+                          </div>
 
-                        // Styles: clamped (3 lines) vs expanded (full)
-                        const clampedStyle = {
-                          fontSize: "0.85rem",
-                          marginTop: "2px",
-                          color: "#cbd5e1",
-                          wordWrap: "break-word",
-                          whiteSpace: "normal",
-                          maxWidth: "220px",
-                          display: "-webkit-box",
-                          WebkitLineClamp: 3,
-                          WebkitBoxOrient: "vertical",
-                          overflow: "hidden",
-                        };
-                        const expandedStyle = {
-                          fontSize: "0.85rem",
-                          marginTop: "2px",
-                          color: "#cbd5e1",
-                          wordWrap: "break-word",
-                          whiteSpace: "normal",
-                          maxWidth: "220px",
-                        };
-
-                        return (
+                          {/* Note: collapsible */}
                           <div style={{ marginTop: "2px" }}>
-                            <p style={isExpanded ? expandedStyle : clampedStyle}>{noteText}</p>
+                            <p
+                              style={
+                                isExpanded
+                                  ? {
+                                      fontSize: "0.85rem",
+                                      marginTop: "2px",
+                                      color: "#cbd5e1",
+                                      wordWrap: "break-word",
+                                      whiteSpace: "normal",
+                                      maxWidth: "220px",
+                                    }
+                                  : {
+                                      fontSize: "0.85rem",
+                                      marginTop: "2px",
+                                      color: "#cbd5e1",
+                                      wordWrap: "break-word",
+                                      whiteSpace: "normal",
+                                      maxWidth: "220px",
+                                      display: "-webkit-box",
+                                      WebkitLineClamp: 3,
+                                      WebkitBoxOrient: "vertical",
+                                      overflow: "hidden",
+                                    }
+                              }
+                            >
+                              {noteText}
+                            </p>
 
                             {tooLong && (
                               <button
@@ -707,171 +684,204 @@ const toggleExpand = (key, e) => {
                               </button>
                             )}
                           </div>
-                        );
-                      })()}
 
-
-                      {/* Display in UTC to mirror the Cesium clock */}
-                      {it.timestampMs && (
-                        <p
-                          style={{
-                            fontSize: "0.75rem",
-                            color: "#94a3b8",
-                            marginTop: "4px",
-                          }}
-                        >
-                          {new Date(it.timestampMs).toLocaleTimeString(
-                            "en-GB",
-                            {
-                              hour: "2-digit",
-                              minute: "2-digit",
-                              second: "2-digit",
-                              timeZone: "UTC",
-                              hour12: false,
-                            }
+                          {/* Time (UTC to mirror Cesium clock) */}
+                          {it.timestampMs && (
+                            <p
+                              style={{
+                                fontSize: "0.75rem",
+                                color: "#94a3b8",
+                                marginTop: "4px",
+                              }}
+                            >
+                              {new Date(it.timestampMs).toLocaleTimeString(
+                                "en-GB",
+                                {
+                                  hour: "2-digit",
+                                  minute: "2-digit",
+                                  second: "2-digit",
+                                  timeZone: "UTC",
+                                  hour12: false,
+                                }
+                              )}
+                            </p>
                           )}
-                        </p>
-                      )}
 
-                      <div
-                        style={{ marginTop: "6px", display: "flex", gap: "12px" }}
-                      >
-                        {it.source === "flag" && (
-                          <>
-                            <Pencil
-                              size={16}
-                              color="#9ca3af"
-                              style={{ cursor: "pointer" }}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setEditingPoint(it.raw);
-                                setEditTitle(it.title || "");
-                                setEditNote(it.note || "");
-                              }}
-                            />
-                            <Trash2
-                              size={16}
-                              color="#9ca3af"
-                              style={{ cursor: "pointer" }}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleDelete(it);
-                              }}
-                            />
-                          </>
-                        )}
+                          {/* Edit/Delete for flags only */}
+                          <div
+                            style={{
+                              marginTop: "6px",
+                              display: "flex",
+                              gap: "12px",
+                            }}
+                          >
+                            {it.source === "flag" && (
+                              <>
+                                <Pencil
+                                  size={16}
+                                  color="#9ca3af"
+                                  style={{ cursor: "pointer" }}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setEditingPoint(it.raw);
+                                    setEditTitle(it.title || "");
+                                    setEditNote(it.note || "");
+                                  }}
+                                />
+                                <Trash2
+                                  size={16}
+                                  color="#9ca3af"
+                                  style={{ cursor: "pointer" }}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    confirmDelete(it);
+                                  }}
+                                />
+                              </>
+                            )}
+                          </div>
+                        </div>
                       </div>
-                    </div>
-                  </div>
-                ))
-              )}
+                    );
+                  })
+                )}
+              </div>
             </div>
-          </div>
-        </>
-      )}
+          </>
+        )}
 
-      {editingPoint && (
-        <div
-          style={{
-            position: "fixed",
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            backgroundColor: "rgba(0,0,0,0.7)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            zIndex: 2000,
-          }}
-        >
+        {/* Edit modal */}
+        {editingPoint && (
           <div
             style={{
-              backgroundColor: "#1e1e1e",
-              padding: "24px",
-              borderRadius: "12px",
-              width: "90%",
-              maxWidth: "400px",
-              color: "white",
+              position: "fixed",
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              backgroundColor: "rgba(0,0,0,0.7)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              zIndex: 2000,
             }}
           >
-            <h2 style={{ fontSize: "1.2rem", marginBottom: "12px" }}>
-              Edit Flag
-            </h2>
-
-            <input
-              type="text"
-              placeholder="Title"
-              value={editTitle}
-              onChange={(e) => setEditTitle(e.target.value)}
-              style={{
-                width: "100%",
-                padding: "8px",
-                marginBottom: "12px",
-                borderRadius: "8px",
-                border: "1px solid #333",
-                backgroundColor: "#111",
-                color: "#fff",
-              }}
-            />
-
-            <textarea
-              placeholder="Note"
-              value={editNote}
-              onChange={(e) => setEditNote(e.target.value)}
-              rows={4}
-              style={{
-                width: "100%",
-                padding: "8px",
-                borderRadius: "8px",
-                border: "1px solid #333",
-                backgroundColor: "#111",
-                color: "#fff",
-                marginBottom: "16px",
-              }}
-            />
-
             <div
-              style={{ display: "flex", justifyContent: "flex-end", gap: "12px" }}
+              style={{
+                backgroundColor: "#1e1e1e",
+                padding: "24px",
+                borderRadius: "12px",
+                width: "90%",
+                maxWidth: "400px",
+                color: "white",
+              }}
             >
-              <button
-                onClick={() => setEditingPoint(null)}
+              <h2 style={{ fontSize: "1.2rem", marginBottom: "12px" }}>
+                Edit Flag
+              </h2>
+
+              <input
+                type="text"
+                placeholder="Title"
+                value={editTitle}
+                onChange={(e) => setEditTitle(e.target.value)}
                 style={{
-                  padding: "8px 14px",
-                  backgroundColor: "#444",
+                  width: "100%",
+                  padding: "8px",
+                  marginBottom: "12px",
                   borderRadius: "8px",
-                  color: "white",
-                  border: "none",
+                  border: "1px solid #333",
+                  backgroundColor: "#111",
+                  color: "#fff",
                 }}
-              >
-                Cancel
-              </button>
-              <button
-                onClick={async () => {
-                  if (!caseId || !editingPoint?.id) return;
-                  const ref = doc(
-                    db,
-                    `cases/${caseId}/interpolatedPoints`,
-                    editingPoint.id
-                  );
-                  await updateDoc(ref, { title: editTitle, note: editNote });
-                  setEditingPoint(null);
-                }}
+              />
+
+              <textarea
+                placeholder="Note"
+                value={editNote}
+                onChange={(e) => setEditNote(e.target.value)}
+                rows={4}
                 style={{
-                  padding: "8px 14px",
-                  backgroundColor: "#38bdf8",
+                  width: "100%",
+                  padding: "8px",
                   borderRadius: "8px",
-                  color: "#000",
-                  fontWeight: "bold",
-                  border: "none",
+                  border: "1px solid #333",
+                  backgroundColor: "#111",
+                  color: "#fff",
+                  marginBottom: "16px",
                 }}
+              />
+
+              <div
+                style={{ display: "flex", justifyContent: "flex-end", gap: "12px" }}
               >
-                Save
-              </button>
+                <button
+                  onClick={() => setEditingPoint(null)}
+                  style={{
+                    padding: "8px 14px",
+                    backgroundColor: "#444",
+                    borderRadius: "8px",
+                    color: "white",
+                    border: "none",
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={async () => {
+                    try {
+                      if (!caseId || !editingPoint?.id) return;
+                      const ref = doc(
+                        db,
+                        `cases/${caseId}/interpolatedPoints`,
+                        editingPoint.id
+                      );
+                      await updateDoc(ref, { title: editTitle, note: editNote });
+                      setEditingPoint(null);
+                      openModal({
+                        variant: "success",
+                        title: "Flag updated",
+                        description: "Your changes were saved.",
+                      });
+                    } catch (err) {
+                      console.error("Edit flag failed:", err);
+                      openModal({
+                        variant: "error",
+                        title: "Save failed",
+                        description: getFriendlyErrorMessage(
+                          err,
+                          "We couldn't save your changes. Please try again."
+                        ),
+                      });
+                    }
+                  }}
+                  style={{
+                    padding: "8px 14px",
+                    backgroundColor: "#38bdf8",
+                    borderRadius: "8px",
+                    color: "#000",
+                    fontWeight: "bold",
+                    border: "none",
+                  }}
+                >
+                  Save
+                </button>
+              </div>
             </div>
           </div>
-        </div>
-      )}
-    </div>
+        )}
+      </div>
+
+      {/* Global notifications / confirms */}
+      <NotificationModal
+        isOpen={modalState.isOpen}
+        title={modalState.title}
+        description={modalState.description}
+        variant={modalState.variant}
+        onClose={closeModal}
+        primaryAction={modalState.primaryAction}
+        secondaryAction={modalState.secondaryAction}
+      />
+    </>
   );
 }

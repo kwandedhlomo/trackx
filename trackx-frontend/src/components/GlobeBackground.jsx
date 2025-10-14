@@ -6,16 +6,10 @@ function GlobeBackground({ interactive, globePoints }) {
   const globeContainerRef = useRef();
   const globeInstanceRef = useRef(null);
   const navigate = useNavigate();
-
- 
-  const BLUE = "#1E40AF";
-  const RED = "#B91C1C";
-  const GREEN = "#059669";
-
   const statusColorMap = {
-    "not started": RED,
-    "in progress": BLUE,
-    "completed": GREEN,
+    "not started": "#c2410c", // deep amber to match pie chart
+    "in progress": "#1d4ed8", // royal blue
+    "completed": "#0f766e", // rich teal
   };
 
   // Preprocess points to assign color and size

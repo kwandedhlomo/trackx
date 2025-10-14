@@ -1,4 +1,5 @@
 import { Link } from "react-router-dom";
+import { motion } from "framer-motion";
 import { FaSearch, FaMapMarkerAlt, FaCalendarAlt } from "react-icons/fa";
 import adfLogo from "../assets/image-removebg-preview.png";
 import { useState, useEffect } from "react";
@@ -29,6 +30,7 @@ function ManageCasesPage() {
   const currentCases = cases.slice(indexOfFirstCase, indexOfLastCase);
   const totalPages = Math.ceil(cases.length / casesPerPage);
   const { modalState, openModal, closeModal } = useNotificationModal();
+  const formattedDateTime = new Date().toLocaleString();
 
   useEffect(() => {
     handleSearch(); // Triggers unfiltered search on first load
@@ -36,16 +38,25 @@ function ManageCasesPage() {
   
 
 
-  const handleSearch = async () => {
+  const handleSearch = async (overrides = {}) => {
+    const nextSearchTerm = overrides.searchTerm !== undefined ? overrides.searchTerm : searchTerm;
+    const nextRegion = overrides.region !== undefined ? overrides.region : region;
+    const nextDate = overrides.date !== undefined ? overrides.date : date;
+
+    if (overrides.searchTerm !== undefined) setSearchTerm(overrides.searchTerm);
+    if (overrides.region !== undefined) setRegion(overrides.region);
+    if (overrides.date !== undefined) setDate(overrides.date);
+
     try {
       const response = await axios.get("http://localhost:8000/cases/search", {
         params: {
-          case_name: searchTerm || undefined,
-          region: region || undefined,
-          date: date || undefined,
+          case_name: nextSearchTerm || undefined,
+          region: nextRegion || undefined,
+          date: nextDate || undefined,
         }
       });
-      setCases(response.data.cases); 
+      setCases(Array.isArray(response.data.cases) ? response.data.cases : []);
+      setCurrentPage(1);
     } catch (error) {
       console.error("Search failed:", error);
     }
@@ -97,216 +108,369 @@ function ManageCasesPage() {
   };
 
   return (
-    <div className="relative flex flex-col min-h-screen">
-      {/* Background */}
-      <div className="absolute inset-0 bg-gradient-to-br from-black via-gray-900 to-black -z-20" />
-  
-      {/* Navbar */}
-      <nav className="flex justify-between items-center bg-gradient-to-r from-black to-gray-900 p-4 relative font-sans shadow-md">        <div className="flex items-center space-x-4">
-          {/* Hamburger Icon */}
-          <div className="text-white text-3xl cursor-pointer" onClick={() => setShowMenu(!showMenu)}>
+    <motion.div
+      initial={{ opacity: 0, y: 18 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.8 }}
+      className="relative min-h-screen overflow-hidden bg-gradient-to-br from-black via-gray-900 to-black font-sans text-white"
+    >
+      <div className="absolute inset-0 bg-gradient-to-br from-black via-gray-900 to-black -z-10" />
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(59,130,246,0.14),transparent_55%)]" />
+
+      <nav className="mx-6 mt-6 flex items-center justify-between rounded-3xl border border-white/10 bg-gradient-to-br from-black/85 via-slate-900/70 to-black/80 px-6 py-4 shadow-xl shadow-[0_25px_65px_rgba(8,11,24,0.65)] backdrop-blur-xl">
+        <div className="flex items-center gap-4">
+          <button
+            type="button"
+            onClick={() => setShowMenu(!showMenu)}
+            className="flex h-11 w-11 items-center justify-center rounded-full border border-white/10 bg-white/[0.02] text-xl text-white shadow-inner shadow-white/5 transition hover:bg-white/10"
+            aria-label="Toggle navigation"
+          >
             &#9776;
-          </div>
-  
-          <Link to="/home">
-            <img src={adfLogo} alt="ADF Logo" className="h-10 w-auto cursor-pointer hover:opacity-80 transition" />
+          </button>
+
+          <Link to="/home" className="hidden sm:block">
+            <img
+              src={adfLogo}
+              alt="ADF Logo"
+              className="h-11 w-auto drop-shadow-[0_10px_20px_rgba(59,130,246,0.35)] transition hover:opacity-90"
+            />
           </Link>
         </div>
-  
-        {/* Centered Title */}
-        <div className="absolute left-1/2 transform -translate-x-1/2 text-3xl font-extrabold text-white font-sans">
-          Manage Cases
+
+        <div className="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 text-2xl font-semibold tracking-[0.35em] text-white/80 drop-shadow-[0_2px_12px_rgba(15,23,42,0.55)]">
+          MANAGE CASES
         </div>
-  
-        <div className="flex items-center space-x-6 text-white font-sans">
-          <Link to="/home" className="hover:text-gray-300">Home</Link>
-          <div className="flex flex-col text-right">
-            <p className="text-sm">{profile ? `${profile.firstName} ${profile.surname}` : "Loading..."}</p>
-            <button onClick={handleSignOut} className="text-red-400 hover:text-red-600 text-xs">Sign Out</button>
+
+        <div className="flex items-center gap-4 text-sm text-gray-200">
+          <Link
+            to="/home"
+            className="hidden md:inline-flex items-center rounded-full border border-white/10 bg-white/[0.02] px-4 py-2 text-xs font-semibold text-gray-200 shadow-inner shadow-white/5 transition hover:border-white/25 hover:text-white"
+          >
+            Home
+          </Link>
+          <div className="hidden text-right lg:block">
+            <span className="block text-xs text-gray-400">
+              {cases.length} case{cases.length === 1 ? "" : "s"} found
+            </span>
+            <span className="block text-xs text-gray-500">Page {currentPage} of {Math.max(totalPages, 1)}</span>
           </div>
-          <div className="text-sm text-gray-300">
-            {new Date().toLocaleString()}
+          <div className="flex flex-col items-end">
+            <span className="text-base font-semibold text-white">
+              {profile ? `${profile.firstName || ""} ${profile.surname || ""}`.trim() || "Investigator" : "Loading..."}
+            </span>
+            <button
+              onClick={handleSignOut}
+              className="text-xs text-gray-400 transition hover:text-white"
+            >
+              Sign Out
+            </button>
+          </div>
+          <div className="rounded-full bg-white/[0.02] px-3 py-1.5 text-xs font-medium text-gray-400 shadow-inner shadow-white/5">
+            {formattedDateTime}
           </div>
         </div>
       </nav>
-  
-      {/* Hamburger Menu Content */}
+
       {showMenu && (
-        <div className="absolute top-16 left-0 w-64 rounded-r-3xl border border-white/10 bg-gradient-to-br from-gray-900/95 to-black/90 backdrop-blur-xl p-6 z-30 shadow-2xl space-y-2">
+        <div className="absolute left-6 top-32 z-30 w-64 space-y-2 rounded-3xl border border-white/10 bg-gradient-to-br from-slate-950/85 via-slate-900/78 to-black/78 p-6 shadow-2xl shadow-[0_30px_60px_rgba(30,58,138,0.45)] backdrop-blur-2xl">
           <Link
             to="/home"
-            className="flex items-center gap-3 px-3 py-2 rounded-2xl text-sm font-medium text-gray-200 hover:text-white hover:bg-white/10 transition"
+            className="flex items-center gap-3 rounded-2xl px-3 py-2 text-sm font-medium text-gray-200 transition hover:bg-white/10 hover:text-white"
             onClick={() => setShowMenu(false)}
           >
-            <Home className="w-4 h-4" />
+            <Home className="h-4 w-4" />
             Home
           </Link>
           <Link
             to="/new-case"
-            className="flex items-center gap-3 px-3 py-2 rounded-2xl text-sm font-medium text-gray-200 hover:text-white hover:bg-white/10 transition"
+            className="flex items-center gap-3 rounded-2xl px-3 py-2 text-sm font-medium text-gray-200 transition hover:bg-white/10 hover:text-white"
             onClick={() => setShowMenu(false)}
           >
-            <FilePlus2 className="w-4 h-4" />
+            <FilePlus2 className="h-4 w-4" />
             Create New Case
           </Link>
-          <div className="flex items-center gap-3 px-3 py-2 rounded-2xl text-sm font-medium text-white bg-white/10">
-            <FolderOpen className="w-4 h-4" />
+          <div className="flex items-center gap-3 rounded-2xl px-3 py-2 text-sm font-medium text-white bg-white/[0.045] shadow-inner shadow-white/10">
+            <FolderOpen className="h-4 w-4" />
             Manage Cases
           </div>
           <Link
             to="/my-cases"
-            className="flex items-center gap-3 px-3 py-2 rounded-2xl text-sm font-medium text-gray-200 hover:text-white hover:bg-white/10 transition"
+            className="flex items-center gap-3 rounded-2xl px-3 py-2 text-sm font-medium text-gray-200 transition hover:bg-white/10 hover:text-white"
             onClick={() => setShowMenu(false)}
           >
-            <Briefcase className="w-4 h-4" />
+            <Briefcase className="h-4 w-4" />
             My Cases
           </Link>
-
           {profile?.role === "admin" && (
             <Link
               to="/admin-dashboard"
-              className="flex items-center gap-3 px-3 py-2 rounded-2xl text-sm font-medium text-gray-200 hover:text-white hover:bg-white/10 transition"
+              className="flex items-center gap-3 rounded-2xl px-3 py-2 text-sm font-medium text-gray-200 transition hover:bg-white/10 hover:text-white"
               onClick={() => setShowMenu(false)}
             >
-              <LayoutDashboard className="w-4 h-4" />
+              <LayoutDashboard className="h-4 w-4" />
               Admin Dashboard
             </Link>
           )}
         </div>
       )}
 
-      {/* Main Content */}
-      <main className="flex flex-col flex-grow p-8 space-y-6 items-center">
-        <div className="w-full max-w-6xl">
-          <Link to="/home" className="bg-blue-800 text-white px-4 py-2 rounded hover:bg-blue-700 transition-colors duration-200">
-            Back Home
-          </Link>
-        </div>
+      <div className="mx-6 mt-6 flex justify-center gap-8 rounded-full border border-white/10 bg-white/[0.02] px-6 py-2 text-xs font-semibold text-gray-300 shadow-[0_15px_40px_rgba(15,23,42,0.45)] backdrop-blur-xl">
+        <Link to="/home" className="text-gray-400 transition hover:text-white">
+          Home
+        </Link>
+        <Link to="/new-case" className="text-gray-400 transition hover:text-white">
+          New Case
+        </Link>
+        <span className="inline-flex items-center rounded-full bg-gradient-to-r from-blue-900/80 to-purple-900/80 px-5 py-1.5 text-white shadow-[0_12px_30px_rgba(15,23,42,0.45)]">
+          Manage Cases
+        </span>
+        <Link to="/my-cases" className="text-gray-400 transition hover:text-white">
+          My Cases
+        </Link>
+      </div>
 
-        {/* Filters */}
-        <div className="flex flex-wrap justify-between items-center w-full max-w-6xl space-y-4 md:space-y-0 md:space-x-4">
-          <div className="relative flex-1 min-w-[200px]">
-            <FaSearch className="absolute left-3 top-2.5 text-gray-400" />
-            <input
-              type="text"
-              placeholder="Search Case"
-              className="pl-10 pr-4 py-2 w-full rounded bg-white bg-opacity-10 text-white border border-gray-600 placeholder-gray-400"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              onFocus={(e) => e.target.placeholder = ''}
-              onBlur={(e) => e.target.placeholder = 'Search Case'}
-            />
+      <main className="pb-24">
+        <section className="relative mx-auto mt-10 w-full max-w-6xl px-6">
+          <div className="relative overflow-hidden rounded-3xl border border-white/10 bg-white/[0.02] px-8 py-8 shadow-[0_35px_90px_rgba(15,23,42,0.55)] backdrop-blur-2xl">
+            <div className="pointer-events-none absolute -top-28 right-0 h-56 w-56 rounded-full bg-blue-900/25 blur-3xl" />
+            <div className="pointer-events-none absolute -bottom-24 left-0 h-48 w-48 rounded-full bg-purple-900/20 blur-3xl" />
+            <div className="relative z-10 flex flex-col gap-10 lg:flex-row lg:items-center lg:justify-between">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.35em] text-gray-400">Case Library</p>
+                <h1 className="mt-3 text-3xl font-semibold text-white">Orchestrate your investigations</h1>
+                <p className="mt-3 max-w-xl text-sm text-gray-400">
+                  Search, filter, and maintain case metadata across your TrackX workspace. Keep collaborators aligned and your docket pristine.
+                </p>
+                <div className="mt-6 flex flex-wrap gap-3">
+                  <Link
+                    to="/new-case"
+                    className="inline-flex items-center justify-center rounded-full bg-gradient-to-r from-blue-600 to-indigo-600 px-6 py-2.5 text-sm font-semibold text-white shadow-lg shadow-blue-500/25 transition hover:from-blue-500 hover:to-indigo-500"
+                  >
+                    ＋ Create case
+                  </Link>
+                  <Link
+                    to="/home"
+                    className="inline-flex items-center justify-center rounded-full border border-white/15 bg-white/[0.04] px-6 py-2.5 text-sm font-semibold text-gray-200 transition hover:border-white/30 hover:text-white"
+                  >
+                    Back home
+                  </Link>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-4 text-sm text-gray-300">
+                <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-4">
+                  <p className="text-xs uppercase tracking-wide text-gray-500">Matches</p>
+                  <p className="mt-2 text-2xl font-semibold text-white">{cases.length}</p>
+                  <p className="text-xs text-gray-500">Based on your current filters.</p>
+                </div>
+                <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-4">
+                  <p className="text-xs uppercase tracking-wide text-gray-500">Page results</p>
+                  <p className="mt-2 text-2xl font-semibold text-white">{currentCases.length}</p>
+                  <p className="text-xs text-gray-500">Showing per page.</p>
+                </div>
+                <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-4">
+                  <p className="text-xs uppercase tracking-wide text-gray-500">Region filter</p>
+                  <p className="mt-2 text-base font-medium capitalize text-white">{region ? region.replace(/-/g, " ") : "All regions"}</p>
+                  <p className="text-xs text-gray-500">Narrow by geography.</p>
+                </div>
+                <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-4">
+                  <p className="text-xs uppercase tracking-wide text-gray-500">Date filter</p>
+                  <p className="mt-2 text-base font-medium text-white">{date || "Any date"}</p>
+                  <p className="text-xs text-gray-500">Target event windows.</p>
+                </div>
+              </div>
+            </div>
           </div>
+        </section>
 
-          <div className="relative flex-1 min-w-[160px]">
-            <FaMapMarkerAlt className="absolute left-3 top-2.5 text-gray-400" />
-            <select
-              className="pl-10 pr-4 py-2 w-full rounded bg-white bg-opacity-10 text-white border border-gray-600"
-              value={region}
-              onChange={(e) => setRegion(e.target.value)}
-            >
-              <option value="" disabled>Select Region</option>
-              <option value="western-cape">Western Cape</option>
-              <option value="eastern-cape">Eastern Cape</option>
-              <option value="northern-cape">Northern Cape</option>
-              <option value="gauteng">Gauteng</option>
-              <option value="kwazulu-natal">KwaZulu-Natal</option>
-              <option value="free-state">Free State</option>
-              <option value="mpumalanga">Mpumalanga</option>
-              <option value="limpopo">Limpopo</option>
-              <option value="north-west">North West</option>
-            </select>
-          </div>
-
-          <div className="relative flex-1 min-w-[160px]">
-            <FaCalendarAlt className="absolute left-3 top-2.5 text-gray-400" />
-            <input
-              type="date"
-              value={date}
-              onChange={(e) => setDate(e.target.value)}
-              className="pl-10 pr-4 py-2 w-full rounded bg-white bg-opacity-10 text-white border border-gray-600"
-            />
-          </div>
-
-          <button
-            onClick={handleSearch}
-            className="bg-blue-700 text-white px-4 py-2 rounded hover:bg-blue-600"
-          >
-            Search
-          </button>
-        </div>
-
-
-      {/* Case List */}
-      <div className="w-full max-w-4xl bg-white bg-opacity-10 border border-gray-700 rounded-lg p-6">
-        <h2 className="text-xl font-semibold mb-4 text-blue-500">Matching Cases</h2>
-        <ul className="space-y-4">
-          {currentCases.map((caseItem, index) => (
-            <li key={index} className="flex justify-between items-center bg-black bg-opacity-20 rounded px-4 py-3 border border-gray-600">
-              <span className="text-white font-medium">{caseItem.caseTitle}</span>
-              <div className="flex space-x-2">
-                <Link
-                  to="/edit-case"
-                  state={{ caseData: { ...caseItem, doc_id: caseItem.doc_id } }}
-                  className="bg-blue-700 text-white px-4 py-2 rounded hover:bg-blue-600 transition"
-                >
-                  Manage
-                </Link>
+        <div className="mx-auto mt-10 w-full max-w-6xl px-6 space-y-8">
+          <div className="rounded-3xl border border-white/10 bg-white/[0.018] p-6 shadow-[0_25px_70px_rgba(15,23,42,0.45)] backdrop-blur-2xl">
+            <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+              <div className="grid w-full gap-4 md:grid-cols-2 lg:grid-cols-4">
+                <div className="relative">
+                  <FaSearch className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
+                  <input
+                    type="text"
+                    placeholder="Search case"
+                    className="w-full rounded-2xl border border-white/12 bg-white/[0.05] px-10 py-3 text-sm text-white placeholder-gray-500 shadow-inner shadow-black/20 focus:border-blue-600/60 focus:outline-none focus:ring-2 focus:ring-blue-600/20"
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                  />
+                </div>
+                <div className="relative">
+                  <FaMapMarkerAlt className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
+                  <select
+                    className="w-full appearance-none rounded-2xl border border-white/12 bg-white/[0.05] px-10 py-3 text-sm text-white shadow-inner shadow-black/20 focus:border-indigo-600/60 focus:outline-none focus:ring-2 focus:ring-indigo-600/20"
+                    value={region}
+                    onChange={(e) => setRegion(e.target.value)}
+                  >
+                    <option value="">All regions</option>
+                    <option value="western-cape">Western Cape</option>
+                    <option value="eastern-cape">Eastern Cape</option>
+                    <option value="northern-cape">Northern Cape</option>
+                    <option value="gauteng">Gauteng</option>
+                    <option value="kwazulu-natal">KwaZulu-Natal</option>
+                    <option value="free-state">Free State</option>
+                    <option value="mpumalanga">Mpumalanga</option>
+                    <option value="limpopo">Limpopo</option>
+                    <option value="north-west">North West</option>
+                  </select>
+                </div>
+                <div className="relative">
+                  <FaCalendarAlt className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
+                  <input
+                    type="date"
+                    value={date}
+                    onChange={(e) => setDate(e.target.value)}
+                    className="w-full rounded-2xl border border-white/12 bg-white/[0.05] px-10 py-3 text-sm text-white shadow-inner shadow-black/20 focus:border-purple-600/60 focus:outline-none focus:ring-2 focus:ring-purple-600/20"
+                  />
+                </div>
                 <button
-                  onClick={() => confirmDelete(caseItem)}
-                  className="bg-red-700 text-white px-4 py-2 rounded hover:bg-red-600 transition"
+                  onClick={handleSearch}
+                  className="inline-flex items-center justify-center rounded-2xl bg-gradient-to-r from-blue-600 to-indigo-600 px-4 py-3 text-sm font-semibold text-white shadow-lg shadow-blue-500/20 transition hover:from-blue-500 hover:to-indigo-500"
                 >
-                  Delete
+                  Search
                 </button>
               </div>
-            </li>
-          ))}
-        </ul>
-      </div>
+              <button
+                onClick={() => handleSearch({ searchTerm: "", region: "", date: "" })}
+                className="inline-flex items-center justify-center rounded-full border border-white/15 bg-white/[0.03] px-4 py-2 text-xs font-semibold text-gray-300 transition hover:border-white/30 hover:text-white"
+              >
+                Clear filters
+              </button>
+            </div>
+          </div>
 
-      <div className="flex justify-center mt-4 space-x-2">
-        <button
-          onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
-          disabled={currentPage === 1}
-          className="px-4 py-2 bg-gray-700 text-white rounded disabled:opacity-50"
-        >
-          Previous
-        </button>
+          <div className="rounded-3xl border border-white/10 bg-white/[0.018] p-6 shadow-[0_25px_70px_rgba(15,23,42,0.45)] backdrop-blur-2xl">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <h2 className="text-lg font-semibold text-white">Matching cases</h2>
+                <p className="text-xs text-gray-400">Refine filters to narrow the docket you want to manage.</p>
+              </div>
+              <span className="rounded-full bg-white/[0.05] px-3 py-1 text-xs font-medium text-gray-300">
+                {cases.length} total result{cases.length === 1 ? "" : "s"}
+              </span>
+            </div>
+            <div className="mt-6 space-y-4">
+              {currentCases.length === 0 ? (
+                <div className="rounded-2xl border border-dashed border-white/12 bg-black/30 px-6 py-10 text-center text-sm text-gray-400">
+                  No cases match your criteria yet. Adjust the filters or create a new case to begin.
+                </div>
+              ) : (
+                currentCases.map((caseItem, index) => {
+                  const key = caseItem.doc_id ?? `${caseItem.caseTitle || "case"}-${index}`;
+                  const prettyRegion = caseItem.region ? caseItem.region.replace(/-/g, " ") : null;
+                  const incidentDate = caseItem.dateOfIncident || caseItem.date_of_incident || caseItem.date || null;
+                  return (
+                    <div
+                      key={key}
+                      className="flex flex-col gap-4 rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-5 text-sm text-gray-200 shadow-[0_18px_40px_rgba(15,23,42,0.45)] transition hover:border-blue-500/40 sm:flex-row sm:items-center sm:justify-between"
+                    >
+                      <div>
+                        <p className="text-base font-semibold text-white">{caseItem.caseTitle || "Untitled case"}</p>
+                        <div className="mt-2 flex flex-wrap gap-2 text-xs text-gray-400">
+                          {caseItem.caseNumber && (
+                            <span className="inline-flex items-center gap-1 rounded-full bg-white/[0.05] px-2 py-1 text-[11px] font-medium text-gray-300">
+                              #{caseItem.caseNumber}
+                            </span>
+                          )}
+                          {prettyRegion && (
+                            <span className="inline-flex items-center gap-1 rounded-full bg-white/[0.05] px-2 py-1 text-[11px] font-medium capitalize text-gray-300">
+                              <FaMapMarkerAlt className="h-3 w-3" />
+                              {prettyRegion}
+                            </span>
+                          )}
+                          {incidentDate && (
+                            <span className="inline-flex items-center gap-1 rounded-full bg-white/[0.05] px-2 py-1 text-[11px] font-medium text-gray-300">
+                              <FaCalendarAlt className="h-3 w-3" />
+                              {incidentDate}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      <div className="flex flex-wrap gap-3">
+                        <Link
+                          to="/edit-case"
+                          state={{ caseData: { ...caseItem, doc_id: caseItem.doc_id } }}
+                          className="inline-flex items-center justify-center rounded-full bg-gradient-to-r from-blue-600 to-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-blue-500/20 transition hover:from-blue-500 hover:to-indigo-500"
+                        >
+                          Manage
+                        </Link>
+                        <button
+                          onClick={() => confirmDelete(caseItem)}
+                          className="inline-flex items-center justify-center rounded-full bg-gradient-to-r from-rose-500 to-orange-500 px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-rose-500/20 transition hover:from-rose-400 hover:to-orange-400"
+                        >
+                          Delete
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
 
-        <span className="text-white px-4 py-2">
-          Page {currentPage} of {totalPages}
-        </span>
+          <div className="flex flex-col items-center gap-4 rounded-3xl border border-white/10 bg-white/[0.018] px-6 py-5 shadow-[0_25px_70px_rgba(15,23,42,0.45)] backdrop-blur-2xl sm:flex-row sm:justify-between">
+            <div className="flex items-center gap-3">
+              <button
+                onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
+                disabled={currentPage === 1}
+                className={`inline-flex items-center justify-center rounded-full px-4 py-2 text-sm font-semibold transition ${
+                  currentPage === 1
+                    ? "cursor-not-allowed bg-white/10 text-gray-400"
+                    : "bg-gradient-to-r from-blue-600 to-indigo-600 text-white hover:from-blue-500 hover:to-indigo-500"
+                }`}
+              >
+                Previous
+              </button>
+              <button
+                onClick={() => setCurrentPage((prev) => Math.min(prev + 1, totalPages || 1))}
+                disabled={currentPage === totalPages || totalPages === 0}
+                className={`inline-flex items-center justify-center rounded-full px-4 py-2 text-sm font-semibold transition ${
+                  currentPage === totalPages || totalPages === 0
+                    ? "cursor-not-allowed bg-white/10 text-gray-400"
+                    : "bg-gradient-to-r from-blue-600 to-indigo-600 text-white hover:from-blue-500 hover:to-indigo-500"
+                }`}
+              >
+                Next
+              </button>
+            </div>
+            <span className="text-xs text-gray-400">
+              Page {currentPage} of {Math.max(totalPages, 1)}
+            </span>
+          </div>
 
-        <button
-          onClick={() => setCurrentPage((prev) => Math.min(prev + 1, totalPages))}
-          disabled={currentPage === totalPages}
-          className="px-4 py-2 bg-gray-700 text-white rounded disabled:opacity-50"
-        >
-          Next
-        </button>
-      </div>
-
-        {/* Create Button */}
-        <div className="flex justify-end w-full max-w-4xl">
-          <Link
-            to="/new-case"
-            className="flex items-center border border-blue-800 text-blue-800 font-bold py-3 px-6 rounded-full shadow hover:bg-blue-800 hover:text-white transition-colors duration-200"
-          >
-            ＋ Create
-          </Link>
+          <div className="rounded-3xl border border-white/10 bg-white/[0.018] p-6 shadow-[0_25px_70px_rgba(15,23,42,0.45)] backdrop-blur-2xl">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <p className="text-sm text-gray-400">Need to capture new telemetry? Start a fresh case and assign collaborators.</p>
+              <div className="flex flex-wrap gap-3">
+                <Link
+                  to="/new-case"
+                  className="inline-flex items-center justify-center rounded-full bg-gradient-to-r from-blue-600 to-indigo-600 px-5 py-2 text-sm font-semibold text-white shadow-lg shadow-blue-500/20 transition hover:from-blue-500 hover:to-indigo-500"
+                >
+                  ＋ Create case
+                </Link>
+                <Link
+                  to="/home"
+                  className="inline-flex items-center justify-center rounded-full border border-white/15 bg-white/[0.04] px-5 py-2 text-sm font-semibold text-gray-200 transition hover:border-white/30 hover:text-white"
+                >
+                  Back home
+                </Link>
+              </div>
+            </div>
+          </div>
         </div>
-
-        <NotificationModal
-          isOpen={modalState.isOpen}
-          title={modalState.title}
-          description={modalState.description}
-          variant={modalState.variant}
-          onClose={closeModal}
-          primaryAction={modalState.primaryAction}
-          secondaryAction={modalState.secondaryAction}
-        />
       </main>
-    </div>
+
+      <NotificationModal
+        isOpen={modalState.isOpen}
+        title={modalState.title}
+        description={modalState.description}
+        variant={modalState.variant}
+        onClose={closeModal}
+        primaryAction={modalState.primaryAction}
+        secondaryAction={modalState.secondaryAction}
+      />
+    </motion.div>
   );
 }
 

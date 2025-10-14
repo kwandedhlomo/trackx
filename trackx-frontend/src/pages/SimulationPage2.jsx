@@ -433,7 +433,7 @@ useEffect(() => {
     const currentMillis = Cesium.JulianDate.toDate(currentTime).getTime();
     const lastMillis = lastSimMillisRef.current;
 
-    const storedPoints = JSON.parse(localStorage.getItem("flaggedSidebarFlash") || "[]");
+    const storedItems = JSON.parse(localStorage.getItem("flaggedSidebarFlash") || "[]");
 
     // Skip first run to initialize
     if (!lastMillis) {
@@ -441,17 +441,17 @@ useEffect(() => {
       return;
     }
 
-    // Loop through flagged points
-    storedPoints.forEach((point, idx) => {
-      const pointMillis = point.timestamp?.seconds * 1000;
+    // Works with both:
+    //  - Jon's merged items (have `timestampMs`)
+    //  - your older cache (has Firestore `timestamp.seconds`)
+    storedItems.forEach((it, idx) => {
+      const ms =
+        (typeof it.timestampMs === "number" && it.timestampMs) ||
+        (it.timestamp?.seconds ? it.timestamp.seconds * 1000 : null);
+      if (!ms) return;
 
-      // Check if point falls between last and current time
-      if (
-        pointMillis >= Math.min(lastMillis, currentMillis) &&
-        pointMillis <= Math.max(lastMillis, currentMillis)
-      ) {
-        const event = new CustomEvent("flashSidebarItem", { detail: idx });
-        window.dispatchEvent(event);
+      if (ms >= Math.min(lastMillis, currentMillis) && ms <= Math.max(lastMillis, currentMillis)) {
+        window.dispatchEvent(new CustomEvent("flashSidebarItem", { detail: idx }));
       }
     });
 
@@ -919,10 +919,13 @@ async function rebuildFlagBillboards(viewer, flaggedPoints, liftMeters = 1.5) {
   const raw = [];
   const payload = [];
   for (const fp of flaggedPoints) {
-    if (fp?.longitude == null || fp?.latitude == null) continue;
-    raw.push(Cesium.Cartesian3.fromDegrees(fp.longitude, fp.latitude, 30));
+    const lon = fp.longitude ?? fp.lng ?? fp.lon;
+    const lat = fp.latitude ?? fp.lat;
+    if (lon == null || lat == null) continue;
+    raw.push(Cesium.Cartesian3.fromDegrees(lon, lat, 30));
     payload.push(fp);
   }
+
 
   if (raw.length === 0) {
     console.log("Flags: no valid lon/lat");

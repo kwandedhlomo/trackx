@@ -6,6 +6,8 @@ trackx-backend/gcp-service-account.json
 # Secrets
 trackx-backend/.env
 trackx-backend/gcp-service-account.json
+trackx-backend/.env.example
+trackx-frontend/.env
 
 # Python caches
 __pycache__/
