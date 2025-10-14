@@ -20,7 +20,44 @@ import EvidenceLocker from "../components/EvidenceLocker";
 // Firebase services
 import { updateCaseAnnotations, getCurrentUserId } from "../services/firebaseServices";
 
+// Dynamic PDF.js import to ensure version compatibility
+let pdfjsLib = null;
 
+// Security configuration
+const SECURITY_CONFIG = {
+  maxFileSize: 10 * 1024 * 1024, // 10MB
+  allowedMimeTypes: [
+    'text/csv',
+    'text/plain',
+    'application/vnd.ms-excel',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    'application/pdf'
+  ],
+  allowedExtensions: ['.csv', '.xls', '.xlsx', '.pdf'],
+  maliciousPatterns: [
+    /<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi,
+    /javascript:/gi,
+    /vbscript:/gi,
+    /onload\s*=/gi,
+    /onerror\s*=/gi,
+    /eval\s*\(/gi,
+    /document\.write/gi,
+    /innerHTML/gi,
+    /<\?php/gi,
+    /<%/gi,
+    /<asp:/gi,
+    /cmd\.exe/gi,
+    /powershell/gi,
+    /system\(/gi,
+    /exec\(/gi
+  ]
+};
+
+// Security Scanner Class
+class FileSecurityScanner {
+  constructor() {
+    this.config = SECURITY_CONFIG;
+  }
 
 // ADD: Security config and scanner (lightweight content/mimetype checks; client-side only)
 let pdfjsLib = null;
@@ -221,94 +258,44 @@ function NewCasePage() {
     parsedData && parsedData.stoppedPoints && parsedData.stoppedPoints.length > 0 && !isProcessing
   );
 
-  useEffect(() => {
-    const current = auth.currentUser;
-    if (!current) return;
-    setAssignedUsers((prev) => {
-      if (prev.some((u) => u.id === current.uid)) {
-        return prev;
-      }
-      const displayName = profile
-        ? `${profile.firstName || ""} ${profile.surname || ""}`.trim() || current.email || "Current user"
-        : current.email || "Current user";
-      return [
-        ...prev,
-        {
-          id: current.uid,
-          name: displayName,
-          email: current.email || "",
-        },
-      ];
-    });
-  }, [profile]);
+  // Evidence Locker state
+  const [evidenceItems, setEvidenceItems] = useState([]);
 
-  const currentUserId = auth.currentUser?.uid;
-
-  const handleUserSearch = async () => {
-    const term = userSearchTerm.trim();
-    if (term.length < 2) {
-      openModal({
-        variant: "info",
-        title: "Keep typing",
-        description: "Enter at least two characters to search for users.",
-      });
-      return;
-    }
-
-    setIsSearchingUsers(true);
-    try {
-      const { data } = await axios.get(`${API_BASE}/admin/users`, {
-        params: {
-          search: term,
-          page_size: 10,
-        },
-      });
-      const results = data?.users || [];
-      const assignedIds = new Set(assignedUsers.map((u) => u.id));
-      setUserSearchResults(results.filter((user) => user.id && !assignedIds.has(user.id)));
-    } catch (error) {
-      console.error("User search failed:", error);
-      openModal({
-        variant: "error",
-        title: "Search failed",
-        description: getFriendlyErrorMessage(error, "We couldn't search for users right now. Please try again."),
-      });
-    } finally {
-      setIsSearchingUsers(false);
-    }
-  };
-
-  const handleAddUserToCase = (user) => {
-    if (!user?.id) return;
-    setAssignedUsers((prev) => {
-      if (prev.some((u) => u.id === user.id)) {
-        return prev;
-      }
-      return [...prev, user];
-    });
-    setUserSearchResults((prev) => prev.filter((u) => u.id !== user.id));
-  };
-
-  const handleRemoveAssignedUser = (userId) => {
-    if (userId === currentUserId) {
-      openModal({
-        variant: "warning",
-        title: "Cannot remove",
-        description: "You cannot remove yourself from the case you are creating.",
-      });
-      return;
-    }
-
-    setAssignedUsers((prev) => prev.filter((user) => user.id !== userId));
-  };
-
+  // Initialize security scanner
+  const securityScanner = new FileSecurityScanner();
 
   useEffect(() => {
-    clearCaseSession();   // ✅ guarantees a clean slate when user lands on /new-case
+    clearCaseSession();
   }, []);
-  
 
-    // minimal mirror writer (no cross-deps on firebaseServices.js)
+  // Evidence Locker Functions
+  const generateEvidenceId = () => {
+    const timestamp = Date.now();
+    const random = Math.floor(Math.random() * 1000);
+    return `EV-${timestamp}-${random}`;
+  };
+
+  const addEvidence = () => {
+    const newEvidence = {
+      id: generateEvidenceId(),
+      description: '',
+      dateAdded: new Date().toISOString(),
+      caseNumber: caseNumber || 'Pending'
+    };
+    setEvidenceItems([...evidenceItems, newEvidence]);
+  };
+
+  const updateEvidence = (id, description) => {
+    setEvidenceItems(evidenceItems.map(item => 
+      item.id === id ? { ...item, description } : item
+    ));
+  };
+
+  const removeEvidence = (id) => {
+    setEvidenceItems(evidenceItems.filter(item => item.id !== id));
+  };
+
+  // minimal mirror writer
   async function upsertFirebaseMirror(caseId, mirror) {
     const caseRef = doc(db, "cases", caseId);
     const batch = writeBatch(db);
@@ -321,7 +308,6 @@ function NewCasePage() {
       between: mirror.between || "",
       urgency: mirror.urgency || "Medium",
       userId: mirror.userId || null,
-      userIds: mirror.userIds || (mirror.userId ? [mirror.userId] : []),
       locationTitles: mirror.locationTitles || [],
       reportIntro: mirror.reportIntro || "",
       reportConclusion: mirror.reportConclusion || "",
@@ -334,24 +320,19 @@ function NewCasePage() {
       updatedAt: serverTimestamp(),
     }, { merge: true });
 
-    // also fan-out locations into a subcollection the Annotations page can read
     const locs = mirror.locations || [];
     locs.forEach((loc, idx) => {
       const locRef = doc(collection(db, "cases", caseId, "locations"), `location_${idx}`);
       batch.set(locRef, {
         locationId: `location_${idx}`,
-        // store raw numbers to avoid GeoPoint coupling (Annotations code reads lat/lng directly)
         lat: Number(loc.lat),
         lng: Number(loc.lng),
         order: idx,
-        // user-editable fields start blank
         title: mirror.locationTitles?.[idx] || "",
         description: "",
-        // metadata the UI shows
         timestamp: loc.timestamp || null,
         ignitionStatus: loc.ignitionStatus || "Unknown",
         address: loc.address || null,
-        // keep original for “View original data”
         originalData: {
           csvDescription: loc.description || null,
           rawData: loc.rawData || null,
@@ -879,12 +860,12 @@ function NewCasePage() {
   const extractTimestamps = (text) => {
     const timestamps = [];
     const patterns = [
-      /\b\d{4}[/-]\d{2}[/-]\d{2}[,\s]+\d{2}:\d{2}:\d{2}\b/g, // YYYY-MM-DD HH:MM:SS
-      /\b\d{2}[/-]\d{2}[/-]\d{4}[,\s]+\d{2}:\d{2}:\d{2}\b/g, // DD/MM/YYYY HH:MM:SS
-      /\b\d{2}:\d{2}:\d{2}\b/g, // HH:MM:SS
-      /\b\d{2}:\d{2}\b/g, // HH:MM
-      /Time[:\s]+(\d{2}:\d{2}(?::\d{2})?)/gi, // “Time: 12:34”
-      /\b\d{4}\/\d{2}\/\d{2}\b/g, // YYYY/MM/DD
+      /\b\d{4}[/-]\d{2}[/-]\d{2}[,\s]+\d{2}:\d{2}:\d{2}\b/g,
+      /\b\d{2}[/-]\d{2}[/-]\d{4}[,\s]+\d{2}:\d{2}:\d{2}\b/g,
+      /\b\d{2}:\d{2}:\d{2}\b/g,
+      /\b\d{2}:\d{2}\b/g,
+      /Time[:\s]+(\d{2}:\d{2}(?::\d{2})?)/gi,
+      /\b\d{4}\/\d{2}\/\d{2}\b/g,
     ];
 
     patterns.forEach((pattern) => {
@@ -1016,14 +997,14 @@ function NewCasePage() {
 Detected text sample: "${fullText.substring(0, 200)}..."
 
 The PDF may contain:
-• Scanned images instead of text
-• Coordinates in an unsupported format
-• No GPS coordinate data
+- Scanned images instead of text
+- Coordinates in an unsupported format
+- No GPS coordinate data
 
 Please ensure your PDF contains GPS coordinates in one of these formats:
-• Decimal: -33.918861, 18.423300
-• Labeled: Latitude: -33.918861, Longitude: 18.423300
-• DMS: 33°55'07.9"S 18°25'23.9"E`
+- Decimal: -33.918861, 18.423300
+- Labeled: Latitude: -33.918861, Longitude: 18.423300
+- DMS: 33°55'07.9"S 18°25'23.9"E`
           );
           setParsedData(null);
           setCsvStats(null);
@@ -1127,7 +1108,7 @@ Please ensure your PDF contains GPS coordinates in one of these formats:
                 2
               )
           );
-        return distance < 100;
+          return distance < 100;
         });
 
         if (!isDuplicate) uniquePoints.push(point);
@@ -1172,7 +1153,7 @@ Please ensure your PDF contains GPS coordinates in one of these formats:
     }
   };
 
-  // --- CSV parsing helpers & parser ---
+  // CSV parsing helpers & parser
   const determineIgnitionStatus = (description) => {
     if (!description) return null;
 
@@ -1421,7 +1402,10 @@ Please ensure your PDF contains GPS coordinates in one of these formats:
         return;
       }
 
-      setIsProcessing(true);
+      // Show warnings if any
+      if (scanResults.warnings.length > 0) {
+        console.warn('⚠️ Security warnings:', scanResults.warnings);
+      }
 
       // 1) Create in backend, return caseId
       const payload = {
@@ -1543,17 +1527,12 @@ const handleFile = async (selected) => {
   }
 };
 
-  // Submit: just call create
+  // Submit
   const handleNext = async (e) => {
     e.preventDefault();
 
     if (!caseNumber || !caseTitle || !dateOfIncident || !region || !file || !parsedData) {
-      openModal({
-        variant: "warning",
-        title: "Missing information",
-        description:
-          "Please complete all required fields and upload a valid CSV or PDF file before continuing.",
-      });
+      alert("Please fill all required fields and upload a valid file");
       return;
     }
 
@@ -1564,13 +1543,94 @@ const handleFile = async (selected) => {
   const handleSignOut = async () => {
     try {
       await signOut(auth);
-      navigate("/"); // Redirect to LandingPage
+      navigate("/");
     } catch (error) {
       console.error("Sign-out failed:", error.message);
     }
   };
 
-  // ---------- UI ----------
+  // Security status component
+  const SecurityStatus = () => {
+    if (!securityResults) return null;
+
+    const getRiskColor = (level) => {
+      switch (level) {
+        case 'LOW': return 'text-green-400';
+        case 'MEDIUM': return 'text-yellow-400';
+        case 'HIGH': return 'text-red-400';
+        default: return 'text-gray-400';
+      }
+    };
+
+    const getRiskIcon = (level) => {
+      switch (level) {
+        case 'LOW': return <Shield className="w-4 h-4" />;
+        case 'MEDIUM': return <AlertTriangle className="w-4 h-4" />;
+        case 'HIGH': return <AlertCircle className="w-4 h-4" />;
+        default: return <Shield className="w-4 h-4" />;
+      }
+    };
+
+    return (
+      <div className="mt-2 p-3 bg-gray-800 rounded border border-gray-600">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center space-x-2">
+            <div className={getRiskColor(securityResults.riskLevel)}>
+              {getRiskIcon(securityResults.riskLevel)}
+            </div>
+            <span className={`font-semibold ${getRiskColor(securityResults.riskLevel)}`}>
+              Security: {securityResults.riskLevel} Risk
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setShowSecurityDetails(!showSecurityDetails)}
+            className="text-blue-400 hover:text-blue-300 text-sm"
+          >
+            {showSecurityDetails ? 'Hide Details' : 'Show Details'}
+          </button>
+        </div>
+        
+        {showSecurityDetails && (
+          <div className="mt-3 space-y-2 text-sm">
+            {securityResults.fileHash && (
+              <p className="text-gray-400">
+                File Hash: <span className="font-mono text-xs">{securityResults.fileHash.substring(0, 16)}...</span>
+              </p>
+            )}
+            
+            {securityResults.threats.length > 0 && (
+              <div>
+                <p className="text-red-400 font-semibold">Threats Detected:</p>
+                <ul className="list-disc list-inside text-red-300 text-xs ml-2">
+                  {securityResults.threats.map((threat, index) => (
+                    <li key={index}>{threat}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            
+            {securityResults.warnings.length > 0 && (
+              <div>
+                <p className="text-yellow-400 font-semibold">Warnings:</p>
+                <ul className="list-disc list-inside text-yellow-300 text-xs ml-2">
+                  {securityResults.warnings.map((warning, index) => (
+                    <li key={index}>{warning}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            
+            {securityResults.safe && securityResults.threats.length === 0 && (
+              <p className="text-green-400 text-xs">✓ File passed all security checks</p>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  // UI
   return (
     <motion.div
       initial={{ opacity: 0 }}
@@ -1848,6 +1908,15 @@ const handleFile = async (selected) => {
                   </span>
                 ))}
               </div>
+              <button
+                type="button"
+                onClick={addEvidence}
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded text-white text-sm flex items-center"
+              >
+                <span className="mr-2">+</span>
+                Add Evidence
+              </button>
+            </div>
 
               <div className="flex flex-col sm:flex-row sm:items-center gap-3">
                 <input
@@ -1891,15 +1960,13 @@ const handleFile = async (selected) => {
                         onClick={() => handleAddUserToCase(user)}
                         className="inline-flex items-center gap-1 rounded-full border border-white/10 bg-gradient-to-r from-emerald-800 to-teal-700 px-3 py-1 text-white transition hover:from-emerald-700 hover:to-teal-600"
                       >
-                        <UserPlus className="w-3 h-3" /> Add
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                        </svg>
                       </button>
                     </div>
-                  ))
-                ) : userSearchTerm ? (
-                  <p className="text-xs text-gray-500">No users found.</p>
-                ) : (
-                  <p className="text-xs text-gray-500">Search to find users to add to this case.</p>
-                )}
+                  </div>
+                ))}
               </div>
             </section>
           )}
@@ -1924,7 +1991,8 @@ const handleFile = async (selected) => {
           <section className="relative z-10 mt-8 space-y-4 rounded-2xl border border-white/10 bg-white/[0.018] p-6 shadow-[0_18px_45px_rgba(15,23,42,0.45)]">
             <div className="mb-2 flex items-center justify-between">
               <label className="block text-sm font-medium text-gray-300">
-                Upload GPS Coordinates (CSV or PDF) *
+                Upload GPS Coordinates (CSV or PDF) * 
+                <span className="ml-2 text-green-400 text-xs">🔒 Security Enabled</span>
               </label>
               <button
                 type="button"
@@ -1936,7 +2004,7 @@ const handleFile = async (selected) => {
               </button>
             </div>
 
-            {/* File Guide */}
+            {/* Enhanced Guide with Security Info */}
             {showGuide && (
               <div className="mb-4 rounded-2xl border border-white/10 bg-white/[0.02] p-6 text-sm text-gray-200 shadow-[0_18px_45px_rgba(15,23,42,0.45)]">
                 <h3 className="font-semibold mb-2">Supported File Formats:</h3>
@@ -1946,10 +2014,7 @@ const handleFile = async (selected) => {
                   <h4 className="font-semibold text-blue-300 mb-1">CSV Files:</h4>
                   <p className="mb-2">Your CSV should include the following columns:</p>
                   <ul className="list-disc pl-5 space-y-1 text-xs">
-                    <li>
-                      Latitude (decimal coordinates - column name containing "lat" or
-                      "latitude")
-                    </li>
+                    <li>Latitude (decimal coordinates - column name containing "lat" or "latitude")</li>
                     <li>
                       Longitude (decimal coordinates - column name containing "lng", "lon",
                       or "longitude")
@@ -1983,6 +2048,16 @@ const handleFile = async (selected) => {
                     Note: PDF extraction works best with text-based PDFs. Scanned images may
                     not extract properly.
                   </p>
+                </div>
+
+                {/* File Limits */}
+                <div className="mb-4 p-2 bg-gray-700 rounded">
+                  <h4 className="font-semibold text-orange-400 mb-1">File Limits:</h4>
+                  <ul className="list-disc pl-5 space-y-1 text-xs">
+                    <li>Maximum file size: 10MB</li>
+                    <li>Supported extensions: .csv, .pdf, .xls, .xlsx</li>
+                    <li>Text-based files only (no scanned images)</li>
+                  </ul>
                 </div>
 
                 {/* Ignition Status Detection */}
@@ -2024,12 +2099,12 @@ const handleFile = async (selected) => {
               <input
                 id="file-upload"
                 type="file"
-                accept=".csv,.pdf"
+                accept=".csv,.pdf,.xls,.xlsx"
                 className="hidden"
                 onChange={handleFileSelect}
               />
 
-              {isProcessing ? (
+              {isScanning ? (
                 <div className="text-center">
                   <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-blue-700 mx-auto mb-4"></div>
                   <div className="text-blue-300 mb-2">
@@ -2179,16 +2254,6 @@ const handleFile = async (selected) => {
           </div>
         </form>
       </div>
-
-      <NotificationModal
-        isOpen={modalState.isOpen}
-        title={modalState.title}
-        description={modalState.description}
-        variant={modalState.variant}
-        onClose={closeModal}
-        primaryAction={modalState.primaryAction}
-        secondaryAction={modalState.secondaryAction}
-      />
     </motion.div>
   );
 }

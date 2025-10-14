@@ -98,8 +98,27 @@ function SimulationPage2() {
   // --- 3D/2D toggle state & refs ---
   const [mode3D, setMode3D] = useState(true);
   const [isMorphing, setIsMorphing] = useState(false);
+
+  const viewerReady = !!viewerRef.current?.cesiumElement;
+  const floatingButtonBaseStyle = {
+    position: "absolute",
+    right: "30px",
+    padding: "10px 18px",
+    borderRadius: "999px",
+    border: "1px solid rgba(56, 189, 248, 0.35)",
+    background: "rgba(15, 23, 42, 0.85)",
+    color: "#e2e8f0",
+    fontWeight: 600,
+    fontSize: "0.9rem",
+    boxShadow: "0 12px 30px rgba(15, 23, 42, 0.45)",
+    backdropFilter: "blur(6px)",
+    letterSpacing: "0.01em",
+    zIndex: 1000,
+    transition: "transform 0.2s ease, box-shadow 0.2s ease",
+    cursor: "pointer"
+  };
   // remember whether playback was running before morph
-const wasAnimatingRef = useRef(true);
+  const wasAnimatingRef = useRef(true);
 
 // keep exactly one onTick handler to force repaint during play/scrub
 const onTickCleanupRef = useRef(null);

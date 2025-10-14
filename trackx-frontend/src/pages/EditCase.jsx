@@ -61,16 +61,13 @@ function EditCasePage() {
       ...(primaryAction ? { primaryAction: { closeOnClick: true, ...primaryAction } } : {}),
     });
 
-  // Possible sources
   const caseDataFromLocation = location.state?.caseData || null;
   const docIdFromLocation = location.state?.docId || null; // backend id
   const caseIdFromLocation = location.state?.caseId || null; // firebase id
 
-  // Loading & base state
   const [loading, setLoading] = useState(true);
   const [caseData, setCaseData] = useState(caseDataFromLocation);
 
-  // Editable fields
   const [caseNumber, setCaseNumber] = useState("");
   const [caseTitle, setCaseTitle] = useState("");
   const [dateOfIncident, setDateOfIncident] = useState("");
@@ -80,7 +77,6 @@ function EditCasePage() {
   const [urgency, setUrgency] = useState("");
   const [showMenu, setShowMenu] = useState(false);
 
-  // Firebase integration state
   const [firebaseCase, setFirebaseCase] = useState(null);
   const [annotationsAvailable, setAnnotationsAvailable] = useState(false);
   const [loadingAnnotations, setLoadingAnnotations] = useState(false);
@@ -141,7 +137,6 @@ function EditCasePage() {
       setLoading(true);
       try {
         if (caseIdFromLocation) {
-          // Prefer Firebase
           try {
             const fb = await loadCaseWithAnnotations(caseIdFromLocation);
             setCaseData(fb);
@@ -162,7 +157,7 @@ function EditCasePage() {
           return;
         }
 
-        await checkForAnnotations(); // after we have caseData
+        await checkForAnnotations();
       } catch (err) {
         console.error("Failed to fetch case:", err);
       } finally {
@@ -189,14 +184,12 @@ function EditCasePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [caseDataFromLocation, docIdFromLocation, caseIdFromLocation]);
 
-  // Normalize into form state
   useEffect(() => {
     if (!caseData) return;
 
     setCaseNumber(caseData.caseNumber || caseData.case_number || "");
     setCaseTitle(caseData.caseTitle || caseData.title || "");
 
-    // Date: handle strings/Date/Firestore
     let dateValue = "";
     const src = caseData.dateOfIncident || caseData.date;
     if (src) {
@@ -218,7 +211,6 @@ function EditCasePage() {
     setEvidenceItems(caseData.evidenceItems || caseData.evidence_items || []);
   }, [caseData]);
 
-  // Check annotations presence (Firebase + session snapshots + reports)
   const checkForAnnotations = async () => {
     if (!caseData) return;
     setLoadingAnnotations(true);
@@ -226,12 +218,10 @@ function EditCasePage() {
     try {
       const userId = getCurrentUserId();
 
-      // If already a Firebase case with locations
       let existing = null;
       if (caseData.caseId && caseData.locations) {
         existing = caseData;
       } else {
-        // Try to locate Firebase case by caseNumber
         try {
           const userCases = await getUserCases(userId);
           const found = userCases.find(
@@ -251,7 +241,6 @@ function EditCasePage() {
       if (existing?.locations) {
         setAnnotationsAvailable(true);
 
-        // Count snapshots (Firebase hints + sessionStorage)
         let snapshotCount = 0;
         try {
           if (existing.caseId) {
@@ -278,7 +267,6 @@ function EditCasePage() {
           console.warn("Could not load snapshots:", se);
         }
 
-        // Reports in Firebase
         let firebaseReportsCount = 0;
         try {
           if (existing.caseId) {
@@ -289,7 +277,6 @@ function EditCasePage() {
           console.warn("Could not load reports:", re);
         }
 
-        // Stats
         const stats = {
           locations: existing.locations?.length || 0,
           snapshots: snapshotCount,

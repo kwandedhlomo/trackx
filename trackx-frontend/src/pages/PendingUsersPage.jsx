@@ -4,10 +4,7 @@ import {
   collection,
   getDocs,
   updateDoc,
-  deleteDoc,
   doc,
-  query,
-  where,
   getDoc,
 } from "firebase/firestore";
 import { signOut } from "firebase/auth";
@@ -60,26 +57,12 @@ function PendingUsersPage() {
     }
   };
 
-  const approveUser = async (userId, wasRejected = false, skipConfirmation = false) => {
-    if (wasRejected && !skipConfirmation) {
-      openModal({
-        variant: "warning",
-        title: "Approve rejected user?",
-        description:
-          "This user was previously rejected. Approving them will allow access to the system. Continue?",
-        primaryAction: {
-          label: "Approve user",
-          closeOnClick: false,
-          onClick: () => {
-            closeModal();
-            approveUser(userId, true, true);
-          },
-        },
-        secondaryAction: {
-          label: "Cancel",
-        },
-      });
-      return;
+  const approveUser = async (userId, wasRejected = false) => {
+    if (wasRejected) {
+      const confirmed = window.confirm(
+        "This user was previously rejected. Are you SURE you want to allow them into the system?"
+      );
+      if (!confirmed) return;
     }
 
     try {
@@ -102,24 +85,15 @@ function PendingUsersPage() {
         "nv9uRgDbQKDVfYOf4"
       );
 
-      openModal({
-        variant: "success",
-        title: "User approved",
-        description: "The user has been approved and notified via email.",
-      });
+      alert("User approved and notified via email.");
       setAllUsers((prev) =>
-        prev.map((u) => (u.id === userId ? { ...u, isApproved: true, status: "approved" } : u))
+        prev.map((u) =>
+          u.id === userId ? { ...u, isApproved: true, status: "approved" } : u
+        )
       );
     } catch (err) {
       console.error("Error approving user:", err);
-      openModal({
-        variant: "error",
-        title: "Approval failed",
-        description: getFriendlyErrorMessage(
-          err,
-          "We couldn't approve the user or send the email notification. Please try again."
-        ),
-      });
+      alert("Error approving user or sending email.");
     }
   };
 
@@ -127,21 +101,15 @@ function PendingUsersPage() {
     try {
       const userRef = doc(db, "users", userId);
       await updateDoc(userRef, { isApproved: false, status: "rejected" });
-      openModal({
-        variant: "info",
-        title: "User rejected",
-        description: "The user has been marked as rejected.",
-      });
+      alert("User rejected.");
       setAllUsers((prev) =>
-        prev.map((u) => (u.id === userId ? { ...u, isApproved: false, status: "rejected" } : u))
+        prev.map((u) =>
+          u.id === userId ? { ...u, isApproved: false, status: "rejected" } : u
+        )
       );
     } catch (err) {
       console.error("Error rejecting user:", err);
-      openModal({
-        variant: "error",
-        title: "Rejection failed",
-        description: getFriendlyErrorMessage(err, "We couldn't update the user status. Please try again."),
-      });
+      alert("Error rejecting user.");
     }
   };
 
@@ -151,9 +119,11 @@ function PendingUsersPage() {
   };
 
   const filteredUsers = allUsers.filter((user) => {
-    if (filter === "pending") return user.isApproved === false && user.status !== "rejected";
+    if (filter === "pending")
+      return user.isApproved === false && user.status !== "rejected" && user.status !== "revoked";
     if (filter === "rejected") return user.status === "rejected";
     if (filter === "approved") return user.isApproved === true;
+    if (filter === "revoked") return user.status === "revoked";
     return true;
   });
 

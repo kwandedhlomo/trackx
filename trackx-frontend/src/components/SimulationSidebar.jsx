@@ -407,6 +407,34 @@ export default function SimulationSidebar({ viewerRef, disabled = false }) {
         ),
       });
     }
+    viewer.clock.shouldAnimate = false;
+
+    console.groupCollapsed("⏱️ [JUMP clamp-check]");
+    console.table({
+      targetUTC: new Date(targetMs).toLocaleTimeString("en-GB", {
+        hour12: false,
+        timeZone: "UTC",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+      }),
+      windowStartUTC: new Date(startMs).toLocaleTimeString("en-GB", {
+        hour12: false,
+        timeZone: "UTC",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+      }),
+      windowStopUTC: new Date(stopMs).toLocaleTimeString("en-GB", {
+        hour12: false,
+        timeZone: "UTC",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+      }),
+      outcome,
+    });
+    console.groupEnd();
   };
 
   const confirmDelete = (point) => {

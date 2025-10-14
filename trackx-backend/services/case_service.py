@@ -1,5 +1,5 @@
 from firebase.firebase_config import db
-from google.cloud.firestore_v1 import DocumentReference, SERVER_TIMESTAMP
+from google.cloud.firestore_v1 import DocumentReference
 from google.api_core.datetime_helpers import DatetimeWithNanoseconds
 from google.cloud.firestore_v1 import SERVER_TIMESTAMP
 from models.case_model import CaseCreateRequest
@@ -15,20 +15,16 @@ import time
 from datetime import timedelta
 from datetime import timezone
 from datetime import datetime
-from typing import List, Dict, Any, Optional
 from services.notifications_service import add_notification  # Import the notifications service
 import os
 from dotenv import load_dotenv
 from openai import OpenAI
-from firebase_admin import firestore
-from firebase_admin.firestore import SERVER_TIMESTAMP
-import logging
-
-logger = logging.getLogger(__name__)
+from typing import Optional
 
 load_dotenv()  # loads OPENAI_API_KEY from .env (safe in dev)
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-db = firestore.client()
+
+
 
 # SIMULATION_PROGRESS = {}
 logger = logging.getLogger(__name__)
@@ -46,259 +42,36 @@ def sanitize_firestore_data(data):
             clean[key] = str(value)
     return clean
 
-
-def _case_accessible_to_user(case_data: Dict[str, Any], user_id: str) -> bool:
-    if not user_id:
-        return True
-    user_ids = case_data.get("userIds") or case_data.get("userIDs") or []
-    if isinstance(user_ids, list) and user_id in user_ids:
-        return True
-    return case_data.get("userID") == user_id
-
-
-def _get_case_documents_for_user(user_id: str) -> Dict[str, Any]:
-    cases_ref = db.collection("cases")
-    docs_map: Dict[str, Any] = {}
-
-    if not user_id:
-        for doc in cases_ref.stream():
-            docs_map[doc.id] = doc
-        return docs_map
-
-    try:
-        for doc in cases_ref.where("userIds", "array_contains", user_id).stream():
-            docs_map[doc.id] = doc
-    except Exception as exc:
-        logger.debug(f"userIds array_contains query failed for user {user_id}: {exc}")
-
-    try:
-        for doc in cases_ref.where("userIDs", "array_contains", user_id).stream():
-            docs_map.setdefault(doc.id, doc)
-    except Exception as exc:
-        logger.debug(f"legacy userIDs array_contains query failed for user {user_id}: {exc}")
-
-    try:
-        for doc in cases_ref.where("userID", "==", user_id).stream():
-            docs_map.setdefault(doc.id, doc)
-    except Exception as exc:
-        logger.debug(f"legacy userID query failed for user {user_id}: {exc}")
-
-    return docs_map
-from firebase_admin import firestore
-from firebase_admin.firestore import SERVER_TIMESTAMP
-from openai import OpenAI
-
-client = OpenAI()
-db = firestore.client()
-
-# Helper: collect annotation descriptions from likely subcollections
-async def fetch_annotation_descriptions(case_id: str) -> list:
-    """
-    Tries multiple subcollection names and pulls text-like fields.
-    Returns a list of descriptions (strings), de-duped and filtered.
-    """
-    doc_ref = db.collection("cases").document(case_id)
-    candidate_subcollections = [
-        "locations", "annotations", "locationAnnotations", "points", "allPoints", "notes"
-    ]
-    descriptions = []
-    for col in candidate_subcollections:
-        try:
-            coll_ref = doc_ref.collection(col)
-            docs = list(coll_ref.stream())
-            for d in docs:
-                data = d.to_dict() or {}
-                # common keys where human text might live
-                for k in ("description", "annotation", "notes", "note", "text", "descriptionText"):
-                    v = data.get(k)
-                    if v and isinstance(v, str) and v.strip():
-                        descriptions.append(v.strip())
-        except Exception as e:
-            logger.debug(f"Could not read subcollection {col} for case {case_id}: {e}")
-    # also check top-level fields on the case doc
-    try:
-        case_doc = doc_ref.get()
-        if case_doc.exists:
-            case_data = case_doc.to_dict() or {}
-            for k in ("reportNotes", "annotations", "locationDescriptions"):
-                v = case_data.get(k)
-                if isinstance(v, str) and v.strip():
-                    descriptions.append(v.strip())
-                # if it's a list of strings:
-                if isinstance(v, list):
-                    descriptions.extend([str(x).strip() for x in v if isinstance(x, str) and x.strip()])
-    except Exception:
-        pass
-
-    # de-dup while preserving order
-    seen = set()
-    out = []
-    for t in descriptions:
-        if t not in seen:
-            seen.add(t)
-            out.append(t)
-    return out
-
-# --- AI generation helpers (improved prompts) ---
-
-async def generate_case_intro(case_title: str, region: str, date: str) -> str:
-    """
-    Produce a single concise paragraph suitable for a forensic report introduction.
-    Explicit instructions prevent the model from producing headers or inventing details.
-    """
-    # Build a short factual context string (only include if present)
-    facts = []
-    if case_title: facts.append(f"case title: {case_title}")
-    if region: facts.append(f"region: {region}")
-    if date: facts.append(f"date: {date}")
-    facts_str = "; ".join(facts) if facts else "No case metadata provided."
-
-    prompt = (
-        "You are a forensic analyst. Write ONE concise paragraph (2–4 sentences) suitable as the "
-        "introduction to a formal forensic report. **Important**: "
-        "1) Output only the paragraph — do NOT include a title, headings, or separate lines for Date/Location/Case Title. "
-        "2) Do NOT invent facts or make definitive claims about specific forensic test results unless they are explicitly provided. "
-        "3) Be neutral and factual. "
-        f"Context: {facts_str}"
-    )
-
-    resp = client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[
-            {"role": "system", "content": "You are a forensic analyst writing concise, formal introductions."},
-            {"role": "user", "content": prompt}
-        ],
-        max_tokens=250,
-        temperature=0.15,
-    )
-    return (resp.choices[0].message.content or "").strip()
-
-
-async def generate_case_conclusion(case_title: str, region: str, intro_text: str, annotation_texts: list, evidence_items: list) -> str:
-    """
-    Strict evidence-driven conclusion: summarises annotations + evidenceItems + intro.
-    Will not invent facts; will be cautious if evidence is limited.
-    """
-
-    # Prepare annotation block
-    if annotation_texts:
-        ann_lines = [f"{i+1}. {t}" for i, t in enumerate(annotation_texts)]
-        annotation_block = "\n".join(ann_lines)
-    else:
-        annotation_block = "No annotation descriptions available."
-
-    # Prepare evidence block
-    if evidence_items:
-        ev_lines = [f"{i+1}. {e}" for i, e in enumerate(evidence_items)]
-        evidence_block = "\n".join(ev_lines)
-    else:
-        evidence_block = "No explicit evidence items recorded."
-
-    prompt = (
-        "You are a forensic analyst. Compose a single concise conclusion paragraph (2–4 sentences) that "
-        "summarizes only the evidence provided below. **Do NOT invent new facts**, and do not attribute "
-        "specific laboratory results unless they appear in the evidence. If the evidence is limited or inconclusive, "
-        "explicitly say so and recommend further investigation.\n\n"
-        f"INTRODUCTION (for context):\n{intro_text or '(none)'}\n\n"
-        f"ANNOTATION DESCRIPTIONS:\n{annotation_block}\n\n"
-        f"EVIDENCE ITEMS:\n{evidence_block}\n\n"
-        "Output: one paragraph only."
-    )
-
-    resp = client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[
-            {"role": "system", "content": "You are a forensic analyst writing clear, objective conclusions."},
-            {"role": "user", "content": prompt}
-        ],
-        max_tokens=300,
-        temperature=0.15,
-    )
-    return (resp.choices[0].message.content or "").strip()
-
-# --- Combined helper that creates both and stores to Firestore with aligned keys ---
-async def add_intro_conclusion(case_id: str):
-    doc_ref = db.collection("cases").document(case_id)
-    doc = doc_ref.get()
-    if not doc.exists:
-        return False, "Case not found"
-
-    case = doc.to_dict() or {}
-    # fetch annotation descriptions (robust)
-    annotation_texts = await fetch_annotation_descriptions(case_id)
-
-    # include evidenceItems array as well (if any)
-    evidence_items = case.get("evidenceItems", [])
-    combined_evidence = annotation_texts + evidence_items
-
-    # create intro
-    intro = await generate_case_intro(
-        case.get("caseTitle", "") or "",
-        case.get("region", "") or "",
-        case.get("dateOfIncident", "") or ""
-    )
-
-    # create conclusion based strictly on intro + annotations
-    conclusion = await generate_case_conclusion(
-        case.get("caseTitle", "") or "",
-        case.get("region", "") or "",
-        intro,
-        combined_evidence
-    )
-
-    # store using the keys the frontend expects
-    doc_ref.update({
-        "reportIntro": intro,
-        "reportConclusion": conclusion,
-        "updatedAt": SERVER_TIMESTAMP
-    })
-
-    return True, {"reportIntro": intro, "reportConclusion": conclusion}
-
 async def search_cases(case_name: str = "", region: str = "", date: str = "", user_id: str = "", status: str = "", urgency: str = ""):
     try:
         print(f"Received filters: case_name={case_name}, region={region}, date={date}, user_id={user_id}, status={status}, urgency={urgency}")
         
-        if user_id:
-            docs_map = _get_case_documents_for_user(user_id)
-            documents = list(docs_map.values())
-        else:
-            cases_ref = db.collection("cases")
-            query_ref = cases_ref
-            if case_name:
-                query_ref = query_ref.where("caseTitle", "==", case_name)
-            if region:
-                query_ref = query_ref.where("region", "==", region)
-            if date:
-                query_ref = query_ref.where("dateOfIncident", "==", date)
-            if status:
-                query_ref = query_ref.where("status", "==", status)
-            if urgency:
-                query_ref = query_ref.where("urgency", "==", urgency)
-            documents = list(query_ref.stream())
+        cases_ref = db.collection("cases")
+        query = cases_ref
 
+        # Always filter by user_id
+        if user_id:
+            query = query.where("userID", "==", user_id)
+
+        # Dynamically chain other filters
+        if case_name:
+            query = query.where("caseTitle", "==", case_name)
+        if region:
+            query = query.where("region", "==", region)
+        if date:
+            query = query.where("dateOfIncident", "==", date)
+        if status:
+            query = query.where("status", "==", status)
+        if urgency:
+            query = query.where("urgency", "==", urgency)
+
+        documents = list(query.stream())
         results = []
-        seen_ids = set()
         for doc in documents:
-            if doc.id in seen_ids:
-                continue
             data = doc.to_dict()
-            if not _case_accessible_to_user(data, user_id):
-                continue
-            if case_name and data.get("caseTitle") != case_name:
-                continue
-            if region and data.get("region") != region:
-                continue
-            if date and data.get("dateOfIncident") != date:
-                continue
-            if status and data.get("status") != status:
-                continue
-            if urgency and data.get("urgency") != urgency:
-                continue
             sanitized = sanitize_firestore_data(data)
             sanitized["doc_id"] = doc.id
             results.append(sanitized)
-            seen_ids.add(doc.id)
 
         return results
 
@@ -311,16 +84,6 @@ async def create_case(payload: CaseCreateRequest) -> str:
     try:
         case_id = str(uuid.uuid4())
 
-        raw_user_ids = list(getattr(payload, "userIDs", []) or getattr(payload, "userIds", []) or [])
-        legacy_user_id = getattr(payload, "userID", None)
-        if legacy_user_id:
-            raw_user_ids.append(legacy_user_id)
-        # ensure creator present at least once
-        user_ids = []
-        for uid in raw_user_ids:
-            if uid and uid not in user_ids:
-                user_ids.append(uid)
-
         # Main case metadata
         case_data = {
             "caseNumber": payload.case_number,
@@ -331,8 +94,7 @@ async def create_case(payload: CaseCreateRequest) -> str:
             "urgency": payload.urgency, 
             "createdAt": firestore.SERVER_TIMESTAMP,
             "status": "in progress",
-            "userID": user_ids[0] if user_ids else legacy_user_id,
-            "userIds": user_ids,
+            "userID": getattr(payload, "userID", None)
         }
 
         # Save case document
@@ -380,17 +142,14 @@ async def create_case(payload: CaseCreateRequest) -> str:
             logger.info(f"Added {len(payload.all_points)} allPoints to case {case_id}")
         
                 # Trigger notification
-        notified = set()
-        for uid in user_ids:
-            if uid and uid not in notified:
-                await add_notification(
-                    user_id=uid,
-                    title="Case Created",
-                    message=f"A new case titled '{case_data['caseTitle']}' has been created.",
-                    notification_type="case-created"
-                )
-                notified.add(uid)
-                logger.info(f"Notification sent to user {uid} for case creation.")
+        if case_data["userID"]:
+            await add_notification(
+                user_id=case_data["userID"],
+                title="Case Created",
+                message=f"A new case titled '{case_data['caseTitle']}' has been created.",
+                notification_type="case-created"
+            )
+            logger.info(f"Notification sent to user {case_data['userID']} for case creation.")
 
         return case_id
 
@@ -430,20 +189,6 @@ async def update_case(data: dict):
             "updatedAt": SERVER_TIMESTAMP,
         }
 
-        if "userIDs" in data or "userIds" in data:
-            incoming_user_ids = data.get("userIDs") or data.get("userIds") or []
-            if not isinstance(incoming_user_ids, list):
-                raise ValueError("userIds must be a list")
-            normalized_ids = []
-            for uid in incoming_user_ids:
-                if uid and uid not in normalized_ids:
-                    normalized_ids.append(uid)
-            update_fields["userIds"] = normalized_ids
-            if normalized_ids:
-                update_fields["userID"] = normalized_ids[0]
-        elif "userID" in data:
-            update_fields["userID"] = data.get("userID")
-
         # Remove fields that are not being updated
         update_fields = {k: v for k, v in update_fields.items() if v is not None}
 
@@ -470,25 +215,17 @@ async def update_case(data: dict):
             notification_message = f"Your case '{case_title}' has been updated."
 
         # Fetch the user ID associated with the case
-        target_user_ids = (
-            update_fields.get("userIds")
-            or current_data.get("userIds")
-            or []
-        )
-        if not target_user_ids and current_data.get("userID"):
-            target_user_ids = [current_data.get("userID")]
+        user_id = current_data.get("userID")
 
-        notified = set()
-        for uid in target_user_ids:
-            if uid and uid not in notified:
-                await add_notification(
-                    user_id=uid,
-                    title="Case Updated",
-                    message=notification_message,
-                    notification_type="case-update"
-                )
-                notified.add(uid)
-                print(f"Notification sent to user {uid} for case update.")
+        # Trigger a notification for the user
+        if user_id:
+            await add_notification(
+                user_id=user_id,
+                title="Case Updated",
+                message=notification_message,
+                notification_type="case-update"
+            )
+            print(f"Notification sent to user {user_id} for case update.")
 
         return True, "Update successful"
 
@@ -506,9 +243,7 @@ async def delete_case(doc_id: str):
             return False, "Case not found"
 
         case_data = doc.to_dict()
-        user_ids = case_data.get("userIds") or []
-        if not user_ids and case_data.get("userID"):
-            user_ids = [case_data.get("userID")]
+        user_id = case_data.get("userID")
         case_title = case_data.get("caseTitle", "Unknown Case")
 
         # Delete the case
@@ -516,17 +251,14 @@ async def delete_case(doc_id: str):
         print(f"Deleted case with doc_id: {doc_id}")
 
         # Trigger notification if user ID is found
-        notified = set()
-        for uid in user_ids:
-            if uid and uid not in notified:
-                await add_notification(
-                    user_id=uid,
-                    title="Case Deleted",
-                    message=f"Your case titled '{case_title}' has been deleted.",
-                    notification_type="case-delete"
-                )
-                notified.add(uid)
-                print(f"Notification sent to user {uid} for deleted case.")
+        if user_id:
+            await add_notification(
+                user_id=user_id,
+                title="Case Deleted",
+                message=f"Your case titled '{case_title}' has been deleted.",
+                notification_type="case-delete"
+            )
+            print(f"Notification sent to user {user_id} for deleted case.")
 
         return True, "Deleted successfully"
 
@@ -535,27 +267,18 @@ async def delete_case(doc_id: str):
         return False, f"Delete failed: {str(e)}"
 
 async def fetch_recent_cases(sort_by: str = "dateEntered", user_id: str = ""):
-    docs_map = _get_case_documents_for_user(user_id)
+    query = db.collection("cases")
+    if user_id:
+        query = query.where("userID", "==", user_id)
+
     sort_field = "createdAt" if sort_by == "dateEntered" else "dateOfIncident"
+    query = query.order_by(sort_field, direction=firestore.Query.DESCENDING).limit(4)
 
-    def _sort_key(doc_snapshot):
-        data = doc_snapshot.to_dict() or {}
-        value = data.get(sort_field)
-        if isinstance(value, DatetimeWithNanoseconds):
-            return value
-        if isinstance(value, datetime):
-            return value
-        if isinstance(value, str):
-            try:
-                return datetime.fromisoformat(value.split("Z")[0])
-            except Exception:
-                return datetime.min
-        return datetime.min
-
-    sorted_docs = sorted(docs_map.values(), key=_sort_key, reverse=True)
+    documents = list(query.stream())
     results = []
-    for doc in sorted_docs[:4]:
-        data = doc.to_dict() or {}
+
+    for doc in documents:
+        data = doc.to_dict()
         sanitized = sanitize_firestore_data(data)
         sanitized["doc_id"] = doc.id
         results.append(sanitized)
@@ -564,8 +287,11 @@ async def fetch_recent_cases(sort_by: str = "dateEntered", user_id: str = ""):
 
 async def get_case_counts_by_month(user_id: str = ""):
     print(f"get_case_counts_by_month() called with user_id: {user_id}")
-    docs_map = _get_case_documents_for_user(user_id)
-    documents = list(docs_map.values())
+    query = db.collection("cases")
+    if user_id:
+        query = query.where("userID", "==", user_id)
+
+    documents = list(query.stream())
     print(f" Found {len(documents)} case documents for monthly count")
 
     month_counts = defaultdict(int)
@@ -584,8 +310,11 @@ async def get_case_counts_by_month(user_id: str = ""):
 
 
 async def get_region_case_counts(user_id: str = ""):
-    docs_map = _get_case_documents_for_user(user_id)
-    docs = list(docs_map.values())
+    query = db.collection("cases")
+    if user_id:
+        query = query.where("userID", "==", user_id)
+
+    docs = list(query.stream())
     print(f" Found {len(docs)} cases for region count (user_id={user_id})")
 
     region_counts = {}
@@ -1024,59 +753,7 @@ async def fetch_last_points_per_case():
         print(f"Error in fetch_last_points_per_case: {e}")
         return []
 
-
-async def assign_case_users(case_id: str, user_ids: List[str]):
-    if not isinstance(user_ids, list) or not user_ids:
-        raise ValueError("user_ids must be a non-empty list")
-
-    normalized_ids: list[str] = []
-    for uid in user_ids:
-        if uid and uid not in normalized_ids:
-            normalized_ids.append(uid)
-
-    if not normalized_ids:
-        raise ValueError("No valid user IDs provided")
-
-    case_ref = db.collection("cases").document(case_id)
-    snapshot = case_ref.get()
-    if not snapshot.exists:
-        raise ValueError("Case not found")
-
-    existing = snapshot.to_dict() or {}
-    previous_ids = set(existing.get("userIds") or [])
-    if not previous_ids and existing.get("userID"):
-        previous_ids.add(existing.get("userID"))
-
-    case_ref.update({
-        "userIds": normalized_ids,
-        "userID": normalized_ids[0],
-        "updatedAt": firestore.SERVER_TIMESTAMP,
-    })
-
-    case_title = existing.get("caseTitle", "Unknown Case")
-
-    newly_added = [uid for uid in normalized_ids if uid not in previous_ids]
-    removed = [uid for uid in previous_ids if uid not in normalized_ids]
-
-    for uid in newly_added:
-        await add_notification(
-            user_id=uid,
-            title="Case Assignment",
-            message=f"You have been added to the case '{case_title}'.",
-            notification_type="case-assignment"
-        )
-
-    for uid in removed:
-        await add_notification(
-            user_id=uid,
-            title="Case Access Updated",
-            message=f"You have been removed from the case '{case_title}'.",
-            notification_type="case-assignment"
-        )
-
-    return True
-
-async def generate_ai_description(lat, lng, timestamp, status: str = "", snapshot: str | None = None) -> str:
+async def generate_ai_description(lat, lng, timestamp, status: str = "", snapshot: Optional[str] = None) -> str:
     """
     Generate a concise forensic-style narrative for a GPS point.
     - lat, lng: numbers
