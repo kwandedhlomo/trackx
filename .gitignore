@@ -10,18 +10,23 @@ trackx-backend/.env.example
 trackx-frontend/.env
 
 # Python caches
+venv/
 __pycache__/
 *.pyc
+.pytest_cache/
 
 # Node/Vite build
 node_modules/
 dist/
 .vite/
+build/
 
 # macOS
 .DS_Store
 
 # Lockfile oddballs
+.env
+.env.*
 package-lock *.json
 !package-lock.json
 trackx-backend/.env
