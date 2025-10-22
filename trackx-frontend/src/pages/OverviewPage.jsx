@@ -324,6 +324,12 @@ function OverviewPage() {
   const [intro, setIntro] = useState("");
   const [conclusion, setConclusion] = useState("");
 
+  // --- AI Suggestion states ---
+const [showSuggestionModal, setShowSuggestionModal] = useState(false);
+const [suggestedText, setSuggestedText] = useState("");
+const [loadingSuggestion, setLoadingSuggestion] = useState(false);
+const [suggestTarget, setSuggestTarget] = useState(null);
+
   // --- helpers ---
   // --- Evidence Locker (structure + utils) ---
   // Generate a stable-ish ID for new items
@@ -634,7 +640,7 @@ useEffect(() => {
       console.error("Error saving to localStorage:", e);
     }
   };
-
+  
 const saveData = async (additionalData = {}) => {
   saveToLocalStorage(additionalData);
   if (!currentCaseId) {
@@ -702,6 +708,41 @@ const saveData = async (additionalData = {}) => {
       currentCaseId
     ]); // eslint-disable-line
 
+// --- Grammar & Spelling Improvement (AI Review) ---
+const handleTextImprovement = async (target) => {
+  setLoadingSuggestion(true);
+  setSuggestTarget(target);
+
+  try {
+    let textToImprove = "";
+
+    if (target === "intro") textToImprove = reportIntro;
+    else if (target === "conclusion") textToImprove = reportConclusion;
+    else if (target === "evidence")
+      textToImprove = evidenceItems.map((e) => e.description || e).join("\n");
+    else if (target === "technical")
+      textToImprove = technicalTerms.join("\n");
+
+    if (!textToImprove.trim()) {
+      showError("No Text Found", "Please enter text before requesting improvements.");
+      setLoadingSuggestion(false);
+      return;
+    }
+
+    const response = await axios.post(`${API_BASE}/cases/ai-review`, {
+      text: textToImprove,
+      contextType: target,
+    });
+
+    setSuggestedText(response.data.suggestedText || "");
+    setShowSuggestionModal(true);
+  } catch (err) {
+    console.error("AI improvement error:", err);
+    showError("AI Suggestion Error", err, "Failed to fetch AI improvements.");
+  } finally {
+    setLoadingSuggestion(false);
+  }
+};
 
 // --- PDF (with normalization) ---
 const generatePDF = async () => {
@@ -1592,40 +1633,69 @@ const handleGenerateConclusion = async () => {
           </div>
         </div>
 
-        {/* Report Intro */}
-        <div className="rounded-3xl border border-white/10 bg-white/[0.018] p-6 shadow-[0_25px_70px_rgba(15,23,42,0.45)] backdrop-blur-2xl">
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <h2 className="text-lg font-semibold text-white">Report Introduction</h2>
-              <p className="text-xs text-gray-400">Set the tone for your findings.</p>
-            </div>
-            <button
-              onClick={handleGenerateIntro}
-              disabled={loadingIntro}
-              className={`inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold transition ${
-                loadingIntro
-                  ? "cursor-not-allowed bg-white/10 text-gray-300"
-                  : "bg-gradient-to-r from-purple-600 to-indigo-600 text-white hover:from-purple-500 hover:to-indigo-500"
-              }`}
-            >
-              {loadingIntro ? (
-                <span className="flex items-center gap-2">
-                  <span className="h-3 w-3 animate-spin rounded-full border-b-2 border-white/70" />
-                  Generating...
-                </span>
-              ) : (
-                "Generate AI Intro"
-              )}
-            </button>
-          </div>
-          <textarea
-            placeholder="Enter report introduction..."
-            value={reportIntro}
-            onChange={(e) => setReportIntro(e.target.value)}
-            onBlur={() => saveToLocalStorage()}
-            className="mt-4 min-h-[140px] w-full rounded-2xl border border-white/10 bg-slate-950/50 px-4 py-3 text-sm text-white placeholder-gray-500 focus:border-purple-500/50 focus:outline-none focus:ring-2 focus:ring-purple-500/30"
-          />
-        </div>
+{/* Report Intro */}
+<div className="rounded-3xl border border-white/10 bg-white/[0.018] p-6 shadow-[0_25px_70px_rgba(15,23,42,0.45)] backdrop-blur-2xl">
+  {/* Header + Buttons Row */}
+  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+    <div>
+      <h2 className="text-lg font-semibold text-white">Report Introduction</h2>
+      <p className="text-xs text-gray-400">Set the tone for your findings.</p>
+    </div>
+
+    {/* Button Group */}
+    <div className="flex gap-3 mt-2 sm:mt-0">
+      {/* Generate Button */}
+      <button
+        onClick={handleGenerateIntro}
+        disabled={loadingIntro}
+        className={`inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold transition ${
+          loadingIntro
+            ? "cursor-not-allowed bg-white/10 text-gray-300"
+            : "bg-gradient-to-r from-purple-600 to-indigo-600 text-white hover:from-purple-500 hover:to-indigo-500"
+        }`}
+      >
+        {loadingIntro ? (
+          <span className="flex items-center gap-2">
+            <span className="h-3 w-3 animate-spin rounded-full border-b-2 border-white/70" />
+            Generating...
+          </span>
+        ) : (
+          "Generate AI Intro"
+        )}
+      </button>
+
+      {/* Suggest Button */}
+      <button
+        onClick={() => handleTextImprovement("intro")}
+        disabled={loadingSuggestion}
+        className={`inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold transition ${
+          loadingSuggestion && suggestTarget === "intro"
+            ? "cursor-not-allowed bg-white/10 text-gray-300"
+            : "bg-gradient-to-r from-gray-700 to-gray-800 text-white hover:from-gray-600 hover:to-gray-700"
+        }`}
+      >
+        {loadingSuggestion && suggestTarget === "intro" ? (
+          <span className="flex items-center gap-2">
+            <span className="h-3 w-3 animate-spin rounded-full border-b-2 border-white/70" />
+            Loading...
+          </span>
+        ) : (
+          "Suggest Improvements"
+        )}
+      </button>
+    </div>
+  </div>
+
+  {/* extarea for input */}
+  <textarea
+    placeholder="Enter report introduction..."
+    value={reportIntro}
+    onChange={(e) => setReportIntro(e.target.value)}
+    onBlur={() => saveToLocalStorage()}
+    className="mt-4 min-h-[140px] w-full rounded-2xl border border-white/10 bg-slate-950/50 px-4 py-3 text-sm text-white placeholder-gray-500 focus:border-purple-500/50 focus:outline-none focus:ring-2 focus:ring-purple-500/30"
+  />
+</div>
+
 
           <EvidenceLocker
             evidenceItems={evidenceItems}
@@ -1650,39 +1720,68 @@ const handleGenerateConclusion = async () => {
           disabled={isSaving}
         />
         {/* Report Conclusion */}
-        <div className="rounded-3xl border border-white/10 bg-white/[0.018] p-6 shadow-[0_25px_70px_rgba(15,23,42,0.45)] backdrop-blur-2xl">
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <h2 className="text-lg font-semibold text-white">Report Conclusion</h2>
-              <p className="text-xs text-gray-400">Wrap up the investigation with decisive commentary.</p>
-            </div>
-            <button
-              onClick={handleGenerateConclusion}
-              disabled={loadingConclusion}
-              className={`inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold transition ${
-                loadingConclusion
-                  ? "cursor-not-allowed bg-white/10 text-gray-300"
-                  : "bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white hover:from-violet-500 hover:to-fuchsia-500"
-              }`}
-            >
-              {loadingConclusion ? (
-                <span className="flex items-center gap-2">
-                  <span className="h-3 w-3 animate-spin rounded-full border-b-2 border-white/70" />
-                  Generating...
-                </span>
-              ) : (
-                "Generate AI Conclusion"
-              )}
-            </button>
-          </div>
-          <textarea
-            placeholder="Enter report conclusion..."
-            value={reportConclusion}
-            onChange={(e) => setReportConclusion(e.target.value)}
-            onBlur={() => saveToLocalStorage()}
-            className="mt-4 min-h-[140px] w-full rounded-2xl border border-white/10 bg-slate-950/50 px-4 py-3 text-sm text-white placeholder-gray-500 focus:border-fuchsia-500/50 focus:outline-none focus:ring-2 focus:ring-fuchsia-500/30"
-          />
-        </div>
+<div className="rounded-3xl border border-white/10 bg-white/[0.018] p-6 shadow-[0_25px_70px_rgba(15,23,42,0.45)] backdrop-blur-2xl">
+  {/* Header + Buttons Row */}
+  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+    <div>
+      <h2 className="text-lg font-semibold text-white">Report Conclusion</h2>
+      <p className="text-xs text-gray-400"> Wrap up the investigation with decisive commentary.</p>
+    </div>
+
+    {/* Button Group */}
+    <div className="flex gap-3 mt-2 sm:mt-0">
+      {/* Generate Button */}
+      <button
+        onClick={handleGenerateConclusion}
+        disabled={loadingConclusion}
+        className={`inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold transition ${
+          loadingConclusion
+            ? "cursor-not-allowed bg-white/10 text-gray-300"
+            : "bg-gradient-to-r from-purple-600 to-indigo-600 text-white hover:from-purple-500 hover:to-indigo-500"
+        }`}
+      >
+        {loadingConclusion ? (
+          <span className="flex items-center gap-2">
+            <span className="h-3 w-3 animate-spin rounded-full border-b-2 border-white/70" />
+            Generating...
+          </span>
+        ) : (
+          "Generate AI Conclusion"
+        )}
+      </button>
+
+      {/* Suggest Button */}
+      <button
+        onClick={() => handleTextImprovement("conclusion")}
+        disabled={loadingSuggestion}
+        className={`inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold transition ${
+          loadingSuggestion && suggestTarget === "conclusion"
+            ? "cursor-not-allowed bg-white/10 text-gray-300"
+            : "bg-gradient-to-r from-gray-700 to-gray-800 text-white hover:from-gray-600 hover:to-gray-700"
+        }`}
+      >
+        {loadingSuggestion && suggestTarget === "conclusion" ? (
+          <span className="flex items-center gap-2">
+            <span className="h-3 w-3 animate-spin rounded-full border-b-2 border-white/70" />
+            Loading...
+          </span>
+        ) : (
+          "Suggest Improvements"
+        )}
+      </button>
+    </div>
+  </div>
+
+  {/* Textarea for input */}
+  <textarea
+    placeholder="Enter report conclusion..."
+    value={reportConclusion}
+    onChange={(e) => setReportConclusion(e.target.value)}
+    onBlur={() => saveToLocalStorage()}
+    className="mt-4 min-h-[140px] w-full rounded-2xl border border-white/10 bg-slate-950/50 px-4 py-3 text-sm text-white placeholder-gray-500 focus:border-purple-500/50 focus:outline-none focus:ring-2 focus:ring-purple-500/30"
+  />
+</div>
+
 
         {/* Save bar */}
         <div className="rounded-3xl border border-white/10 bg-white/[0.018] p-6 shadow-[0_25px_70px_rgba(15,23,42,0.45)] backdrop-blur-2xl">
@@ -1943,7 +2042,57 @@ const handleGenerateConclusion = async () => {
         primaryAction={modalState.primaryAction}
         secondaryAction={modalState.secondaryAction}
       />
+      {/* --- AI Suggestion Modal --- */}
+{showSuggestionModal && (
+  <div className="fixed inset-0 flex items-center justify-center bg-black bg-opacity-60 z-50">
+    <div className="bg-gray-800 p-6 rounded-xl shadow-2xl max-w-lg w-full border border-gray-700">
+      <h2 className="text-lg font-semibold text-white mb-4">
+        AI Suggested Improvements
+      </h2>
+
+      <textarea
+        className="w-full h-40 bg-gray-900 text-gray-100 border border-gray-700 rounded-md p-3 mb-4 resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"
+        value={suggestedText}
+        onChange={(e) => setSuggestedText(e.target.value)}
+      />
+
+      <div className="flex justify-end gap-3">
+        <button
+          className="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-gray-200 rounded-md transition"
+          onClick={() => setShowSuggestionModal(false)}
+        >
+          Close
+        </button>
+
+        <button
+          className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-md transition"
+          onClick={() => {
+            const raw = (suggestedText || "").trim();
+            if (!raw) return setShowSuggestionModal(false);
+
+            if (suggestTarget === "intro") setReportIntro(raw);
+            else if (suggestTarget === "conclusion") setReportConclusion(raw);
+            else if (suggestTarget === "evidence") {
+              const lines = raw.split("\n").map((l) => l.trim()).filter(Boolean);
+              setEvidenceItems(lines.map((desc) => ({ id: Date.now(), description: desc })));
+            } else if (suggestTarget === "technical") {
+              const lines = raw.split("\n").map((l) => l.trim()).filter(Boolean);
+              setTechnicalTerms(lines);
+            }
+
+            setShowSuggestionModal(false);
+          }}
+        >
+          Apply Changes
+        </button>
+      </div>
+    </div>
+  </div>
+)}
+
     </motion.div>
+
+    
   );
 }
 

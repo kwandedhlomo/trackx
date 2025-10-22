@@ -1117,3 +1117,29 @@ async def generate_ai_description(lat, lng, timestamp, status: str = "", snapsho
     except Exception as e:
         # Don’t explode the route—return a friendly message the UI can show
         return f"AI description unavailable. Error: {str(e)}"
+
+async def suggest_text_improvement(text: str, context_type: str = "general") -> str:
+    """
+    Returns an improved version of the given text with grammar, spelling, and clarity fixes.
+    """
+    if not text.strip():
+        return ""
+
+    prompt = (
+        "You are an expert editor. Review the text below for grammar, spelling, and clarity. "
+        "Keep the meaning intact and maintain a formal tone suitable for a forensic report. "
+        f"Context type: {context_type}. Only output the corrected text.\n\n"
+        f"Text:\n{text}"
+    )
+
+    resp = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[
+            {"role": "system", "content": "You are a helpful and precise editor."},
+            {"role": "user", "content": prompt}
+        ],
+        max_tokens=500,
+        temperature=0.1,
+    )
+
+    return (resp.choices[0].message.content or "").strip()
