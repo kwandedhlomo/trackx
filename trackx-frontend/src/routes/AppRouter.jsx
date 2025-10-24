@@ -24,6 +24,7 @@ import PendingUsersPage from "../pages/PendingUsersPage";
 import AdminPanel from '../pages/AdminPanel.jsx'; 
 import ForgotPassword from "../pages/ForgotPassword";
 import MyCasesPage from "../pages/MyCasesPage.jsx";
+import TrashBinPage from "../pages/TrashBin.jsx";
 
 
 
@@ -159,6 +160,16 @@ function AppRouter() {
             </ProtectedRoute>
           }
         />
+        <Route
+          path="/trash-bin"
+          element={
+            <ProtectedRoute>
+              <TrashBinPage/>
+            </ProtectedRoute>
+          }
+        />
+        {/* Redirect any unknown routes to home */}
+        <Route path="*" element={<Navigate to="/home" replace />} />
       </Routes>
     </BrowserRouter>
   );

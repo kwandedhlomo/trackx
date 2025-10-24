@@ -22,6 +22,7 @@ from services.case_service import generate_case_intro, generate_case_conclusion,
 from firebase.firebase_config import db
 from google.cloud.firestore_v1 import SERVER_TIMESTAMP
 from services.case_service import suggest_text_improvement
+from services.case_service import soft_delete_case, restore_case, permanently_delete_case
 
 db = firestore.client()
 
@@ -97,7 +98,7 @@ async def search_cases_route(
     urgency: str = "",
 ):
     print(f"Received query parameters: user_id={user_id}, case_name={case_name}, region={region}, date={date}, status={status}, urgency={urgency}")
-    
+
     results = await search_cases(
         case_name=case_name,
         region=region,
@@ -105,6 +106,7 @@ async def search_cases_route(
         user_id=user_id,
         status=status,
         urgency=urgency,
+        include_deleted=False
     )
     return {"cases": results}
 
@@ -141,13 +143,14 @@ async def update_case_route(request: Request):
     else:
         raise HTTPException(status_code=400, detail=message)
 
-@router.delete("/cases/delete/{doc_id}")
-async def delete_case_route(doc_id: str):
-    success, message = await delete_case(doc_id)
-    if success:
-        return {"success": True}
-    else:
-        raise HTTPException(status_code=400, detail=message)
+#DELETE
+#@router.delete("/cases/delete/{doc_id}")
+#async def delete_case_route(doc_id: str):
+#    success, message = await delete_case(doc_id)
+#    if success:
+#        return {"success": True}
+#    else:
+#       raise HTTPException(status_code=400, detail=message)
     #
 @router.get("/cases/monthly-counts")
 async def get_monthly_case_counts(user_id: str = ""):
@@ -340,3 +343,43 @@ async def generate_description_route(case_id: str, request: Request):
     except Exception as e:
         print(f"Error generating AI description: {str(e)}")
         raise HTTPException(status_code=500, detail="Failed to generate AI description.")
+
+@router.put("/cases/soft-delete/{case_id}")
+async def soft_delete_case_endpoint(case_id: str):
+    """Soft delete — mark as trashed."""
+    try:
+        result = await soft_delete_case(case_id)
+        return JSONResponse(status_code=200, content=result)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/cases/trashed")
+async def get_trashed_cases():
+    """Retrieve all trashed cases."""
+    try:
+        trashed_ref = db.collection("cases").where("is_deleted", "==", True)
+        results = [doc.to_dict() | {"doc_id": doc.id} for doc in trashed_ref.stream()]
+        return {"cases": results}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.put("/cases/restore/{case_id}")
+async def restore_case_endpoint(case_id: str):
+    """Restore a case from the trash bin."""
+    try:
+        result = await restore_case(case_id)
+        return JSONResponse(status_code=200, content=result)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/cases/delete/{case_id}")
+async def permanently_delete_case_endpoint(case_id: str):
+    """Permanently delete a trashed case."""
+    try:
+        result = await permanently_delete_case(case_id)
+        return JSONResponse(status_code=200, content=result)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
