@@ -33,3 +33,40 @@ trackx-backend/.env
 trackx-backend/gcp-service-account.json
 trackx-backend/.env
 trackx-backend/gcp-service-account.json
+
+# Node modules
+node_modules/
+**/node_modules/
+
+# Python cache
+__pycache__/
+**/__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# OS files
+.DS_Store
+**/.DS_Store
+
+# Python virtual environment
+.venv/
+venv/
+**/.venv/
+**/venv/
+
+# Environment files
+.env
+**/.env
+
+# Build files
+dist/
+build/
+
+node_modules/
+__pycache__/
+*.pyc
+.DS_Store
+.venv/
+venv/
+.env
