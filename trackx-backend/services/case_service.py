@@ -56,34 +56,33 @@ def _case_accessible_to_user(case_data: Dict[str, Any], user_id: str) -> bool:
     return case_data.get("userID") == user_id
 
 
-def _get_case_documents_for_user(user_id: str) -> Dict[str, Any]:
+def _get_case_documents_for_user(user_id: str, include_deleted: bool = False) -> Dict[str, Any]:
+    """
+    Returns all case documents for a user, excluding soft-deleted ones unless include_deleted=True.
+    Works even if 'is_deleted' doesn't exist on some documents.
+    """
     cases_ref = db.collection("cases")
     docs_map: Dict[str, Any] = {}
 
-    if not user_id:
-        for doc in cases_ref.stream():
-            docs_map[doc.id] = doc
-        return docs_map
+    # Step 1: Fetch all docs (no risky Firestore filters)
+    all_docs = list(cases_ref.stream())
 
-    try:
-        for doc in cases_ref.where("userIds", "array_contains", user_id).stream():
-            docs_map[doc.id] = doc
-    except Exception as exc:
-        logger.debug(f"userIds array_contains query failed for user {user_id}: {exc}")
+    for doc in all_docs:
+        data = doc.to_dict() or {}
 
-    try:
-        for doc in cases_ref.where("userIDs", "array_contains", user_id).stream():
-            docs_map.setdefault(doc.id, doc)
-    except Exception as exc:
-        logger.debug(f"legacy userIDs array_contains query failed for user {user_id}: {exc}")
+        # Skip soft-deleted unless explicitly requested
+        if not include_deleted and data.get("is_deleted", False):
+            continue
 
-    try:
-        for doc in cases_ref.where("userID", "==", user_id).stream():
-            docs_map.setdefault(doc.id, doc)
-    except Exception as exc:
-        logger.debug(f"legacy userID query failed for user {user_id}: {exc}")
+        # Filter by user ownership if applicable
+        if user_id:
+            if not _case_accessible_to_user(data, user_id):
+                continue
+
+        docs_map[doc.id] = doc
 
     return docs_map
+
 from firebase_admin import firestore
 from firebase_admin.firestore import SERVER_TIMESTAMP
 from openai import OpenAI
@@ -255,9 +254,11 @@ async def add_intro_conclusion(case_id: str):
 
     return True, {"reportIntro": intro, "reportConclusion": conclusion}
 
-async def search_cases(case_name: str = "", region: str = "", date: str = "", user_id: str = "", status: str = "", urgency: str = "", province: str = "", provinceCode: str = "", provinceName: str = "", district: str = "", districtCode: str = "", districtName: str = ""):
+async def search_cases(case_name: str = "", region: str = "", date: str = "", user_id: str = "",
+                       status: str = "", urgency: str = "", include_deleted: bool = False, province: str = "", provinceCode: str = "", provinceName: str = "", district: str = "", districtCode: str = "", districtName: str = ""):
     try:
-        print(f"Received filters: case_name={case_name}, region={region}, date={date}, user_id={user_id}, status={status}, urgency={urgency}")
+        print(f"Received filters: case_name={case_name}, region={region}, date={date}, "
+              f"user_id={user_id}, status={status}, urgency={urgency}, include_deleted={include_deleted}")
 
         # Normalize province/district inputs early so both user and non-user paths can use them
         eff_province_code = (provinceCode or province or "").strip()
@@ -277,11 +278,14 @@ async def search_cases(case_name: str = "", region: str = "", date: str = "", us
 
         province_slug = _slugify(eff_province_name) if eff_province_name else ""
         province_lower = eff_province_name.lower() if eff_province_name else ""
-        
+
+        # Get all cases, applying soft-delete logic
         if user_id:
-            docs_map = _get_case_documents_for_user(user_id)
+            docs_map = _get_case_documents_for_user(user_id, include_deleted=include_deleted)
             documents = list(docs_map.values())
         else:
+            docs_map = _get_case_documents_for_user("", include_deleted=include_deleted)
+            documents = list(docs_map.values())
             cases_ref = db.collection("cases")
             eff_province_code = (provinceCode or province).strip() if (provinceCode or province) else ""
             eff_province_name = (provinceName or region).strip() if (provinceName or region) else ""
@@ -354,6 +358,10 @@ async def search_cases(case_name: str = "", region: str = "", date: str = "", us
             if doc.id in seen_ids:
                 continue
             data = doc.to_dict()
+                # Skip deleted cases unless explicitly included
+            if not include_deleted and data.get("is_deleted", False):
+                continue
+
             if not _case_accessible_to_user(data, user_id):
                 continue
             if case_name and data.get("caseTitle") != case_name:
@@ -648,6 +656,56 @@ async def delete_case(doc_id: str):
     except Exception as e:
         print("Error deleting case:", e)
         return False, f"Delete failed: {str(e)}"
+
+async def soft_delete_case(case_id: str):
+    """Marks a case as deleted (soft delete)."""
+    try:
+        doc_ref = db.collection("cases").document(case_id)
+        doc = doc_ref.get()
+        if not doc.exists:
+            return {"success": False, "message": "Case not found"}
+
+        doc_ref.update({
+            "is_deleted": True,
+            "deleted_at": firestore.SERVER_TIMESTAMP
+        })
+        return {"success": True, "message": "Case moved to trash"}
+    except Exception as e:
+        print(f"Error in soft_delete_case: {e}")
+        raise
+
+
+async def restore_case(case_id: str):
+    """Restores a soft-deleted case."""
+    try:
+        doc_ref = db.collection("cases").document(case_id)
+        doc = doc_ref.get()
+        if not doc.exists:
+            return {"success": False, "message": "Case not found"}
+
+        doc_ref.update({
+            "is_deleted": False,
+            "deleted_at": firestore.DELETE_FIELD
+        })
+        return {"success": True, "message": "Case restored"}
+    except Exception as e:
+        print(f"Error in restore_case: {e}")
+        raise
+
+
+async def permanently_delete_case(case_id: str):
+    """Completely removes a case document from Firestore."""
+    try:
+        doc_ref = db.collection("cases").document(case_id)
+        doc = doc_ref.get()
+        if not doc.exists:
+            return {"success": False, "message": "Case not found"}
+
+        doc_ref.delete()
+        return {"success": True, "message": "Case permanently deleted"}
+    except Exception as e:
+        print(f"Error in permanently_delete_case: {e}")
+        raise
 
 async def fetch_recent_cases(sort_by: str = "dateEntered", user_id: str = ""):
     docs_map = _get_case_documents_for_user(user_id)
@@ -1279,3 +1337,29 @@ async def generate_ai_description(lat, lng, timestamp, status: str = "", snapsho
     except Exception as e:
         # Don’t explode the route—return a friendly message the UI can show
         return f"AI description unavailable. Error: {str(e)}"
+
+async def suggest_text_improvement(text: str, context_type: str = "general") -> str:
+    """
+    Returns an improved version of the given text with grammar, spelling, and clarity fixes.
+    """
+    if not text.strip():
+        return ""
+
+    prompt = (
+        "You are an expert editor. Review the text below for grammar, spelling, and clarity. "
+        "Keep the meaning intact and maintain a formal tone suitable for a forensic report. "
+        f"Context type: {context_type}. Only output the corrected text.\n\n"
+        f"Text:\n{text}"
+    )
+
+    resp = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[
+            {"role": "system", "content": "You are a helpful and precise editor."},
+            {"role": "user", "content": prompt}
+        ],
+        max_tokens=500,
+        temperature=0.1,
+    )
+
+    return (resp.choices[0].message.content or "").strip()

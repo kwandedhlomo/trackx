@@ -1,13 +1,17 @@
 venv/
 firebase/firebase-adminsdk.json
 
-# Ignore Python cache files
+# Python
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
 
-# Optional frontend folders
+# Node / frontend
 node_modules/
 dist/
 build/
+
+# OS junk
+.DS_Store
+Thumbs.db

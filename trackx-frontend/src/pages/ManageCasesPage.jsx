@@ -91,7 +91,7 @@ function ManageCasesPage() {
     }
   };
 
-  const performDelete = async (caseItem) => {
+  /*const performDelete = async (caseItem) => {
     closeModal();
     try {
       await axios.delete(`http://localhost:8000/cases/delete/${caseItem.doc_id}`);
@@ -110,8 +110,29 @@ function ManageCasesPage() {
       });
     }
   };
+  */
 
-  const confirmDelete = (caseItem) => {
+  const performSoftDelete = async (caseItem) => {
+  closeModal();
+  try {
+    await axios.put(`http://localhost:8000/cases/soft-delete/${caseItem.doc_id}`);
+    openModal({
+      variant: "success",
+      title: "Case moved to Trash",
+      description: `“${caseItem.caseTitle}” has been moved to the Trash Bin.`,
+    });
+    handleSearch();
+  } catch (err) {
+    console.error("Soft delete failed:", err);
+    openModal({
+      variant: "error",
+      title: "Delete failed",
+      description: getFriendlyErrorMessage(err, "Failed to move case to Trash. Please try again."),
+    });
+  }
+};
+
+ /* const confirmDelete = (caseItem) => {
     openModal({
       variant: "warning",
       title: "Delete case?",
@@ -126,6 +147,23 @@ function ManageCasesPage() {
       },
     });
   };
+  */
+ const confirmDelete = (caseItem) => {
+  openModal({
+    variant: "warning",
+    title: "Move to Trash?",
+    description: `Are you sure you want to move “${caseItem.caseTitle}” to the Trash Bin? You can restore it later.`,
+    primaryAction: {
+      label: "Move to Trash",
+      closeOnClick: false,
+      onClick: () => performSoftDelete(caseItem),
+    },
+    secondaryAction: {
+      label: "Cancel",
+    },
+  });
+};
+
 
   return (
     <motion.div
@@ -247,6 +285,14 @@ function ManageCasesPage() {
         <Link to="/my-cases" className="text-gray-400 transition hover:text-white">
           My Cases
         </Link>
+        <Link
+  to="/trash-bin"
+  className="flex items-center gap-3 rounded-2xl px-3 py-2 text-sm font-medium text-gray-200 transition hover:bg-white/10 hover:text-white"
+  onClick={() => setShowMenu(false)}
+>
+  🗑️ Trash Bin
+</Link>
+
       </div>
 
       <main className="pb-24">
