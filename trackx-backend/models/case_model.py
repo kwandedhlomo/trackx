@@ -17,6 +17,10 @@ class CaseCreateRequest(BaseModel):
     case_title: str
     date_of_incident: str
     region: str
+    provinceCode: Optional[str] = None
+    provinceName: Optional[str] = None
+    districtCode: Optional[str] = None
+    districtName: Optional[str] = None
     between: Optional[str] = None
     urgency: str  
     csv_data: List[GpsPoint]  

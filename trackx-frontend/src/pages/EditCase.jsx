@@ -24,6 +24,7 @@ import NotificationModal from "../components/NotificationModal";
 import useNotificationModal from "../hooks/useNotificationModal";
 import { getFriendlyErrorMessage } from "../utils/errorMessages";
 import EvidenceLocker from "../components/EvidenceLocker";
+import RegionSelectorModal from "../components/RegionSelectorModal";
 
 
 // Firebase services (with Jon's updater)
@@ -72,6 +73,11 @@ function EditCasePage() {
   const [caseTitle, setCaseTitle] = useState("");
   const [dateOfIncident, setDateOfIncident] = useState("");
   const [region, setRegion] = useState("");
+  const [provinceCode, setProvinceCode] = useState("");
+  const [provinceName, setProvinceName] = useState("");
+  const [districtCode, setDistrictCode] = useState("");
+  const [districtName, setDistrictName] = useState("");
+  const [showRegionModal, setShowRegionModal] = useState(false);
   const [between, setBetween] = useState("");
   const [status, setStatus] = useState("not started");
   const [urgency, setUrgency] = useState("");
@@ -205,6 +211,10 @@ function EditCasePage() {
     setDateOfIncident(dateValue);
 
     setRegion(caseData.region || "");
+    setProvinceName(caseData.provinceName || caseData.region || "");
+    setProvinceCode(caseData.provinceCode || "");
+    setDistrictName(caseData.districtName || "");
+    setDistrictCode(caseData.districtCode || "");
     setBetween(caseData.between || "");
     setStatus(caseData.status || "not started");
     setUrgency(caseData.urgency || "");
@@ -319,7 +329,11 @@ const handleUpdate = async (e) => {
       caseNumber: String(caseNumber || "").trim(),
       caseTitle: String(caseTitle || "").trim(),
       dateOfIncident: dateOfIncident || "",
-      region: region || "",
+      region: provinceName || region || "",
+      provinceCode: provinceCode || null,
+      provinceName: provinceName || (region || null),
+      districtCode: districtCode || null,
+      districtName: districtName || null,
       between: String(between || "").trim(),
       status: status || "not started",
       urgency: urgency || "",
@@ -869,22 +883,20 @@ const handleUpdate = async (e) => {
                   <label className="mb-2 block text-xs font-semibold uppercase tracking-wide text-gray-400">
                     Region *
                   </label>
-                  <select
-                    value={region}
-                    onChange={(e) => setRegion(e.target.value)}
-                    className="w-full rounded-2xl border border-white/12 bg-white/[0.05] px-4 py-3 text-sm text-white focus:border-indigo-600/60 focus:outline-none focus:ring-2 focus:ring-indigo-600/20"
+                  <button
+                    type="button"
+                    onClick={() => setShowRegionModal(true)}
+                    className="w-full rounded-2xl border border-white/12 bg-white/[0.05] px-4 py-3 text-left text-sm text-white focus:border-indigo-600/60 focus:outline-none focus:ring-2 focus:ring-indigo-600/20"
                   >
-                    <option value="">Select region</option>
-                    <option value="western-cape">Western Cape</option>
-                    <option value="eastern-cape">Eastern Cape</option>
-                    <option value="northern-cape">Northern Cape</option>
-                    <option value="gauteng">Gauteng</option>
-                    <option value="kwazulu-natal">KwaZulu-Natal</option>
-                    <option value="free-state">Free State</option>
-                    <option value="mpumalanga">Mpumalanga</option>
-                    <option value="limpopo">Limpopo</option>
-                    <option value="north-west">North West</option>
-                  </select>
+                    {provinceName ? (
+                      <span className="capitalize">
+                        {provinceName}
+                        {districtName ? ` — ${districtName}` : ""}
+                      </span>
+                    ) : (
+                      <span className="text-gray-400">Select province and district</span>
+                    )}
+                  </button>
                 </div>
                 <div>
                   <label className="mb-2 block text-xs font-semibold uppercase tracking-wide text-gray-400">
@@ -948,6 +960,18 @@ const handleUpdate = async (e) => {
               </div>
             </form>
           </div>
+
+          <RegionSelectorModal
+            isOpen={showRegionModal}
+            onClose={() => setShowRegionModal(false)}
+            onSelect={({ provinceCode: pCode, provinceName: pName, districtCode: dCode, districtName: dName }) => {
+              setProvinceCode(pCode || "");
+              setProvinceName(pName || "");
+              setDistrictCode(dCode || "");
+              setDistrictName(dName || "");
+              setRegion(pName || "");
+            }}
+          />
 
           {/* Evidence Locker */}
           <EvidenceLocker

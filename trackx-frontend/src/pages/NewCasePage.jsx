@@ -19,6 +19,7 @@ import { normalizeTechnicalTermList } from "../utils/technicalTerms";
 import EvidenceLocker from "../components/EvidenceLocker";
 // Firebase services
 import { updateCaseAnnotations, getCurrentUserId } from "../services/firebaseServices";
+import RegionSelectorModal from "../components/RegionSelectorModal";
 
 
 
@@ -192,6 +193,11 @@ function NewCasePage() {
   const [caseTitle, setCaseTitle] = useState("");
   const [dateOfIncident, setDateOfIncident] = useState("");
   const [region, setRegion] = useState("");
+  const [provinceCode, setProvinceCode] = useState("");
+  const [provinceName, setProvinceName] = useState("");
+  const [districtCode, setDistrictCode] = useState("");
+  const [districtName, setDistrictName] = useState("");
+  const [showRegionModal, setShowRegionModal] = useState(false);
   const [between, setBetween] = useState("");
   const [urgency, setUrgency] = useState("");
   const [selectedTechnicalTerms, setSelectedTechnicalTerms] = useState([]);
@@ -1416,7 +1422,7 @@ Please ensure your PDF contains GPS coordinates in one of these formats:
 
   const handleCreateCase = async () => {
     try {
-      if (!caseNumber || !caseTitle || !dateOfIncident || !region || !parsedData) {
+      if (!caseNumber || !caseTitle || !dateOfIncident || !provinceName || !parsedData) {
         alert("Please fill all required fields and upload a valid file");
         return;
       }
@@ -1428,7 +1434,11 @@ Please ensure your PDF contains GPS coordinates in one of these formats:
         case_number: caseNumber,
         case_title: caseTitle,
         date_of_incident: dateOfIncident,
-        region,
+        region: provinceName,
+        provinceCode,
+        provinceName,
+        districtCode,
+        districtName,
         between: between || "",
         urgency,
         userID: auth.currentUser ? auth.currentUser.uid : null,
@@ -1462,12 +1472,18 @@ Please ensure your PDF contains GPS coordinates in one of these formats:
         caseNumber,
         caseTitle,
         dateOfIncident,
-        region,
+        region: provinceName,
+        provinceCode,
+        provinceName,
+        districtCode,
+        districtName,
         between: between || "",
         urgency,
         userId: getCurrentUserId() || auth.currentUser?.uid || null,
         userIds: assignedUsers.map(u => u.id),
         evidenceItems,
+        // Persist selected technical terms at creation
+        technicalTerms: normalizeTechnicalTermList(selectedTechnicalTerms || []),
         locations: (parsedData.stoppedPoints || []).map((p, i) => ({
           lat: p.lat,
           lng: p.lng,
@@ -1547,7 +1563,7 @@ const handleFile = async (selected) => {
   const handleNext = async (e) => {
     e.preventDefault();
 
-    if (!caseNumber || !caseTitle || !dateOfIncident || !region || !file || !parsedData) {
+    if (!caseNumber || !caseTitle || !dateOfIncident || !provinceName || !file || !parsedData) {
       openModal({
         variant: "warning",
         title: "Missing information",
@@ -1752,29 +1768,30 @@ const handleFile = async (selected) => {
               />
             </div>
 
-            {/* Region */}
+            {/* Region (Province + optional District) */}
             <div>
-              <label htmlFor="region" className="block text-sm font-medium text-gray-300 mb-1">
-                Region *
-              </label>
-              <select
-                id="region"
-                value={region}
-                onChange={(e) => setRegion(e.target.value)}
-                className="w-full rounded-xl border border-white/10 bg-white/[0.02] px-3 py-2 text-sm text-white placeholder-gray-500 focus:border-blue-700/50 focus:outline-none focus:ring-2 focus:ring-blue-700/30"
-                required
+              <label className="block text-sm font-medium text-gray-300 mb-1">Region *</label>
+              <button
+                type="button"
+                onClick={() => setShowRegionModal(true)}
+                className="w-full rounded-xl border border-white/10 bg-white/[0.02] px-3 py-2 text-left text-sm text-white placeholder-gray-500 focus:border-blue-700/50 focus:outline-none focus:ring-2 focus:ring-blue-700/30"
               >
-                <option value="">Select a region</option>
-                <option value="western-cape">Western Cape</option>
-                <option value="eastern-cape">Eastern Cape</option>
-                <option value="northern-cape">Northern Cape</option>
-                <option value="gauteng">Gauteng</option>
-                <option value="kwazulu-natal">KwaZulu-Natal</option>
-                <option value="free-state">Free State</option>
-                <option value="mpumalanga">Mpumalanga</option>
-                <option value="limpopo">Limpopo</option>
-                <option value="north-west">North West</option>
-              </select>
+                {provinceName ? (
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="inline-flex items-center gap-1 rounded-full bg-white/[0.06] px-2 py-0.5 text-xs text-gray-200">
+                      {provinceName}
+                    </span>
+                    {districtName && (
+                      <span className="inline-flex items-center gap-1 rounded-full bg-white/[0.06] px-2 py-0.5 text-xs text-gray-200">
+                        {districtName}
+                      </span>
+                    )}
+                  </div>
+                ) : (
+                  <span className="text-gray-400">Select province and district</span>
+                )}
+              </button>
+              <p className="mt-1 text-xs text-gray-500">Click to choose the province and optionally a magisterial district.</p>
             </div>
 
             {/* Between */}
@@ -2188,6 +2205,19 @@ const handleFile = async (selected) => {
         onClose={closeModal}
         primaryAction={modalState.primaryAction}
         secondaryAction={modalState.secondaryAction}
+      />
+
+      <RegionSelectorModal
+        isOpen={showRegionModal}
+        onClose={() => setShowRegionModal(false)}
+        onSelect={({ provinceCode: pCode, provinceName: pName, districtCode: dCode, districtName: dName }) => {
+          setProvinceCode(pCode || "");
+          setProvinceName(pName || "");
+          setDistrictCode(dCode || "");
+          setDistrictName(dName || "");
+          // Legacy mirror
+          setRegion(pName || "");
+        }}
       />
     </motion.div>
   );

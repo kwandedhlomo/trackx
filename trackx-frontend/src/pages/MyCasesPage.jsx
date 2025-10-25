@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+﻿import { useState, useEffect, useMemo } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import { auth } from "../firebase";
@@ -7,6 +7,7 @@ import { signOut } from "firebase/auth";
 import axios from "axios";
 import adfLogo from "../assets/image-removebg-preview.png";
 import { Calendar, MapPin, Hash, Info, Route, Home, FilePlus2, FolderOpen, Briefcase, LayoutDashboard } from "lucide-react";
+import { FaMapMarkerAlt } from "react-icons/fa";
 import {
   PieChart,
   Pie,
@@ -17,8 +18,11 @@ import {
 } from "recharts";
 import MiniHeatMapWindow from "../components/MiniHeatMapWindow";
 import NotificationModal from "../components/NotificationModal";
+import RegionSelectorModal from "../components/RegionSelectorModal";
 import useNotificationModal from "../hooks/useNotificationModal";
 import { getFriendlyErrorMessage } from "../utils/errorMessages";
+import ZA_REGIONS from "../data/za_regions";
+
 
 function MyCasesPage() {
   const { profile } = useAuth();
@@ -36,6 +40,20 @@ function MyCasesPage() {
   // State for filters
   const [searchTerm, setSearchTerm] = useState("");
   const [region, setRegion] = useState("");
+  const [provinceCode, setProvinceCode] = useState("");
+  const [districtCode, setDistrictCode] = useState("");
+  const [showRegionModal, setShowRegionModal] = useState(false);  const selectedRegionLabel = useMemo(() => {
+    const pName = region || ZA_REGIONS.find(p => p.code === provinceCode)?.name || "";
+    const prov = ZA_REGIONS.find(p => p.code === provinceCode);
+    const dName = prov?.districts?.find(d => String(d.code) === String(districtCode))?.name || "";
+    if (!pName && !dName) return "";
+    return dName ? `${pName} — ${dName}` : pName;
+  }, [region, provinceCode, districtCode]);
+  const prettyRegion = (c) => {
+    const p = c?.provinceName || c?.region || "";
+    const d = c?.districtName || "";
+    return d ? `${p} â€” ${d}` : p;
+  };
   const [date, setDate] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   const [urgencyFilter, setUrgencyFilter] = useState("");
@@ -57,36 +75,48 @@ function MyCasesPage() {
     </div>
   );
 
-  // Fetch current user's cases
-  const fetchCases = async () => {
+  // Unified search (mirrors ManageCases, scoped by user)
+  const handleSearch = async (overrides = {}) => {
+    const nextSearchTerm = overrides.searchTerm !== undefined ? overrides.searchTerm : searchTerm;
+    const nextProvinceCode = overrides.provinceCode !== undefined ? overrides.provinceCode : provinceCode;
+    const nextDistrictCode = overrides.districtCode !== undefined ? overrides.districtCode : districtCode;
+    const nextDate = overrides.date !== undefined ? overrides.date : date;
+
+    if (overrides.searchTerm !== undefined) setSearchTerm(overrides.searchTerm);
+    if (overrides.provinceCode !== undefined) setProvinceCode(overrides.provinceCode);
+    if (overrides.districtCode !== undefined) setDistrictCode(overrides.districtCode);
+    if (overrides.date !== undefined) setDate(overrides.date);
+
+    const prov = ZA_REGIONS.find(p => p.code === nextProvinceCode);
+    setRegion(prov ? prov.name : region);
+
     try {
       const uid = auth.currentUser?.uid;
       if (!uid) return;
       const response = await axios.get("http://localhost:8000/cases/search", {
         params: {
           user_id: uid,
-          searchTerm,
-          region,
-          date,
-          status: statusFilter,
-          urgency: urgencyFilter,
+          searchTerm: nextSearchTerm || undefined,
+          // send both provinceName and legacy region label to maximize server-side matching
+          provinceName: (prov?.name || region) || undefined,
+          region: (prov?.name || region) || undefined,
+          provinceCode: nextProvinceCode || undefined,
+          districtCode: nextDistrictCode || undefined,
+          date: nextDate || undefined,
+          status: statusFilter || undefined,
+          urgency: urgencyFilter || undefined,
         },
       });
-      setMyCases(response.data.cases || []);
+      setMyCases(Array.isArray(response.data.cases) ? response.data.cases : []);
       setCasePage(1);
     } catch (error) {
       console.error("Failed to fetch user cases:", error);
     }
   };
 
-  // Trigger search on button click
-  const handleSearch = () => {
-    fetchCases();
-  };
-
   // Automatically fetch all cases for the user when the component mounts
   useEffect(() => {
-    fetchCases();
+    handleSearch();
   }, []);
 
   // Aggregate heatmap points for these cases
@@ -196,7 +226,7 @@ function MyCasesPage() {
       openModal({
         variant: "success",
         title: "Case deleted",
-        description: `“${caseItem.caseTitle}” has been removed successfully.`,
+        description: `â€œ${caseItem.caseTitle}â€ has been removed successfully.`,
       });
       setMyCases((prev) => prev.filter((c) => c.doc_id !== caseItem.doc_id));
       if (selectedCase?.doc_id === caseItem.doc_id) {
@@ -218,7 +248,7 @@ function MyCasesPage() {
     openModal({
       variant: "warning",
       title: "Delete case?",
-      description: `Are you sure you want to delete “${caseReference.caseTitle}”? This action cannot be undone.`,
+      description: `Are you sure you want to delete â€œ${caseReference.caseTitle}â€? This action cannot be undone.`,
       primaryAction: {
         label: "Delete case",
         closeOnClick: false,
@@ -407,8 +437,8 @@ function MyCasesPage() {
             Home
           </Link>
           <div className="hidden text-right lg:block">
-            <span className="block text-xs text-gray-400">Cases • {myCases.length}</span>
-            <span className="block text-xs text-gray-500">Region • {mostActiveRegion}</span>
+            <span className="block text-xs text-gray-400">Cases â€¢ {myCases.length}</span>
+            <span className="block text-xs text-gray-500">Region â€¢ {mostActiveRegion}</span>
           </div>
           <div className="flex flex-col items-end">
             <span className="text-base font-semibold text-white">
@@ -500,7 +530,7 @@ function MyCasesPage() {
                 <div className="mt-6 flex flex-wrap gap-3">
                   <button
                     type="button"
-                    onClick={fetchCases}
+                    onClick={() => handleSearch()}
                     className="inline-flex items-center justify-center rounded-full bg-gradient-to-r from-blue-600 to-indigo-600 px-5 py-2 text-sm font-semibold text-white shadow-lg shadow-blue-500/20 transition hover:from-blue-500 hover:to-indigo-500"
                   >
                     Refresh list
@@ -510,10 +540,12 @@ function MyCasesPage() {
                     onClick={() => {
                       setSearchTerm('');
                       setRegion('');
+                      setProvinceCode('');
+                      setDistrictCode('');
                       setDate('');
                       setStatusFilter('');
                       setUrgencyFilter('');
-                      fetchCases();
+                      handleSearch({ searchTerm: '', provinceCode: '', districtCode: '', date: '' });
                     }}
                     className="inline-flex items-center justify-center rounded-full border border-white/15 bg-white/[0.05] px-5 py-2 text-sm font-semibold text-gray-200 transition hover:border-white/30 hover:text-white"
                   >
@@ -555,22 +587,16 @@ function MyCasesPage() {
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
               />
-              <select
-                className="w-full rounded-2xl border border-white/12 bg-white/[0.05] px-4 py-3 text-sm text-white focus:border-indigo-600/60 focus:outline-none focus:ring-2 focus:ring-indigo-600/20"
-                value={region}
-                onChange={(e) => setRegion(e.target.value)}
-              >
-                <option value="">All regions</option>
-                <option value="western-cape">Western Cape</option>
-                <option value="eastern-cape">Eastern Cape</option>
-                <option value="northern-cape">Northern Cape</option>
-                <option value="gauteng">Gauteng</option>
-                <option value="kwazulu-natal">KwaZulu-Natal</option>
-                <option value="free-state">Free State</option>
-                <option value="mpumalanga">Mpumalanga</option>
-                <option value="limpopo">Limpopo</option>
-                <option value="north-west">North West</option>
-              </select>
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => setShowRegionModal(true)}
+                  className="w-full rounded-2xl border border-white/12 bg-white/[0.05] pl-10 pr-4 py-3 text-left text-sm text-white shadow-inner shadow-black/20 focus:border-indigo-600/60 focus:outline-none focus:ring-2 focus:ring-indigo-600/20"
+                >
+                  <FaMapMarkerAlt className="absolute left-3 top-3.5 h-4 w-4 text-gray-400" />
+                  <span className="block truncate">{region || 'Region'}</span>
+                </button>
+              </div>
               <input
                 type="date"
                 className="w-full rounded-2xl border border-white/12 bg-white/[0.05] px-4 py-3 text-sm text-white focus:border-purple-600/60 focus:outline-none focus:ring-2 focus:ring-purple-600/20"
@@ -643,7 +669,7 @@ function MyCasesPage() {
                         <div className="mt-2 flex flex-wrap gap-x-4 gap-y-2 text-xs text-gray-400">
                           <span className="flex items-center gap-1">
                             <Hash size={12} />
-                            {caseItem.caseNumber || '—'}
+                            {caseItem.caseNumber || 'â€”'}
                           </span>
                           <span className="flex items-center gap-1">
                             <Calendar size={12} />
@@ -651,7 +677,7 @@ function MyCasesPage() {
                           </span>
                           <span className="flex items-center gap-1 capitalize">
                             <MapPin size={12} />
-                            {caseItem.region || 'Unknown region'}
+                            {prettyRegion(caseItem) || 'Unknown region'}
                           </span>
                           <span className="flex items-center gap-1">
                             <Route size={12} />
@@ -704,7 +730,7 @@ function MyCasesPage() {
                           </p>
                           <p className="flex items-center gap-2 capitalize">
                             <MapPin size={12} />
-                            Region: {caseItem.region || 'Unknown'}
+                            Region: {prettyRegion(caseItem) || 'Unknown'}
                           </p>
                           <p className="flex items-center gap-2">
                             <Route size={12} />
@@ -712,7 +738,7 @@ function MyCasesPage() {
                           </p>
                           <p className="flex items-center gap-2">
                             <Hash size={12} />
-                            Case #: {caseItem.caseNumber || '—'}
+                            Case #: {caseItem.caseNumber || 'â€”'}
                           </p>
                           <p className="flex items-center gap-2">
                             <span
@@ -735,14 +761,14 @@ function MyCasesPage() {
                                 onClick={() => openStreetView(hoverData.first.lat, hoverData.first.lng)}
                                 className="mt-1 block w-full rounded border border-white/10 bg-white/[0.04] px-2 py-1 text-left text-xs text-white transition hover:border-blue-400/40 hover:text-blue-200"
                               >
-                                📍 First: {hoverData.first.lat.toFixed(4)}, {hoverData.first.lng.toFixed(4)}
+                                ðŸ“ First: {hoverData.first.lat.toFixed(4)}, {hoverData.first.lng.toFixed(4)}
                               </button>
                               <button
                                 type="button"
                                 onClick={() => openStreetView(hoverData.last.lat, hoverData.last.lng)}
                                 className="mt-1 block w-full rounded border border-white/10 bg-white/[0.04] px-2 py-1 text-left text-xs text-white transition hover:border-blue-400/40 hover:text-blue-200"
                               >
-                                📍 Last: {hoverData.last.lat.toFixed(4)}, {hoverData.last.lng.toFixed(4)}
+                                ðŸ“ Last: {hoverData.last.lat.toFixed(4)}, {hoverData.last.lng.toFixed(4)}
                               </button>
                             </div>
                           )}
@@ -802,7 +828,7 @@ function MyCasesPage() {
                 <div className="space-y-2">
                   <p className="flex items-center gap-2">
                     <Hash size={14} />
-                    Case #: {selectedCase.caseNumber || '—'}
+                    Case #: {selectedCase.caseNumber || 'â€”'}
                   </p>
                   <p className="flex items-center gap-2">
                     <Calendar size={14} />
@@ -810,7 +836,7 @@ function MyCasesPage() {
                   </p>
                   <p className="flex items-center gap-2 capitalize">
                     <MapPin size={14} />
-                    {selectedCase.region || 'Region unknown'}
+                    {prettyRegion(selectedCase) || 'Region unknown'}
                   </p>
                   <p className="flex items-center gap-2">
                     <Route size={14} />
@@ -961,7 +987,7 @@ function MyCasesPage() {
           <div className="relative mx-auto mt-12 w-11/12 max-w-2xl rounded-3xl border border-white/10 bg-white/[0.04] p-6 text-white shadow-[0_35px_90px_rgba(15,23,42,0.65)] backdrop-blur-2xl">
             <div className="flex items-center justify-between">
               <h2 className="text-lg font-semibold">
-                AI Summary {selectedCase ? `– ${selectedCase.caseTitle}` : ''}
+                AI Summary {selectedCase ? `â€“ ${selectedCase.caseTitle}` : ''}
               </h2>
               <button
                 className={`rounded-full border border-white/15 px-3 py-1 text-xs font-semibold text-gray-200 transition hover:border-white/30 ${aiLoading ? 'cursor-not-allowed opacity-50' : ''}`}
@@ -1003,7 +1029,15 @@ function MyCasesPage() {
           </div>
         </div>
       )}
-      </motion.div>
+            <RegionSelectorModal
+        isOpen={showRegionModal}
+        onClose={() => setShowRegionModal(false)}
+        onSelect={({ provinceCode: pCode, provinceName: pName, districtCode: dCode }) => {
+          setProvinceCode(pCode || "");
+          setRegion(pName || "");
+          setDistrictCode(dCode || "");
+        }}
+      /></motion.div>
       <NotificationModal
         isOpen={modalState.isOpen}
         title={modalState.title}
@@ -1018,3 +1052,6 @@ function MyCasesPage() {
 }
 
 export default MyCasesPage;
+
+
+

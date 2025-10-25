@@ -489,11 +489,16 @@ useEffect(() => {
           const fb = await loadCaseWithAnnotations(caseId);
 
           // Basic case fields
+          const prettyRegion = (fb) => {
+            const p = fb.provinceName || fb.region || "";
+            const d = fb.districtName || "";
+            return d ? `${p} — ${d}` : p;
+          };
           setCaseDetails({
             caseNumber: fb.caseNumber,
             caseTitle: fb.caseTitle,
             dateOfIncident: formatDateForDisplay(fb.dateOfIncident),
-            region: fb.region,
+            region: prettyRegion(fb),
             between: fb.between || "Not specified",
           });
           setLocations(fb.locations || []);
@@ -574,11 +579,16 @@ useEffect(() => {
       setError("No location data found in the case.");
       return;
     }
+    const prettyRegion = (c) => {
+      const p = c.provinceName || c.region || "";
+      const d = c.districtName || "";
+      return d ? `${p} — ${d}` : p;
+    };
     setCaseDetails({
       caseNumber: caseData.caseNumber,
       caseTitle: caseData.caseTitle,
       dateOfIncident: formatDateForDisplay(caseData.dateOfIncident),
-      region: caseData.region,
+      region: prettyRegion(caseData),
       between: caseData.between || "Not specified",
     });
     setLocations(caseData.locations);

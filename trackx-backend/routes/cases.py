@@ -74,25 +74,44 @@ async def ai_conclusion(case_id: str):
 
 @router.get("/cases/search")
 async def search_cases_route(
-    #user_id: Optional[str] = "", 
     user_id: str = "",
-    case_name: str = Query("", alias="searchTerm"),
+    case_name: str = "",
+    searchTerm: str = "",
     region: str = "",
     date: str = "",
     status: str = "",
     urgency: str = "",
+    province: str = "",
+    provinceCode: str = "",
+    provinceName: str = "",
+    district: str = "",
+    districtCode: str = "",
+    districtName: str = "",
 ):
-    print(f"Received query parameters: user_id={user_id}, case_name={case_name}, region={region}, date={date}, status={status}, urgency={urgency}")
-    
-    results = await search_cases(
-        case_name=case_name,
-        region=region,
-        date=date,
-        user_id=user_id,
-        status=status,
-        urgency=urgency,
+    effective_case_name = searchTerm or case_name or ""
+    print(
+        f"Received query parameters: user_id={user_id}, case_name={effective_case_name}, region={region}, date={date}, status={status}, urgency={urgency}, province={province or provinceName or provinceCode}, district={district or districtName or districtCode}"
     )
-    return {"cases": results}
+
+    try:
+        results = await search_cases(
+            case_name=effective_case_name,
+            region=region,
+            date=date,
+            user_id=user_id,
+            status=status,
+            urgency=urgency,
+            province=province,
+            provinceCode=provinceCode,
+            provinceName=provinceName,
+            district=district,
+            districtCode=districtCode,
+            districtName=districtName,
+        )
+        return {"cases": results}
+    except Exception as e:
+        print(f"/cases/search failed: {e}")
+        return {"cases": []}
 
 @router.post("/cases/create")
 async def create_case_route(case_request: CaseCreateRequest):
@@ -234,6 +253,13 @@ async def get_last_case_points():
     from services.case_service import fetch_last_points_per_case
     points = await fetch_last_points_per_case()
     return {"points": points}
+
+@router.get("/cases/recent-points")
+async def get_recent_points(limit: int = 10):
+    """Return the most recent N points across all cases for a lightweight mini-heatmap."""
+    from services.case_service import fetch_recent_points
+    pts = await fetch_recent_points(limit=limit)
+    return {"points": pts}
 
     # For the heatmap page: Added by jon
 @router.get("/cases/all-points-with-case-ids")

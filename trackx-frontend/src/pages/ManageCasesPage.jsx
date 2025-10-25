@@ -2,7 +2,7 @@ import { Link } from "react-router-dom";
 import { motion } from "framer-motion";
 import { FaSearch, FaMapMarkerAlt, FaCalendarAlt } from "react-icons/fa";
 import adfLogo from "../assets/image-removebg-preview.png";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import axios from "axios";
 import { useAuth } from "../context/AuthContext";
 import { signOut } from "firebase/auth";
@@ -12,12 +12,25 @@ import NotificationModal from "../components/NotificationModal";
 import useNotificationModal from "../hooks/useNotificationModal";
 import { getFriendlyErrorMessage } from "../utils/errorMessages";
 import { Home, FilePlus2, FolderOpen, Briefcase, LayoutDashboard } from "lucide-react";
+import ZA_REGIONS from "../data/za_regions";
+import RegionSelectorModal from "../components/RegionSelectorModal";
 
 
 
 function ManageCasesPage() {
   const [searchTerm, setSearchTerm] = useState("");
   const [region, setRegion] = useState("");
+  const [provinceCode, setProvinceCode] = useState("");
+  const [districtCode, setDistrictCode] = useState("");
+  const [showRegionModal, setShowRegionModal] = useState(false);
+
+  const selectedRegionLabel = useMemo(() => {
+    const pName = region || ZA_REGIONS.find(p => p.code === provinceCode)?.name || "";
+    const prov = ZA_REGIONS.find(p => p.code === provinceCode);
+    const dName = prov?.districts?.find(d => String(d.code) === String(districtCode))?.name || "";
+    if (!pName && !dName) return "";
+    return dName ? `${pName} — ${dName}` : pName;
+  }, [region, provinceCode, districtCode]);
   const [date, setDate] = useState("");
   const [cases, setCases] = useState([]);
   const { profile } = useAuth();
@@ -40,18 +53,25 @@ function ManageCasesPage() {
 
   const handleSearch = async (overrides = {}) => {
     const nextSearchTerm = overrides.searchTerm !== undefined ? overrides.searchTerm : searchTerm;
-    const nextRegion = overrides.region !== undefined ? overrides.region : region;
+    const nextProvinceCode = overrides.provinceCode !== undefined ? overrides.provinceCode : provinceCode;
+    const nextDistrictCode = overrides.districtCode !== undefined ? overrides.districtCode : districtCode;
     const nextDate = overrides.date !== undefined ? overrides.date : date;
 
     if (overrides.searchTerm !== undefined) setSearchTerm(overrides.searchTerm);
-    if (overrides.region !== undefined) setRegion(overrides.region);
+    if (overrides.provinceCode !== undefined) setProvinceCode(overrides.provinceCode);
+    if (overrides.districtCode !== undefined) setDistrictCode(overrides.districtCode);
     if (overrides.date !== undefined) setDate(overrides.date);
+
+    const prov = ZA_REGIONS.find(p => p.code === nextProvinceCode);
+    setRegion(prov ? prov.name : "");
 
     try {
       const response = await axios.get("http://localhost:8000/cases/search", {
         params: {
-          case_name: nextSearchTerm || undefined,
-          region: nextRegion || undefined,
+          searchTerm: nextSearchTerm || undefined,
+          region: prov?.name || undefined,
+          provinceCode: nextProvinceCode || undefined,
+          districtCode: nextDistrictCode || undefined,
           date: nextDate || undefined,
         }
       });
@@ -285,7 +305,7 @@ function ManageCasesPage() {
         <div className="mx-auto mt-10 w-full max-w-6xl px-6 space-y-8">
           <div className="rounded-3xl border border-white/10 bg-white/[0.018] p-6 shadow-[0_25px_70px_rgba(15,23,42,0.45)] backdrop-blur-2xl">
             <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
-              <div className="grid w-full gap-4 md:grid-cols-2 lg:grid-cols-4">
+              <div className="grid w-full gap-4 md:grid-cols-2 lg:grid-cols-5">
                 <div className="relative">
                   <FaSearch className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
                   <input
@@ -297,23 +317,14 @@ function ManageCasesPage() {
                   />
                 </div>
                 <div className="relative">
-                  <FaMapMarkerAlt className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
-                  <select
-                    className="w-full appearance-none rounded-2xl border border-white/12 bg-white/[0.05] px-10 py-3 text-sm text-white shadow-inner shadow-black/20 focus:border-indigo-600/60 focus:outline-none focus:ring-2 focus:ring-indigo-600/20"
-                    value={region}
-                    onChange={(e) => setRegion(e.target.value)}
+                  <button
+                    type="button"
+                    onClick={() => setShowRegionModal(true)}
+                    className="w-full appearance-none rounded-2xl border border-white/12 bg-white/[0.05] pl-10 pr-4 py-3 text-left text-sm text-white shadow-inner shadow-black/20 focus:border-indigo-600/60 focus:outline-none focus:ring-2 focus:ring-indigo-600/20"
                   >
-                    <option value="">All regions</option>
-                    <option value="western-cape">Western Cape</option>
-                    <option value="eastern-cape">Eastern Cape</option>
-                    <option value="northern-cape">Northern Cape</option>
-                    <option value="gauteng">Gauteng</option>
-                    <option value="kwazulu-natal">KwaZulu-Natal</option>
-                    <option value="free-state">Free State</option>
-                    <option value="mpumalanga">Mpumalanga</option>
-                    <option value="limpopo">Limpopo</option>
-                    <option value="north-west">North West</option>
-                  </select>
+                    <FaMapMarkerAlt className="absolute left-3 top-3.5 h-4 w-4 text-gray-400" />
+                    <span className="block truncate">{selectedRegionLabel || 'Region'}</span>
+                  </button>
                 </div>
                 <div className="relative">
                   <FaCalendarAlt className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
@@ -332,12 +343,21 @@ function ManageCasesPage() {
                 </button>
               </div>
               <button
-                onClick={() => handleSearch({ searchTerm: "", region: "", date: "" })}
+                onClick={() => handleSearch({ searchTerm: "", provinceCode: "", districtCode: "", date: "" })}
                 className="inline-flex items-center justify-center rounded-full border border-white/15 bg-white/[0.03] px-4 py-2 text-xs font-semibold text-gray-300 transition hover:border-white/30 hover:text-white"
               >
                 Clear filters
               </button>
             </div>
+            <RegionSelectorModal
+              isOpen={showRegionModal}
+              onClose={() => setShowRegionModal(false)}
+              onSelect={({ provinceCode: pCode, provinceName: pName, districtCode: dCode }) => {
+                setProvinceCode(pCode || "");
+                setRegion(pName || "");
+                setDistrictCode(dCode || "");
+              }}
+            />
           </div>
 
           <div className="rounded-3xl border border-white/10 bg-white/[0.018] p-6 shadow-[0_25px_70px_rgba(15,23,42,0.45)] backdrop-blur-2xl">

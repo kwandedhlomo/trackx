@@ -255,27 +255,98 @@ async def add_intro_conclusion(case_id: str):
 
     return True, {"reportIntro": intro, "reportConclusion": conclusion}
 
-async def search_cases(case_name: str = "", region: str = "", date: str = "", user_id: str = "", status: str = "", urgency: str = ""):
+async def search_cases(case_name: str = "", region: str = "", date: str = "", user_id: str = "", status: str = "", urgency: str = "", province: str = "", provinceCode: str = "", provinceName: str = "", district: str = "", districtCode: str = "", districtName: str = ""):
     try:
         print(f"Received filters: case_name={case_name}, region={region}, date={date}, user_id={user_id}, status={status}, urgency={urgency}")
+
+        # Normalize province/district inputs early so both user and non-user paths can use them
+        eff_province_code = (provinceCode or province or "").strip()
+        eff_province_name = (provinceName or region or "").strip()
+        eff_district_code = (districtCode or district or "").strip()
+        eff_district_name = (districtName or "").strip()
+
+        # Precompute legacy-friendly forms to avoid NameErrors in user-scoped path
+        def _slugify(name: str) -> str:
+            try:
+                s = ''.join(ch.lower() if ch.isalnum() else '-' for ch in name)
+                while '--' in s:
+                    s = s.replace('--', '-')
+                return s.strip('-')
+            except Exception:
+                return name
+
+        province_slug = _slugify(eff_province_name) if eff_province_name else ""
+        province_lower = eff_province_name.lower() if eff_province_name else ""
         
         if user_id:
             docs_map = _get_case_documents_for_user(user_id)
             documents = list(docs_map.values())
         else:
             cases_ref = db.collection("cases")
-            query_ref = cases_ref
-            if case_name:
-                query_ref = query_ref.where("caseTitle", "==", case_name)
-            if region:
-                query_ref = query_ref.where("region", "==", region)
-            if date:
-                query_ref = query_ref.where("dateOfIncident", "==", date)
-            if status:
-                query_ref = query_ref.where("status", "==", status)
-            if urgency:
-                query_ref = query_ref.where("urgency", "==", urgency)
-            documents = list(query_ref.stream())
+            eff_province_code = (provinceCode or province).strip() if (provinceCode or province) else ""
+            eff_province_name = (provinceName or region).strip() if (provinceName or region) else ""
+            eff_district_code = (districtCode or district).strip() if (districtCode or district) else ""
+            eff_district_name = (districtName).strip() if districtName else ""
+
+            def apply_common(q):
+                if case_name:
+                    q = q.where("caseTitle", "==", case_name)
+                if eff_district_code:
+                    q = q.where("districtCode", "==", eff_district_code)
+                elif eff_district_name:
+                    q = q.where("districtName", "==", eff_district_name)
+                if date:
+                    q = q.where("dateOfIncident", "==", date)
+                if status:
+                    q = q.where("status", "==", status)
+                if urgency:
+                    q = q.where("urgency", "==", urgency)
+                return q
+
+            def slugify(name: str) -> str:
+                try:
+                    s = ''.join(ch.lower() if ch.isalnum() else '-' for ch in name)
+                    while '--' in s:
+                        s = s.replace('--', '-')
+                    return s.strip('-')
+                except Exception:
+                    return name
+
+            province_slug = slugify(eff_province_name) if eff_province_name else ""
+            province_lower = (eff_province_name or "").strip().lower()
+
+            query_refs = []
+            if eff_province_code or eff_province_name:
+                if eff_province_code:
+                    query_refs.append(apply_common(cases_ref.where("provinceCode", "==", eff_province_code)))
+                if eff_province_name:
+                    # provinceName exact
+                    query_refs.append(apply_common(cases_ref.where("provinceName", "==", eff_province_name)))
+                    # legacy region equals human name
+                    query_refs.append(apply_common(cases_ref.where("region", "==", eff_province_name)))
+                    # legacy region equals slug (western-cape)
+                    if province_slug and province_slug != eff_province_name:
+                        query_refs.append(apply_common(cases_ref.where("region", "==", province_slug)))
+                    # legacy region equals lower-case with space ("western cape")
+                    if province_lower and province_lower != eff_province_name and province_lower != province_slug:
+                        query_refs.append(apply_common(cases_ref.where("region", "==", province_lower)))
+            else:
+                base = apply_common(cases_ref)
+                if region:
+                    base = base.where("region", "==", region)
+                    reg_slug = slugify(region)
+                    if reg_slug and reg_slug != region:
+                        query_refs.append(apply_common(cases_ref.where("region", "==", reg_slug)))
+                    reg_lower = region.strip().lower()
+                    if reg_lower and reg_lower not in (region, reg_slug):
+                        query_refs.append(apply_common(cases_ref.where("region", "==", reg_lower)))
+                query_refs.append(base)
+
+            docs_map_local = {}
+            for qr in query_refs:
+                for d in qr.stream():
+                    docs_map_local[d.id] = d
+            documents = list(docs_map_local.values())
 
         results = []
         seen_ids = set()
@@ -287,8 +358,41 @@ async def search_cases(case_name: str = "", region: str = "", date: str = "", us
                 continue
             if case_name and data.get("caseTitle") != case_name:
                 continue
-            if region and data.get("region") != region:
+            eff_province_code = (provinceCode or province).strip() if (provinceCode or province) else ""
+            eff_province_name = (provinceName or region).strip() if (provinceName or region) else ""
+            eff_district_code = (districtCode or district).strip() if (districtCode or district) else ""
+            eff_district_name = (districtName).strip() if districtName else ""
+
+            if eff_province_code:
+                reg_val = (data.get("region") or "").strip()
+                reg_norm = reg_val.lower()
+                if not (
+                    data.get("provinceCode") == eff_province_code or
+                    (eff_province_name and (
+                        data.get("provinceName") == eff_province_name or
+                        reg_val == eff_province_name or
+                        (province_slug and reg_val == province_slug) or
+                        (province_lower and reg_norm == province_lower)
+                    ))
+                ):
+                    continue
+            elif eff_province_name:
+                reg_val = (data.get("region") or "").strip()
+                reg_norm = reg_val.lower()
+                if not (
+                    data.get("provinceName") == eff_province_name or
+                    reg_val == eff_province_name or
+                    (province_slug and reg_val == province_slug) or
+                    (province_lower and reg_norm == province_lower)
+                ):
+                    continue
+            if eff_district_code and (data.get("districtCode") != eff_district_code):
                 continue
+            if (not eff_district_code) and eff_district_name and (data.get("districtName") != eff_district_name):
+                continue
+            if region and not (eff_province_code or eff_province_name):
+                if data.get("region") != region:
+                    continue
             if date and data.get("dateOfIncident") != date:
                 continue
             if status and data.get("status") != status:
@@ -327,6 +431,10 @@ async def create_case(payload: CaseCreateRequest) -> str:
             "caseTitle": payload.case_title,
             "dateOfIncident": payload.date_of_incident,
             "region": payload.region,
+            "provinceCode": getattr(payload, "provinceCode", None),
+            "provinceName": getattr(payload, "provinceName", None) or payload.region,
+            "districtCode": getattr(payload, "districtCode", None),
+            "districtName": getattr(payload, "districtName", None),
             "between": payload.between,
             "urgency": payload.urgency, 
             "createdAt": firestore.SERVER_TIMESTAMP,
@@ -423,9 +531,16 @@ async def update_case(data: dict):
             "caseTitle": data.get("caseTitle"),
             "dateOfIncident": data.get("dateOfIncident"),
             "region": data.get("region"),
+            # New-style region fields (keep legacy region too)
+            "provinceCode": data.get("provinceCode"),
+            "provinceName": data.get("provinceName"),
+            "districtCode": data.get("districtCode"),
+            "districtName": data.get("districtName"),
             "between": data.get("between"),
             "status": data.get("status", "in progress"),
             "urgency": data.get("urgency"),
+            # Evidence (accept either snake_case from backend route or camelCase from frontend)
+            "evidenceItems": data.get("evidence_items") or data.get("evidenceItems"),
             "updatedBy": "system",
             "updatedAt": SERVER_TIMESTAMP,
         }
@@ -624,6 +739,53 @@ async def fetch_all_case_points():
         print("Error fetching case points:", e)
         return []
 
+async def fetch_recent_points(limit: int = 10) -> list:
+    try:
+        results = []
+        # Primary: collection group on 'allPoints' ordered by timestamp
+        try:
+            cg = db.collection_group("allPoints")
+            docs = list(
+                cg.order_by("timestamp", direction=firestore.Query.DESCENDING)
+                  .limit(max(1, int(limit)))
+                  .stream()
+            )
+            for d in docs:
+                data = d.to_dict() or {}
+                lat = data.get("lat")
+                lng = data.get("lng")
+                if lat is None or lng is None:
+                    continue
+                results.append({
+                    "lat": float(lat),
+                    "lng": float(lng),
+                    "timestamp": data.get("timestamp")
+                })
+        except Exception as primary_err:
+            print("Primary recent-points query failed (allPoints):", primary_err)
+
+        # Fallback: generic 'points' without guaranteed timestamps
+        if not results:
+            try:
+                cg2 = db.collection_group("points")
+                docs2 = list(cg2.limit(max(1, int(limit))).stream())
+                for d in docs2:
+                    data = d.to_dict() or {}
+                    lat = data.get("lat")
+                    lng = data.get("lng")
+                    if lat is None or lng is None:
+                        continue
+                    results.append({
+                        "lat": float(lat),
+                        "lng": float(lng)
+                    })
+            except Exception as inner:
+                print("Fallback fetch from 'points' failed:", inner)
+
+        return results
+    except Exception as e:
+        print("Error in fetch_recent_points:", e)
+        return []
     
 async def fetch_interpolated_points(case_id: str) -> list:
     try:

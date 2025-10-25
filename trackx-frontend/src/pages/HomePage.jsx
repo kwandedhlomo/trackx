@@ -350,17 +350,15 @@ function HomePage() {
     useEffect(() => {
       const fetchHeatPoints = async () => {
         try {
-          const response = await axios.get("http://localhost:8000/cases/all-points");
+          // Fetch a lightweight snapshot for the mini heatmap
+          const response = await axios.get("http://localhost:8000/cases/recent-points", { params: { limit: 10 } });
           const points = response.data.points || [];
-    
-          console.log("Raw heatmap points from backend:", points);
           setHeatPoints(points);
-          //console.log("HomePage fetched points:", points);
         } catch (err) {
-          console.error("Failed to fetch heatmap points:", err);
+          console.error("Failed to fetch mini heatmap points:", err);
         }
       };
-    
+
       fetchHeatPoints();
     }, []);
 

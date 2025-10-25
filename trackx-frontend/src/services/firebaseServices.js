@@ -332,6 +332,10 @@ const fetchCaseDocsForUser = async (userId) => {
           : new Date(),
       
         region: caseData.region,
+        provinceCode: caseData.provinceCode || null,
+        provinceName: caseData.provinceName || caseData.region || null,
+        districtCode: caseData.districtCode || null,
+        districtName: caseData.districtName || null,
         between: caseData.between || '',
         urgency: caseData.urgency || 'Medium',
         userId: mergedUserIds[0] || finalUserId,
@@ -498,6 +502,10 @@ const fetchCaseDocsForUser = async (userId) => {
           caseData.date?.toDate?.() || caseData.date,   // fall back to legacy
       
         region: caseData.region,
+        provinceCode: caseData.provinceCode || null,
+        provinceName: caseData.provinceName || caseData.region || null,
+        districtCode: caseData.districtCode || null,
+        districtName: caseData.districtName || null,
         between: caseData.between || '',
         urgency: caseData.urgency || '',
         userId: caseData.userId,

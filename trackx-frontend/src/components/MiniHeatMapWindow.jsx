@@ -1,5 +1,5 @@
 // components/MiniHeatMapWindow.jsx
-import React from 'react';
+import React, { useMemo } from 'react';
 import { DeckGL } from '@deck.gl/react';
 import { HeatmapLayer } from '@deck.gl/aggregation-layers';
 import Map from 'react-map-gl';
@@ -7,11 +7,11 @@ import Map from 'react-map-gl';
 const MAPBOX_TOKEN = 'pk.eyJ1Ijoiam9ubHVrZTciLCJhIjoiY21icjgzYW1lMDczazJqc2Fmbm4xd2RteSJ9.pbPMQ4ywc52Fy0TXp4ndHg';
 
 const MiniHeatMapWindow = ({ points = [] }) => {
-  const formattedPoints = (points || []).map(p => ({
-    position: [p.lng || 0, p.lat || 0], 
-  }));
-
-  console.log("MiniHeatMapWindow formatted points:", formattedPoints);
+  const formattedPoints = useMemo(() => (
+    (points || []).map(p => ({
+      position: [p.lng || 0, p.lat || 0],
+    }))
+  ), [points]);
 
   const heatmapLayer = new HeatmapLayer({
     id: 'mini-heatmap',
