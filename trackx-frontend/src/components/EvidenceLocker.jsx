@@ -119,7 +119,7 @@ export default function EvidenceLocker({
           <FileText className="mx-auto mb-3 h-10 w-10 text-white/30" />
           <p className="text-white/80">No evidence items yet</p>
           {canMutate && (
-            <p className="mt-1 text-xs text-gray-400">Click “Add Evidence” to create an entry.</p>
+            <p className="mt-1 text-xs text-gray-400">Click "Add Evidence" to create an entry.</p>
           )}
         </div>
       ) : (

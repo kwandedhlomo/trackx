@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from "react";
 import { Link, useNavigate, useLocation } from "react-router-dom";
 import adflogo from "../assets/image-removebg-preview.png";
 import { motion } from "framer-motion";
-import { AlertTriangle, MapPin, FileText, Camera, Home, FilePlus2, FolderOpen, Briefcase, LayoutDashboard, Trash2, Plus } from "lucide-react";
+import { AlertTriangle, MapPin, FileText, Camera, Home, FilePlus2, FolderOpen, Briefcase, LayoutDashboard, Trash2, Plus, Search, Link2 } from "lucide-react";
 import jsPDF from "jspdf";
 import { useAuth } from "../context/AuthContext";
 import { signOut } from "firebase/auth";
@@ -37,6 +37,12 @@ import {
   createReportDocument,
   getCaseReports,
   loadSnapshotsFromFirebase,
+  getCurrentUserId,
+  loadEvidenceByCase,
+  batchSaveEvidence,
+  loadAllEvidence,      // ← ADDED for evidence search
+  searchEvidence,       // ← ADDED for evidence search
+  linkEvidenceToCase,   // ← ADDED for evidence linking
 } from "../services/firebaseServices";
 
 // Optional (not used directly for embedding but left for completeness)
@@ -320,15 +326,15 @@ function OverviewPage() {
   const [evidenceItems, setEvidenceItems] = useState([]);
   const [technicalTerms, setTechnicalTerms] = useState([]);
 
+  // Evidence search and linking state
+  const [showEvidenceSearch, setShowEvidenceSearch] = useState(false);
+  const [evidenceSearchTerm, setEvidenceSearchTerm] = useState("");
+  const [evidenceSearchResults, setEvidenceSearchResults] = useState([]);
+  const [isSearchingEvidence, setIsSearchingEvidence] = useState(false);
+
   //Intro & Conclusions states
   const [intro, setIntro] = useState("");
   const [conclusion, setConclusion] = useState("");
-
-  // --- AI Suggestion states ---
-const [showSuggestionModal, setShowSuggestionModal] = useState(false);
-const [suggestedText, setSuggestedText] = useState("");
-const [loadingSuggestion, setLoadingSuggestion] = useState(false);
-const [suggestTarget, setSuggestTarget] = useState(null);
 
   // --- helpers ---
   // --- Evidence Locker (structure + utils) ---
@@ -384,6 +390,139 @@ const normalizeEvidenceItems = (raw, caseNumber = caseDetails.caseNumber || "Pen
 
   const handleEvidenceBlur = () => saveData();
 
+  // ============================================
+  // EVIDENCE SEARCH AND LINK HANDLERS
+  // ============================================
+
+  /**
+   * Search for evidence items by search term
+   */
+  const handleEvidenceSearch = async () => {
+    const term = evidenceSearchTerm.trim();
+    
+    // Validation
+    if (term.length < 2) {
+      openModal({
+        variant: "info",
+        title: "Keep typing",
+        description: "Enter at least two characters to search for evidence.",
+      });
+      return;
+    }
+
+    setIsSearchingEvidence(true);
+    
+    try {
+      // Search evidence using firebaseServices
+      const results = await searchEvidence(term);
+      setEvidenceSearchResults(results);
+      
+      // Show feedback if no results
+      if (results.length === 0) {
+        openModal({
+          variant: "info",
+          title: "No results",
+          description: `No evidence found matching "${term}". Try different keywords or search by case number.`,
+        });
+      }
+      
+      console.log(`Found ${results.length} evidence items for search: "${term}"`);
+    } catch (error) {
+      console.error("Evidence search failed:", error);
+      openModal({
+        variant: "error",
+        title: "Search failed",
+        description: getFriendlyErrorMessage(
+          error, 
+          "We couldn't search for evidence right now. Please try again."
+        ),
+      });
+    } finally {
+      setIsSearchingEvidence(false);
+    }
+  };
+
+  /**
+   * Link an existing evidence item to the current case
+   */
+  const linkExistingEvidence = async (evidence) => {
+    // Check if evidence is already linked
+    if (evidenceItems.some(item => item.id === evidence.id)) {
+      openModal({
+        variant: "info",
+        title: "Already Added",
+        description: "This evidence item is already in your evidence locker for this case.",
+      });
+      return;
+    }
+
+    try {
+      // Link evidence to case in Firebase
+      if (caseDetails.caseNumber) {
+        await linkEvidenceToCase(evidence.id, caseDetails.caseNumber);
+      }
+
+      // Add evidence to the case
+      const linkedEvidence = {
+        ...evidence,
+        caseNumber: caseDetails.caseNumber || evidence.caseNumber,
+      };
+      
+      setEvidenceItems(prev => [...prev, linkedEvidence]);
+      saveToLocalStorage({ evidenceItems: [...evidenceItems, linkedEvidence] });
+
+      // Show success notification
+      openModal({
+        variant: "success",
+        title: "Evidence Linked",
+        description: `Evidence item "${evidence.id}" has been successfully added to this case.`,
+      });
+
+      // Remove from search results (optional, for cleaner UX)
+      setEvidenceSearchResults(results => 
+        results.filter(r => r.id !== evidence.id)
+      );
+
+      console.log(`Linked evidence ${evidence.id} to case ${caseDetails.caseNumber}`);
+    } catch (error) {
+      console.error("Error linking evidence:", error);
+      openModal({
+        variant: "error",
+        title: "Link Failed",
+        description: "Could not link evidence to case. Please try again.",
+      });
+    }
+  };
+
+  /**
+   * Load all available evidence items (for browsing)
+   */
+  const handleLoadAllEvidence = async () => {
+    setIsSearchingEvidence(true);
+    
+    try {
+      // Load recent evidence (last 50 items)
+      const allEvidence = await loadAllEvidence(50);
+      setEvidenceSearchResults(allEvidence);
+      setShowEvidenceSearch(true);
+      
+      console.log(`Loaded ${allEvidence.length} evidence items`);
+    } catch (error) {
+      console.error("Failed to load evidence:", error);
+      openModal({
+        variant: "error",
+        title: "Load failed",
+        description: "Could not load existing evidence. Please try again.",
+      });
+    } finally {
+      setIsSearchingEvidence(false);
+    }
+  };
+
+  // ============================================
+  // END EVIDENCE HANDLERS
+  // ============================================
+
 
   const formatDateForDisplay = (dateInput) => {
     if (!dateInput) return "Date not available";
@@ -401,7 +540,7 @@ const normalizeEvidenceItems = (raw, caseNumber = caseDetails.caseNumber || "Pen
       return String(dateInput);
     }
   };
-  const getCurrentUserId = () => profile?.uid || auth.currentUser?.uid || "default_user";
+  // getCurrentUserId is now imported from firebaseServices
   const formatTimestamp = (timestamp) => {
     if (!timestamp) return "Not available";
     const d = new Date(timestamp);
@@ -505,7 +644,7 @@ useEffect(() => {
           setLocations(fb.locations || []);
           setLocationTitles(fb.locationTitles || Array((fb.locations || []).length).fill(""));
           setReportIntro(fb.reportIntro || "");
-          setEvidenceItems(normalizeEvidenceItems(fb.evidenceItems || [], fb.caseNumber));
+          // Evidence is loaded separately from evidence collection via loadEvidence()
           setTechnicalTerms(normalizeTechnicalTermList(fb.technicalTerms || []));
           setReportConclusion(fb.reportConclusion || "");
           setSelectedLocations(fb.selectedForReport || []);
@@ -568,6 +707,35 @@ useEffect(() => {
   // eslint-disable-next-line react-hooks/exhaustive-deps
 }, []);
 
+  // Load evidence items from Firebase evidence collection
+  useEffect(() => {
+    const loadEvidence = async () => {
+      if (!caseDetails.caseNumber) {
+        console.log("No case number yet, skipping evidence load");
+        return;
+      }
+      
+      try {
+        console.log(`Loading evidence for case ${caseDetails.caseNumber}...`);
+        const items = await loadEvidenceByCase(caseDetails.caseNumber);
+        
+        if (items.length > 0) {
+          console.log(`✓ Loaded ${items.length} evidence items from Firebase`);
+          setEvidenceItems(items);
+        } else {
+          console.log("No evidence items found in Firebase for this case");
+          // Keep any evidence items from caseData if no items in evidence collection
+        }
+      } catch (error) {
+        console.error("Failed to load evidence from Firebase:", error);
+        // Don't throw - just log the error and continue
+      }
+    };
+
+    loadEvidence();
+  }, [caseDetails.caseNumber]); // Re-run when case number changes
+
+
 
   const loadFromLocalStorage = async () => {
     const s = localStorage.getItem("trackxCaseData");
@@ -590,7 +758,7 @@ useEffect(() => {
     setLocations(caseData.locations);
     setSelectedLocations(caseData.selectedForReport || []);
     setReportIntro(caseData.reportIntro || "");
-    setEvidenceItems(normalizeEvidenceItems(caseData.evidenceItems || [], caseData.caseNumber));
+    // Evidence is loaded separately from evidence collection via loadEvidence()
     setTechnicalTerms(normalizeTechnicalTermList(caseData.technicalTerms || []));
     setReportConclusion(caseData.reportConclusion || "");
     setLocationTitles(caseData.locationTitles || Array(caseData.locations.length).fill(""));
@@ -640,7 +808,7 @@ useEffect(() => {
       console.error("Error saving to localStorage:", e);
     }
   };
-  
+
 const saveData = async (additionalData = {}) => {
   saveToLocalStorage(additionalData);
   if (!currentCaseId) {
@@ -664,11 +832,36 @@ const saveData = async (additionalData = {}) => {
       reportIntro: reportIntro || "",
       reportConclusion: reportConclusion || "",
       selectedForReport: selectedLocations,
-      evidenceItems,
+      // evidenceItems removed - evidence is saved separately in evidence collection
       ...extraCopy,
       technicalTerms: termsForUpdate,
     };
     await updateCaseAnnotations(currentCaseId, updateData);
+    
+    // ✅ Save evidence items to dedicated evidence collection
+    try {
+      if (evidenceItems && evidenceItems.length > 0) {
+        console.log(`Saving ${evidenceItems.length} evidence items for case ${caseDetails.caseNumber}...`);
+        
+        await batchSaveEvidence(
+          evidenceItems,
+          getCurrentUserId(),
+          caseDetails.caseNumber
+        );
+        
+        console.log(`✓ Successfully saved ${evidenceItems.length} evidence items to evidence collection`);
+      }
+    } catch (evidenceError) {
+      console.error("Failed to save evidence:", evidenceError);
+      // Don't fail the whole update if evidence save fails
+      // Show a warning but continue with the success flow
+      showError(
+        "Evidence Warning",
+        evidenceError,
+        "Case updated successfully, but there was an issue updating evidence items. Please try again."
+      );
+    }
+    
     setLastSaved(new Date().toLocaleTimeString());
     setSaveError(null);
   } catch (e) {
@@ -708,41 +901,6 @@ const saveData = async (additionalData = {}) => {
       currentCaseId
     ]); // eslint-disable-line
 
-// --- Grammar & Spelling Improvement (AI Review) ---
-const handleTextImprovement = async (target) => {
-  setLoadingSuggestion(true);
-  setSuggestTarget(target);
-
-  try {
-    let textToImprove = "";
-
-    if (target === "intro") textToImprove = reportIntro;
-    else if (target === "conclusion") textToImprove = reportConclusion;
-    else if (target === "evidence")
-      textToImprove = evidenceItems.map((e) => e.description || e).join("\n");
-    else if (target === "technical")
-      textToImprove = technicalTerms.join("\n");
-
-    if (!textToImprove.trim()) {
-      showError("No Text Found", "Please enter text before requesting improvements.");
-      setLoadingSuggestion(false);
-      return;
-    }
-
-    const response = await axios.post(`${API_BASE}/cases/ai-review`, {
-      text: textToImprove,
-      contextType: target,
-    });
-
-    setSuggestedText(response.data.suggestedText || "");
-    setShowSuggestionModal(true);
-  } catch (err) {
-    console.error("AI improvement error:", err);
-    showError("AI Suggestion Error", err, "Failed to fetch AI improvements.");
-  } finally {
-    setLoadingSuggestion(false);
-  }
-};
 
 // --- PDF (with normalization) ---
 const generatePDF = async () => {
@@ -1633,69 +1791,221 @@ const handleGenerateConclusion = async () => {
           </div>
         </div>
 
-{/* Report Intro */}
-<div className="rounded-3xl border border-white/10 bg-white/[0.018] p-6 shadow-[0_25px_70px_rgba(15,23,42,0.45)] backdrop-blur-2xl">
-  {/* Header + Buttons Row */}
-  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-    <div>
-      <h2 className="text-lg font-semibold text-white">Report Introduction</h2>
-      <p className="text-xs text-gray-400">Set the tone for your findings.</p>
-    </div>
+        {/* Report Intro */}
+        <div className="rounded-3xl border border-white/10 bg-white/[0.018] p-6 shadow-[0_25px_70px_rgba(15,23,42,0.45)] backdrop-blur-2xl">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h2 className="text-lg font-semibold text-white">Report Introduction</h2>
+              <p className="text-xs text-gray-400">Set the tone for your findings.</p>
+            </div>
+            <button
+              onClick={handleGenerateIntro}
+              disabled={loadingIntro}
+              className={`inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold transition ${
+                loadingIntro
+                  ? "cursor-not-allowed bg-white/10 text-gray-300"
+                  : "bg-gradient-to-r from-purple-600 to-indigo-600 text-white hover:from-purple-500 hover:to-indigo-500"
+              }`}
+            >
+              {loadingIntro ? (
+                <span className="flex items-center gap-2">
+                  <span className="h-3 w-3 animate-spin rounded-full border-b-2 border-white/70" />
+                  Generating...
+                </span>
+              ) : (
+                "Generate AI Intro"
+              )}
+            </button>
+          </div>
+          <textarea
+            placeholder="Enter report introduction..."
+            value={reportIntro}
+            onChange={(e) => setReportIntro(e.target.value)}
+            onBlur={() => saveToLocalStorage()}
+            className="mt-4 min-h-[140px] w-full rounded-2xl border border-white/10 bg-slate-950/50 px-4 py-3 text-sm text-white placeholder-gray-500 focus:border-purple-500/50 focus:outline-none focus:ring-2 focus:ring-purple-500/30"
+          />
+        </div>
 
-    {/* Button Group */}
-    <div className="flex gap-3 mt-2 sm:mt-0">
-      {/* Generate Button */}
-      <button
-        onClick={handleGenerateIntro}
-        disabled={loadingIntro}
-        className={`inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold transition ${
-          loadingIntro
-            ? "cursor-not-allowed bg-white/10 text-gray-300"
-            : "bg-gradient-to-r from-purple-600 to-indigo-600 text-white hover:from-purple-500 hover:to-indigo-500"
-        }`}
-      >
-        {loadingIntro ? (
-          <span className="flex items-center gap-2">
-            <span className="h-3 w-3 animate-spin rounded-full border-b-2 border-white/70" />
-            Generating...
-          </span>
-        ) : (
-          "Generate AI Intro"
-        )}
-      </button>
+        {/* Evidence Search & Link Section */}
+        <section className="rounded-3xl border border-white/10 bg-white/[0.018] p-6 shadow-[0_25px_70px_rgba(15,23,42,0.45)] backdrop-blur-2xl">
+          <div className="flex flex-col gap-1 sm:flex-row sm:items-baseline sm:justify-between">
+            <div>
+              <h3 className="text-sm font-semibold text-white flex items-center gap-2">
+                <Search className="h-5 w-5 text-purple-400" />
+                Search & Link Existing Evidence
+              </h3>
+              <p className="text-xs text-gray-400 mt-1">
+                Find and attach evidence from other cases to avoid duplication.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                setShowEvidenceSearch(!showEvidenceSearch);
+                if (!showEvidenceSearch) handleLoadAllEvidence();
+              }}
+              className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-gradient-to-r from-purple-900 to-indigo-900 px-4 py-2 text-sm font-semibold text-white shadow-[0_15px_35px_rgba(15,23,42,0.55)] transition hover:-translate-y-0.5"
+            >
+              <Search className="h-4 w-4" />
+              {showEvidenceSearch ? "Hide Search" : "Search Evidence"}
+            </button>
+          </div>
 
-      {/* Suggest Button */}
-      <button
-        onClick={() => handleTextImprovement("intro")}
-        disabled={loadingSuggestion}
-        className={`inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold transition ${
-          loadingSuggestion && suggestTarget === "intro"
-            ? "cursor-not-allowed bg-white/10 text-gray-300"
-            : "bg-gradient-to-r from-gray-700 to-gray-800 text-white hover:from-gray-600 hover:to-gray-700"
-        }`}
-      >
-        {loadingSuggestion && suggestTarget === "intro" ? (
-          <span className="flex items-center gap-2">
-            <span className="h-3 w-3 animate-spin rounded-full border-b-2 border-white/70" />
-            Loading...
-          </span>
-        ) : (
-          "Suggest Improvements"
-        )}
-      </button>
-    </div>
-  </div>
+          {showEvidenceSearch && (
+            <div className="space-y-4 rounded-2xl border border-white/10 bg-white/[0.02] p-4 mt-4">
+              {/* Search Input */}
+              <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+                <div className="relative flex-1">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+                  <input
+                    type="text"
+                    value={evidenceSearchTerm}
+                    onChange={(e) => setEvidenceSearchTerm(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        handleEvidenceSearch();
+                      }
+                    }}
+                    placeholder="Search by description, case number, or evidence ID..."
+                    className="w-full rounded-xl border border-white/10 bg-white/[0.02] pl-10 pr-3 py-2 text-sm text-white placeholder-gray-500 focus:border-purple-700/50 focus:outline-none focus:ring-2 focus:ring-purple-700/30"
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={handleEvidenceSearch}
+                  disabled={isSearchingEvidence}
+                  className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-gradient-to-r from-purple-900 via-indigo-900 to-purple-900 px-4 py-2 text-sm font-medium text-white shadow-[0_15px_35px_rgba(15,23,42,0.55)] transition hover:-translate-y-0.5 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <Search className="w-4 h-4" />
+                  {isSearchingEvidence ? "Searching..." : "Search"}
+                </button>
+              </div>
 
-  {/* extarea for input */}
-  <textarea
-    placeholder="Enter report introduction..."
-    value={reportIntro}
-    onChange={(e) => setReportIntro(e.target.value)}
-    onBlur={() => saveToLocalStorage()}
-    className="mt-4 min-h-[140px] w-full rounded-2xl border border-white/10 bg-slate-950/50 px-4 py-3 text-sm text-white placeholder-gray-500 focus:border-purple-500/50 focus:outline-none focus:ring-2 focus:ring-purple-500/30"
-  />
-</div>
+              {/* Results Area */}
+              <div className="max-h-96 space-y-3 overflow-y-auto pr-2">
+                {isSearchingEvidence ? (
+                  <div className="flex flex-col items-center justify-center py-8 text-center">
+                    <div className="mb-3 h-8 w-8 animate-spin rounded-full border-t-2 border-b-2 border-purple-500"></div>
+                    <p className="text-sm text-gray-400">Searching evidence database...</p>
+                  </div>
+                ) : evidenceSearchResults.length > 0 ? (
+                  <>
+                    <div className="mb-3 flex items-center justify-between rounded-xl border border-purple-500/20 bg-purple-500/10 px-3 py-2">
+                      <span className="text-xs font-medium text-purple-200">
+                        Found {evidenceSearchResults.length} evidence item{evidenceSearchResults.length !== 1 ? 's' : ''}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEvidenceSearchResults([]);
+                          setEvidenceSearchTerm("");
+                        }}
+                        className="text-xs text-purple-300 hover:text-purple-100 transition"
+                      >
+                        Clear Results
+                      </button>
+                    </div>
+                    
+                    {evidenceSearchResults.map((ev) => {
+                      const isAlreadyLinked = evidenceItems.some(item => item.id === ev.id);
+                      return (
+                        <div
+                          key={ev.id}
+                          className="group flex items-start justify-between gap-4 rounded-2xl border border-white/10 bg-white/[0.035] p-4 text-sm shadow-inner shadow-white/5 transition hover:border-purple-500/30 hover:bg-white/[0.05]"
+                        >
+                          <div className="flex-1 min-w-0">
+                            {/* Evidence ID and Status */}
+                            <div className="flex flex-wrap items-center gap-2 mb-2">
+                              <span className="inline-flex items-center rounded border border-purple-400/30 bg-purple-900/30 px-2 py-1 font-mono text-[11px] leading-none text-purple-200">
+                                {ev.id}
+                              </span>
+                              {isAlreadyLinked && (
+                                <span className="inline-flex items-center gap-1 rounded border border-green-400/30 bg-green-900/30 px-2 py-1 text-[10px] leading-none text-green-200">
+                                  <svg className="h-3 w-3" fill="currentColor" viewBox="0 0 20 20">
+                                    <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                                  </svg>
+                                  LINKED
+                                </span>
+                              )}
+                            </div>
 
+                            {/* Description */}
+                            <p className="mb-2 text-sm leading-relaxed text-white">
+                              {ev.description || <span className="italic text-gray-500">(No description)</span>}
+                            </p>
+
+                            {/* Metadata */}
+                            <div className="flex flex-wrap gap-3 text-xs text-gray-400">
+                              <span className="flex items-center gap-1">
+                                <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                                </svg>
+                                Case: <span className="font-medium text-gray-300">{ev.caseNumber}</span>
+                              </span>
+                              <span>•</span>
+                              <span className="flex items-center gap-1">
+                                <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                                </svg>
+                                {new Date(ev.dateAdded).toLocaleDateString()}
+                              </span>
+                            </div>
+
+                            {/* Related Cases */}
+                            {ev.relatedCases && ev.relatedCases.length > 1 && (
+                              <div className="mt-2 rounded-lg border border-blue-500/20 bg-blue-500/10 px-2 py-1">
+                                <p className="text-xs text-blue-200">
+                                  <span className="font-medium">Also used in:</span> {ev.relatedCases.filter(c => c !== ev.caseNumber).join(", ")}
+                                </p>
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Link Button */}
+                          <button
+                            type="button"
+                            onClick={() => linkExistingEvidence(ev)}
+                            disabled={isAlreadyLinked}
+                            className={`inline-flex shrink-0 items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold transition ${
+                              isAlreadyLinked
+                                ? "cursor-not-allowed border border-white/10 bg-white/5 text-gray-500"
+                                : "bg-gradient-to-r from-purple-600 to-indigo-600 text-white shadow-lg shadow-purple-500/20 hover:from-purple-500 hover:to-indigo-500"
+                            }`}
+                            title={isAlreadyLinked ? "Already linked to this case" : "Link this evidence to your case"}
+                          >
+                            <Link2 className="h-4 w-4" />
+                            {isAlreadyLinked ? "Linked" : "Link"}
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </>
+                ) : evidenceSearchTerm ? (
+                  <div className="flex flex-col items-center justify-center py-8 text-center">
+                    <div className="mb-3 rounded-full bg-white/5 p-3">
+                      <Search className="h-6 w-6 text-gray-400" />
+                    </div>
+                    <p className="mb-1 text-sm font-medium text-white">No results found</p>
+                    <p className="text-xs text-gray-400">
+                      No evidence found matching "{evidenceSearchTerm}". Try different keywords.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="flex flex-col items-center justify-center py-8 text-center">
+                    <div className="mb-3 rounded-full bg-white/5 p-3">
+                      <FileText className="h-6 w-6 text-gray-400" />
+                    </div>
+                    <p className="mb-1 text-sm font-medium text-white">Recent Evidence</p>
+                    <p className="text-xs text-gray-400">
+                      Showing recent evidence items. Use search above to find specific items.
+                    </p>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </section>
 
           <EvidenceLocker
             evidenceItems={evidenceItems}
@@ -1720,68 +2030,39 @@ const handleGenerateConclusion = async () => {
           disabled={isSaving}
         />
         {/* Report Conclusion */}
-<div className="rounded-3xl border border-white/10 bg-white/[0.018] p-6 shadow-[0_25px_70px_rgba(15,23,42,0.45)] backdrop-blur-2xl">
-  {/* Header + Buttons Row */}
-  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-    <div>
-      <h2 className="text-lg font-semibold text-white">Report Conclusion</h2>
-      <p className="text-xs text-gray-400"> Wrap up the investigation with decisive commentary.</p>
-    </div>
-
-    {/* Button Group */}
-    <div className="flex gap-3 mt-2 sm:mt-0">
-      {/* Generate Button */}
-      <button
-        onClick={handleGenerateConclusion}
-        disabled={loadingConclusion}
-        className={`inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold transition ${
-          loadingConclusion
-            ? "cursor-not-allowed bg-white/10 text-gray-300"
-            : "bg-gradient-to-r from-purple-600 to-indigo-600 text-white hover:from-purple-500 hover:to-indigo-500"
-        }`}
-      >
-        {loadingConclusion ? (
-          <span className="flex items-center gap-2">
-            <span className="h-3 w-3 animate-spin rounded-full border-b-2 border-white/70" />
-            Generating...
-          </span>
-        ) : (
-          "Generate AI Conclusion"
-        )}
-      </button>
-
-      {/* Suggest Button */}
-      <button
-        onClick={() => handleTextImprovement("conclusion")}
-        disabled={loadingSuggestion}
-        className={`inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold transition ${
-          loadingSuggestion && suggestTarget === "conclusion"
-            ? "cursor-not-allowed bg-white/10 text-gray-300"
-            : "bg-gradient-to-r from-gray-700 to-gray-800 text-white hover:from-gray-600 hover:to-gray-700"
-        }`}
-      >
-        {loadingSuggestion && suggestTarget === "conclusion" ? (
-          <span className="flex items-center gap-2">
-            <span className="h-3 w-3 animate-spin rounded-full border-b-2 border-white/70" />
-            Loading...
-          </span>
-        ) : (
-          "Suggest Improvements"
-        )}
-      </button>
-    </div>
-  </div>
-
-  {/* Textarea for input */}
-  <textarea
-    placeholder="Enter report conclusion..."
-    value={reportConclusion}
-    onChange={(e) => setReportConclusion(e.target.value)}
-    onBlur={() => saveToLocalStorage()}
-    className="mt-4 min-h-[140px] w-full rounded-2xl border border-white/10 bg-slate-950/50 px-4 py-3 text-sm text-white placeholder-gray-500 focus:border-purple-500/50 focus:outline-none focus:ring-2 focus:ring-purple-500/30"
-  />
-</div>
-
+        <div className="rounded-3xl border border-white/10 bg-white/[0.018] p-6 shadow-[0_25px_70px_rgba(15,23,42,0.45)] backdrop-blur-2xl">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h2 className="text-lg font-semibold text-white">Report Conclusion</h2>
+              <p className="text-xs text-gray-400">Wrap up the investigation with decisive commentary.</p>
+            </div>
+            <button
+              onClick={handleGenerateConclusion}
+              disabled={loadingConclusion}
+              className={`inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold transition ${
+                loadingConclusion
+                  ? "cursor-not-allowed bg-white/10 text-gray-300"
+                  : "bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white hover:from-violet-500 hover:to-fuchsia-500"
+              }`}
+            >
+              {loadingConclusion ? (
+                <span className="flex items-center gap-2">
+                  <span className="h-3 w-3 animate-spin rounded-full border-b-2 border-white/70" />
+                  Generating...
+                </span>
+              ) : (
+                "Generate AI Conclusion"
+              )}
+            </button>
+          </div>
+          <textarea
+            placeholder="Enter report conclusion..."
+            value={reportConclusion}
+            onChange={(e) => setReportConclusion(e.target.value)}
+            onBlur={() => saveToLocalStorage()}
+            className="mt-4 min-h-[140px] w-full rounded-2xl border border-white/10 bg-slate-950/50 px-4 py-3 text-sm text-white placeholder-gray-500 focus:border-fuchsia-500/50 focus:outline-none focus:ring-2 focus:ring-fuchsia-500/30"
+          />
+        </div>
 
         {/* Save bar */}
         <div className="rounded-3xl border border-white/10 bg-white/[0.018] p-6 shadow-[0_25px_70px_rgba(15,23,42,0.45)] backdrop-blur-2xl">
@@ -2042,57 +2323,7 @@ const handleGenerateConclusion = async () => {
         primaryAction={modalState.primaryAction}
         secondaryAction={modalState.secondaryAction}
       />
-      {/* --- AI Suggestion Modal --- */}
-{showSuggestionModal && (
-  <div className="fixed inset-0 flex items-center justify-center bg-black bg-opacity-60 z-50">
-    <div className="bg-gray-800 p-6 rounded-xl shadow-2xl max-w-lg w-full border border-gray-700">
-      <h2 className="text-lg font-semibold text-white mb-4">
-        AI Suggested Improvements
-      </h2>
-
-      <textarea
-        className="w-full h-40 bg-gray-900 text-gray-100 border border-gray-700 rounded-md p-3 mb-4 resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"
-        value={suggestedText}
-        onChange={(e) => setSuggestedText(e.target.value)}
-      />
-
-      <div className="flex justify-end gap-3">
-        <button
-          className="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-gray-200 rounded-md transition"
-          onClick={() => setShowSuggestionModal(false)}
-        >
-          Close
-        </button>
-
-        <button
-          className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-md transition"
-          onClick={() => {
-            const raw = (suggestedText || "").trim();
-            if (!raw) return setShowSuggestionModal(false);
-
-            if (suggestTarget === "intro") setReportIntro(raw);
-            else if (suggestTarget === "conclusion") setReportConclusion(raw);
-            else if (suggestTarget === "evidence") {
-              const lines = raw.split("\n").map((l) => l.trim()).filter(Boolean);
-              setEvidenceItems(lines.map((desc) => ({ id: Date.now(), description: desc })));
-            } else if (suggestTarget === "technical") {
-              const lines = raw.split("\n").map((l) => l.trim()).filter(Boolean);
-              setTechnicalTerms(lines);
-            }
-
-            setShowSuggestionModal(false);
-          }}
-        >
-          Apply Changes
-        </button>
-      </div>
-    </div>
-  </div>
-)}
-
     </motion.div>
-
-    
   );
 }
 
