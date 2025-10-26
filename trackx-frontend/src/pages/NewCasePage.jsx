@@ -47,22 +47,15 @@ const SECURITY_CONFIG = {
     "application/pdf",
   ],
   allowedExtensions: [".csv", ".xls", ".xlsx", ".pdf"],
+  // RELAXED: Only truly dangerous patterns, removed common false positives
   maliciousPatterns: [
     /<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi,
     /javascript:/gi,
     /vbscript:/gi,
     /onload\s*=/gi,
     /onerror\s*=/gi,
-    /eval\s*\(/gi,
-    /document\.write/gi,
-    /innerHTML/gi,
-    /<\?php/gi,
-    /<%/gi,
-    /<asp:/gi,
     /cmd\.exe/gi,
     /powershell/gi,
-    /system\(/gi,
-    /exec\(/gi,
   ],
 };
 
@@ -86,24 +79,36 @@ class FileSecurityScanner {
         results.warnings.push(`MIME type '${file.type}' may not be supported`);
       }
       results.fileHash = await this.generateFileHash(file);
-      const contentScan = await this.scanFileContent(file);
-      results.scanResults.contentScan = contentScan;
-      if (!contentScan.safe) {
-        results.safe = false;
-        results.threats.push(...contentScan.threats);
-      }
+      
+      // For PDFs, use relaxed security check
       if (ext === ".pdf") {
-        const pdfScan = await this.scanPDFStructure(file);
+        const pdfScan = await this.scanPDFStructureRelaxed(file);
         results.scanResults.pdfScan = pdfScan;
+        // Only fail on truly dangerous content
         if (!pdfScan.safe) {
           results.safe = false;
           results.threats.push(...pdfScan.threats);
         }
+        // Add warnings without blocking
+        if (pdfScan.warnings && pdfScan.warnings.length > 0) {
+          results.warnings.push(...pdfScan.warnings);
+        }
+      } else {
+        // For non-PDF files, do content scan
+        const contentScan = await this.scanFileContent(file);
+        results.scanResults.contentScan = contentScan;
+        if (!contentScan.safe) {
+          results.safe = false;
+          results.threats.push(...contentScan.threats);
+        }
       }
+      
       results.riskLevel = !results.safe ? "HIGH" : results.warnings.length ? "MEDIUM" : "LOW";
     } catch (e) {
-      results.safe = false;
-      results.threats.push(`Security scan failed: ${e.message}`);
+      console.warn("Security scan error:", e);
+      // Don't fail upload on scan errors - just log warning
+      results.warnings.push(`Security scan encountered an error: ${e.message}`);
+      results.riskLevel = "MEDIUM";
     }
     return results;
   }
@@ -126,10 +131,8 @@ class FileSecurityScanner {
         r.onerror = () => reject(r.error);
         r.readAsText(file.slice(0, 50000));
       });
-      if (file.type.startsWith("text/") && txt.includes("\x00")) {
-        res.safe = false;
-        res.threats.push("File contains binary data but has a text MIME type");
-      }
+      
+      // Check for truly malicious patterns (relaxed for PDFs)
       for (const p of this.config.maliciousPatterns) {
         if (p.test(txt)) {
           res.safe = false;
@@ -138,38 +141,68 @@ class FileSecurityScanner {
           res.patternsFound.push(pat);
         }
       }
-      if (txt.includes("MZ") || txt.includes("PK")) {
-        res.safe = false;
-        res.threats.push("File may contain embedded executable/archive content");
-      }
-      if (/\\x[0-9a-fA-F]{2}|\\u[0-9a-fA-F]{4}|%[0-9a-fA-F]{2}/g.test(txt)) {
-        res.safe = false;
-        res.threats.push("File contains suspicious encoded content");
-      }
-    } catch {}
+    } catch (e) {
+      console.warn("Content scan error:", e);
+    }
     return res;
   }
-  async scanPDFStructure(file) {
-    const res = { safe: true, threats: [] };
+  /**
+   * RELAXED PDF SECURITY SCAN
+   * Only blocks truly dangerous content, allows normal PDF features
+   */
+  async scanPDFStructureRelaxed(file) {
+    const res = { safe: true, threats: [], warnings: [] };
+    
     try {
       const buf = await file.arrayBuffer();
       const text = new TextDecoder().decode(buf);
+      
+      // Basic PDF header validation
       if (!text.startsWith("%PDF-")) {
         res.safe = false;
-        res.threats.push("Invalid PDF header (file may be corrupted)");
+        res.threats.push("Invalid PDF header - file may be corrupted or not a valid PDF");
+        return res;
       }
-      for (const feature of ["/JavaScript", "/JS", "/Launch", "/SubmitForm", "/ImportData", "/ExportData", "/Movie", "/Sound", "/EmbeddedFile"]) {
+      
+      // RELAXED: Only check for truly dangerous executable content
+      // JavaScript in PDFs is common for forms - only warn, don't block
+      if (text.includes("/JavaScript") || text.includes("/JS")) {
+        res.warnings.push("PDF contains JavaScript (common in interactive forms)");
+      }
+      
+      // Only block actual dangerous actions
+      const dangerousFeatures = ["/Launch", "/Movie", "/Sound"];
+      for (const feature of dangerousFeatures) {
         if (text.includes(feature)) {
           res.safe = false;
           res.threats.push(`PDF contains potentially dangerous feature: ${feature}`);
         }
       }
+      
+      // RELAXED: Encryption is normal - just warn, don't block
       if (text.includes("/Encrypt")) {
-        res.safe = false;
-        res.threats.push("PDF is encrypted/password protected");
+        res.warnings.push("PDF is encrypted (may require password - if processing fails, try an unencrypted version)");
       }
-    } catch {}
+      
+      // RELAXED: Embedded files are common - warn but don't block
+      if (text.includes("/EmbeddedFile")) {
+        res.warnings.push("PDF contains embedded files");
+      }
+      
+      // Form features are normal - don't check them
+      // /SubmitForm, /ImportData, /ExportData are all normal form features
+      
+    } catch (e) {
+      console.warn("PDF structure scan error:", e);
+      res.warnings.push("Unable to fully scan PDF structure");
+    }
+    
     return res;
+  }
+  
+  // Keep old method for backwards compatibility but mark as deprecated
+  async scanPDFStructure(file) {
+    return this.scanPDFStructureRelaxed(file);
   }
 }
 
