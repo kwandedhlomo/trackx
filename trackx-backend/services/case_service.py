@@ -694,18 +694,118 @@ async def restore_case(case_id: str):
 
 
 async def permanently_delete_case(case_id: str):
-    """Completely removes a case document from Firestore."""
+    """Completely removes a case document and all known subcollections.
+
+    Firestore does not cascade-delete subcollections when a document is deleted.
+    We explicitly delete documents in known subcollections before deleting the case doc.
+    """
     try:
-        doc_ref = db.collection("cases").document(case_id)
-        doc = doc_ref.get()
-        if not doc.exists:
+        case_ref = db.collection("cases").document(case_id)
+        case_doc = case_ref.get()
+        if not case_doc.exists:
             return {"success": False, "message": "Case not found"}
 
-        doc_ref.delete()
-        return {"success": True, "message": "Case permanently deleted"}
+        # Known subcollections used in the app
+        subcollections = [
+            "points",
+            "allPoints",
+            "interpolatedPoints",
+            "locations",
+            "annotations",
+            "locationAnnotations",
+            "derived",
+            "events",
+            "notes",
+        ]
+
+        # Helper: delete in batches to avoid huge transactions
+        def _delete_all(coll_ref, batch_size: int = 250):
+            deleted_total = 0
+            while True:
+                docs = list(coll_ref.limit(batch_size).stream())
+                if not docs:
+                    break
+                batch = db.batch()
+                for d in docs:
+                    batch.delete(d.reference)
+                batch.commit()
+                deleted_total += len(docs)
+            return deleted_total
+
+        # Delete all documents in each known subcollection (if present)
+        for name in subcollections:
+            try:
+                coll_ref = case_ref.collection(name)
+                _delete_all(coll_ref)
+            except Exception as e:
+                # Log and continue; we don't want one missing collection to block others
+                print(f"Skip/failed deleting subcollection '{name}' for case {case_id}: {e}")
+
+        # Finally delete the case document itself
+        case_ref.delete()
+        return {"success": True, "message": "Case permanently deleted (including subcollections)"}
     except Exception as e:
         print(f"Error in permanently_delete_case: {e}")
         raise
+
+
+async def fetch_all_points_paginated(limit: int = 200, cursor: str | None = None):
+    """Page through all 'allPoints' across all cases.
+
+    Returns (points, next_cursor)
+    - points: list of {lat, lng, timestamp, caseId}
+    - next_cursor: opaque string to pass back for the next page, or None when done
+    """
+    try:
+        # Build the base collection group query ordered by timestamp then document ID for stability
+        cg = db.collection_group("allPoints")
+        q = (
+            cg.order_by("timestamp", direction=firestore.Query.ASCENDING)
+              .order_by(firestore.FieldPath.document_id(), direction=firestore.Query.ASCENDING)
+              .limit(max(1, int(limit)))
+        )
+
+        # Use an opaque cursor carrying the last doc path
+        if cursor:
+            try:
+                meta = json.loads(cursor)
+                last_path = meta.get("path")
+                if last_path:
+                    snap = db.document(last_path).get()
+                    # start strictly after the last returned doc
+                    q = q.start_after(document=snap)
+            except Exception as e:
+                print(f"Ignoring invalid cursor: {e}")
+
+        docs = list(q.stream())
+        out = []
+        for d in docs:
+            data = d.to_dict() or {}
+            lat = data.get("lat")
+            lng = data.get("lng")
+            if lat is None or lng is None:
+                continue
+            # Extract caseId from path: cases/{id}/allPoints/{pointId}
+            try:
+                case_id = d.reference.parent.parent.id
+            except Exception:
+                case_id = None
+            out.append({
+                "lat": float(lat),
+                "lng": float(lng),
+                "timestamp": data.get("timestamp"),
+                "caseId": case_id,
+            })
+
+        next_cursor = None
+        if docs:
+            last_doc = docs[-1]
+            next_cursor = json.dumps({"path": last_doc.reference.path})
+
+        return out, next_cursor
+    except Exception as e:
+        print(f"Error in fetch_all_points_paginated: {e}")
+        return [], None
 
 async def fetch_recent_cases(sort_by: str = "dateEntered", user_id: str = ""):
     docs_map = _get_case_documents_for_user(user_id)

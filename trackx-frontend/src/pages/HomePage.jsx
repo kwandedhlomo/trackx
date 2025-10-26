@@ -12,6 +12,8 @@ import { signOut } from "firebase/auth";
 import { useNavigate } from "react-router-dom";
 import axios from "axios";
 import MiniHeatMapWindow from "../components/MiniHeatMapWindow";
+import { getMiniHeatmapPoints } from "../services/miniHeatmapService";
+import { getGlobePoints } from "../services/globePointsService";
 
 
 function HomePage() {
@@ -348,34 +350,36 @@ function HomePage() {
 
 
     useEffect(() => {
-      const fetchHeatPoints = async () => {
+      const loadMiniHeatmap = async () => {
         try {
-          // Fetch a lightweight snapshot for the mini heatmap
-          const response = await axios.get("http://localhost:8000/cases/recent-points", { params: { limit: 10 } });
-          const points = response.data.points || [];
+          const points = await getMiniHeatmapPoints({ limit: 10 });
           setHeatPoints(points);
         } catch (err) {
           console.error("Failed to fetch mini heatmap points:", err);
         }
       };
-
-      fetchHeatPoints();
+      loadMiniHeatmap();
     }, []);
 
     useEffect(() => {
-      const fetchGlobePoints = async () => {
-        try {
-          const response = await axios.get("http://localhost:8000/cases/last-points");
-          const data = response.data.points || [];
-    
-          console.log("Retrieved globePoints:", data); 
-          setGlobePoints(data);
-        } catch (err) {
-          console.error("Failed to fetch globe points:", err); 
+      let cancelled = false;
+      const schedule = () => {
+        const run = async () => {
+          try {
+            const points = await getGlobePoints(); // cached for 5 min by default
+            if (!cancelled) setGlobePoints(points);
+          } catch (err) {
+            console.error("Failed to fetch globe points:", err);
+          }
+        };
+        if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
+          window.requestIdleCallback(run, { timeout: 5000 });
+        } else {
+          setTimeout(run, 1500); // defer slightly on older browsers
         }
       };
-    
-      fetchGlobePoints();
+      schedule();
+      return () => { cancelled = true; };
     }, []);
 
     return (

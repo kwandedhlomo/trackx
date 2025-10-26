@@ -1,4 +1,4 @@
-import { Link } from "react-router-dom";
+﻿import { Link } from "react-router-dom";
 import { motion } from "framer-motion";
 import { FaSearch, FaMapMarkerAlt, FaCalendarAlt } from "react-icons/fa";
 import adfLogo from "../assets/image-removebg-preview.png";
@@ -29,7 +29,7 @@ function ManageCasesPage() {
     const prov = ZA_REGIONS.find(p => p.code === provinceCode);
     const dName = prov?.districts?.find(d => String(d.code) === String(districtCode))?.name || "";
     if (!pName && !dName) return "";
-    return dName ? `${pName} — ${dName}` : pName;
+    return dName ? `${pName} â€” ${dName}` : pName;
   }, [region, provinceCode, districtCode]);
   const [date, setDate] = useState("");
   const [cases, setCases] = useState([]);
@@ -98,7 +98,7 @@ function ManageCasesPage() {
       openModal({
         variant: "success",
         title: "Case deleted",
-        description: `“${caseItem.caseTitle}” has been removed successfully.`,
+        description: `â€œ${caseItem.caseTitle}â€ has been removed successfully.`,
       });
       handleSearch(); 
     } catch (err) {
@@ -119,7 +119,7 @@ function ManageCasesPage() {
     openModal({
       variant: "success",
       title: "Case moved to Trash",
-      description: `“${caseItem.caseTitle}” has been moved to the Trash Bin.`,
+      description: `â€œ${caseItem.caseTitle}â€ has been moved to the Trash Bin.`,
     });
     handleSearch();
   } catch (err) {
@@ -136,7 +136,7 @@ function ManageCasesPage() {
     openModal({
       variant: "warning",
       title: "Delete case?",
-      description: `Are you sure you want to delete “${caseItem.caseTitle}”? This action cannot be undone.`,
+      description: `Are you sure you want to delete â€œ${caseItem.caseTitle}â€? This action cannot be undone.`,
       primaryAction: {
         label: "Delete case",
         closeOnClick: false,
@@ -152,7 +152,7 @@ function ManageCasesPage() {
   openModal({
     variant: "warning",
     title: "Move to Trash?",
-    description: `Are you sure you want to move “${caseItem.caseTitle}” to the Trash Bin? You can restore it later.`,
+    description: `Are you sure you want to move â€œ${caseItem.caseTitle}â€ to the Trash Bin? You can restore it later.`,
     primaryAction: {
       label: "Move to Trash",
       closeOnClick: false,
@@ -286,12 +286,12 @@ function ManageCasesPage() {
           My Cases
         </Link>
         <Link
-  to="/trash-bin"
-  className="flex items-center gap-3 rounded-2xl px-3 py-2 text-sm font-medium text-gray-200 transition hover:bg-white/10 hover:text-white"
-  onClick={() => setShowMenu(false)}
->
-  🗑️ Trash Bin
-</Link>
+          to="/trash-bin"
+          className="text-gray-400 transition hover:text-white"
+          onClick={() => setShowMenu(false)}
+        >
+          Trash Bin
+        </Link>
 
       </div>
 
@@ -312,7 +312,7 @@ function ManageCasesPage() {
                     to="/new-case"
                     className="inline-flex items-center justify-center rounded-full bg-gradient-to-r from-blue-600 to-indigo-600 px-6 py-2.5 text-sm font-semibold text-white shadow-lg shadow-blue-500/25 transition hover:from-blue-500 hover:to-indigo-500"
                   >
-                    ＋ Create case
+                    ï¼‹ Create case
                   </Link>
                   <Link
                     to="/home"
@@ -513,7 +513,7 @@ function ManageCasesPage() {
                   to="/new-case"
                   className="inline-flex items-center justify-center rounded-full bg-gradient-to-r from-blue-600 to-indigo-600 px-5 py-2 text-sm font-semibold text-white shadow-lg shadow-blue-500/20 transition hover:from-blue-500 hover:to-indigo-500"
                 >
-                  ＋ Create case
+                  ï¼‹ Create case
                 </Link>
                 <Link
                   to="/home"

@@ -7,11 +7,37 @@ import Map from 'react-map-gl';
 const MAPBOX_TOKEN = 'pk.eyJ1Ijoiam9ubHVrZTciLCJhIjoiY21icjgzYW1lMDczazJqc2Fmbm4xd2RteSJ9.pbPMQ4ywc52Fy0TXp4ndHg';
 
 const MiniHeatMapWindow = ({ points = [] }) => {
+  const safePoints = Array.isArray(points) ? points : [];
+
   const formattedPoints = useMemo(() => (
-    (points || []).map(p => ({
-      position: [p.lng || 0, p.lat || 0],
+    safePoints.map(p => ({
+      position: [Number(p.lng) || 0, Number(p.lat) || 0],
     }))
-  ), [points]);
+  ), [safePoints]);
+
+  const initialViewState = useMemo(() => {
+    // Center on the most recent point if available
+    if (safePoints.length > 0) {
+      const last = safePoints[safePoints.length - 1];
+      const lat = Number(last.lat) || -33.918861;
+      const lng = Number(last.lng) || 18.4233;
+      return {
+        longitude: lng,
+        latitude: lat,
+        zoom: 12.5,
+        bearing: 0,
+        pitch: 0,
+      };
+    }
+    // Fallback default (Cape Town area)
+    return {
+      longitude: 18.4233,
+      latitude: -33.918861,
+      zoom: 12.5,
+      bearing: 0,
+      pitch: 0,
+    };
+  }, [safePoints]);
 
   const heatmapLayer = new HeatmapLayer({
     id: 'mini-heatmap',
@@ -24,13 +50,7 @@ const MiniHeatMapWindow = ({ points = [] }) => {
   return (
     <div style={{ width: '100%', height: '300px', position: 'relative', borderRadius: '1rem', overflow: 'hidden' }}>
       <DeckGL
-        initialViewState={{
-          longitude: 18.4233,
-          latitude: -33.918861,
-          zoom: 12.5,
-          bearing: 0,
-          pitch: 0,
-        }}
+        initialViewState={initialViewState}
         controller={false}
         layers={[heatmapLayer]}
         style={{ width: '100%', height: '100%' }}

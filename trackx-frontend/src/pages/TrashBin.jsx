@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+﻿import { useState, useEffect } from "react";
 import axios from "axios";
 import { Link } from "react-router-dom";
 import { motion } from "framer-motion";
@@ -9,6 +9,7 @@ import useNotificationModal from "../hooks/useNotificationModal";
 function TrashBinPage() {
   const [cases, setCases] = useState([]);
   const { modalState, openModal, closeModal } = useNotificationModal();
+  const [emptying, setEmptying] = useState(false);
 
   useEffect(() => {
     fetchTrashedCases();
@@ -59,6 +60,48 @@ function TrashBinPage() {
     }
   };
 
+  const handleEmptyTrash = () => {
+    if (!cases || cases.length === 0) return;
+    const count = cases.length;
+    openModal({
+      variant: "warning",
+      title: "Empty Trash?",
+      description: `This will permanently delete ${count} case${count === 1 ? '' : 's'}. This action cannot be undone.`,
+      primaryAction: {
+        label: "Delete all",
+        closeOnClick: false,
+        onClick: async () => {
+          setEmptying(true);
+          try {
+            const ids = cases.map(c => c.doc_id).filter(Boolean);
+            const results = await Promise.allSettled(
+              ids.map(id => axios.delete(`http://localhost:8000/cases/delete/${id}`))
+            );
+            const succeeded = results.filter(r => r.status === 'fulfilled').length;
+            const failed = results.length - succeeded;
+            openModal({
+              variant: failed ? 'warning' : 'success',
+              title: failed ? 'Trash partially emptied' : 'Trash emptied',
+              description: failed
+                ? `Deleted ${succeeded} case(s). ${failed} failed. Try again for remaining.`
+                : `Deleted ${succeeded} case(s) successfully.`,
+            });
+            await fetchTrashedCases();
+          } catch (e) {
+            openModal({
+              variant: 'error',
+              title: 'Failed to empty trash',
+              description: 'An unexpected error occurred while deleting. Please try again.',
+            });
+          } finally {
+            setEmptying(false);
+          }
+        }
+      },
+      secondaryAction: { label: 'Cancel' },
+    });
+  };
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 18 }}
@@ -71,11 +114,24 @@ function TrashBinPage() {
 
       <div className="mx-auto mt-10 w-full max-w-5xl px-6">
         <div className="rounded-3xl border border-white/10 bg-white/[0.018] p-8 shadow-[0_25px_70px_rgba(15,23,42,0.45)] backdrop-blur-2xl">
-          <h1 className="text-2xl font-semibold text-white">🗑️ Trash Bin</h1>
+          <h1 className="text-2xl font-semibold text-white">Trash Bin</h1>
           <p className="text-xs text-gray-400 mt-2">
             Restore or permanently remove deleted cases.
           </p>
 
+          {cases.length > 0 && (
+            <div className="mt-4 flex justify-end">
+              <button
+                type="button"
+                disabled={emptying}
+                onClick={handleEmptyTrash}
+                className={`inline-flex items-center rounded-full px-4 py-2 text-sm font-semibold shadow-lg transition ${emptying ? "opacity-60 cursor-not-allowed" : "hover:from-rose-500 hover:to-orange-400"} bg-gradient-to-r from-rose-600 to-orange-500 text-white`}
+                aria-disabled={emptying}
+              >
+                {emptying ? "Deleting…" : "Empty Trash"}
+              </button>
+            </div>
+          )}
           <div className="mt-6 space-y-4">
             {cases.length === 0 ? (
               <div className="rounded-2xl border border-dashed border-white/12 bg-black/30 px-6 py-10 text-center text-sm text-gray-400">
@@ -117,7 +173,7 @@ function TrashBinPage() {
               to="/manage-cases"
               className="rounded-full border border-white/15 bg-white/[0.04] px-5 py-2 text-sm font-medium text-gray-300 transition hover:border-white/30 hover:text-white"
             >
-              ← Back to Manage Cases
+              Back to Manage Cases
             </Link>
           </div>
         </div>

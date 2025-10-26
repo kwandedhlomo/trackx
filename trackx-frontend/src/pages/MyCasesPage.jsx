@@ -17,6 +17,7 @@ import {
   ResponsiveContainer,
 } from "recharts";
 import MiniHeatMapWindow from "../components/MiniHeatMapWindow";
+import { getMiniHeatmapPoints } from "../services/miniHeatmapService";
 import NotificationModal from "../components/NotificationModal";
 import RegionSelectorModal from "../components/RegionSelectorModal";
 import useNotificationModal from "../hooks/useNotificationModal";
@@ -52,7 +53,7 @@ function MyCasesPage() {
   const prettyRegion = (c) => {
     const p = c?.provinceName || c?.region || "";
     const d = c?.districtName || "";
-    return d ? `${p} â€” ${d}` : p;
+    return d ? `${p} - ${d}` : p;
   };
   const [date, setDate] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
@@ -119,26 +120,19 @@ function MyCasesPage() {
     handleSearch();
   }, []);
 
-  // Aggregate heatmap points for these cases
+  // Mini heatmap points (cached, lightweight)
   const [heatPoints, setHeatPoints] = useState([]);
   useEffect(() => {
-    const fetchUserHeatPoints = async () => {
-      if (myCases.length === 0) return;
+    const loadMiniHeatmap = async () => {
       try {
-        let allPoints = [];
-        for (let c of myCases) {
-          const res = await axios.get(
-            `http://localhost:8000/cases/${c.doc_id}/all-points`
-          );
-          allPoints = [...allPoints, ...(res.data.points || [])];
-        }
-        setHeatPoints(allPoints);
+        const points = await getMiniHeatmapPoints({ limit: 10 });
+        setHeatPoints(points);
       } catch (e) {
-        console.error("Failed to fetch user-specific heatmap points:", e);
+        console.error("Failed to fetch mini heatmap points:", e);
       }
     };
-    fetchUserHeatPoints();
-  }, [myCases]);
+    loadMiniHeatmap();
+  }, []);
 
   useEffect(() => {
     const totalPages = Math.max(Math.ceil(myCases.length / CASES_PER_PAGE), 1);
@@ -226,7 +220,7 @@ function MyCasesPage() {
       openModal({
         variant: "success",
         title: "Case deleted",
-        description: `â€œ${caseItem.caseTitle}â€ has been removed successfully.`,
+        description: `"${caseItem.caseTitle}" has been removed successfully.`,
       });
       setMyCases((prev) => prev.filter((c) => c.doc_id !== caseItem.doc_id));
       if (selectedCase?.doc_id === caseItem.doc_id) {
@@ -248,7 +242,7 @@ function MyCasesPage() {
     openModal({
       variant: "warning",
       title: "Delete case?",
-      description: `Are you sure you want to delete â€œ${caseReference.caseTitle}â€? This action cannot be undone.`,
+      description: `Are you sure you want to delete "${caseReference.caseTitle}"? This action cannot be undone.`,
       primaryAction: {
         label: "Delete case",
         closeOnClick: false,
@@ -437,8 +431,8 @@ function MyCasesPage() {
             Home
           </Link>
           <div className="hidden text-right lg:block">
-            <span className="block text-xs text-gray-400">Cases â€¢ {myCases.length}</span>
-            <span className="block text-xs text-gray-500">Region â€¢ {mostActiveRegion}</span>
+            <span className="block text-xs text-gray-400">Cases: {myCases.length}</span>
+            <span className="block text-xs text-gray-500">Region: {mostActiveRegion}</span>
           </div>
           <div className="flex flex-col items-end">
             <span className="text-base font-semibold text-white">
@@ -738,7 +732,7 @@ function MyCasesPage() {
                           </p>
                           <p className="flex items-center gap-2">
                             <Hash size={12} />
-                            Case #: {caseItem.caseNumber || 'â€”'}
+                            Case #: {caseItem.caseNumber || 'N/A'}
                           </p>
                           <p className="flex items-center gap-2">
                             <span
@@ -761,14 +755,14 @@ function MyCasesPage() {
                                 onClick={() => openStreetView(hoverData.first.lat, hoverData.first.lng)}
                                 className="mt-1 block w-full rounded border border-white/10 bg-white/[0.04] px-2 py-1 text-left text-xs text-white transition hover:border-blue-400/40 hover:text-blue-200"
                               >
-                                ðŸ“ First: {hoverData.first.lat.toFixed(4)}, {hoverData.first.lng.toFixed(4)}
+                                 First: {hoverData.first.lat.toFixed(4)}, {hoverData.first.lng.toFixed(4)}
                               </button>
                               <button
                                 type="button"
                                 onClick={() => openStreetView(hoverData.last.lat, hoverData.last.lng)}
                                 className="mt-1 block w-full rounded border border-white/10 bg-white/[0.04] px-2 py-1 text-left text-xs text-white transition hover:border-blue-400/40 hover:text-blue-200"
                               >
-                                ðŸ“ Last: {hoverData.last.lat.toFixed(4)}, {hoverData.last.lng.toFixed(4)}
+                                 Last: {hoverData.last.lat.toFixed(4)}, {hoverData.last.lng.toFixed(4)}
                               </button>
                             </div>
                           )}
@@ -828,7 +822,7 @@ function MyCasesPage() {
                 <div className="space-y-2">
                   <p className="flex items-center gap-2">
                     <Hash size={14} />
-                    Case #: {selectedCase.caseNumber || 'â€”'}
+                    Case #: {selectedCase.caseNumber || 'N/A'}
                   </p>
                   <p className="flex items-center gap-2">
                     <Calendar size={14} />
@@ -987,7 +981,7 @@ function MyCasesPage() {
           <div className="relative mx-auto mt-12 w-11/12 max-w-2xl rounded-3xl border border-white/10 bg-white/[0.04] p-6 text-white shadow-[0_35px_90px_rgba(15,23,42,0.65)] backdrop-blur-2xl">
             <div className="flex items-center justify-between">
               <h2 className="text-lg font-semibold">
-                AI Summary {selectedCase ? `â€“ ${selectedCase.caseTitle}` : ''}
+                AI Summary {selectedCase ? `- ${selectedCase.caseTitle}` : ''}
               </h2>
               <button
                 className={`rounded-full border border-white/15 px-3 py-1 text-xs font-semibold text-gray-200 transition hover:border-white/30 ${aiLoading ? 'cursor-not-allowed opacity-50' : ''}`}
@@ -1052,6 +1046,8 @@ function MyCasesPage() {
 }
 
 export default MyCasesPage;
+
+
 
 
 

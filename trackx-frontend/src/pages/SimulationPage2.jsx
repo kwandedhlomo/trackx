@@ -970,7 +970,10 @@ async function rebuildFlagBillboards(viewer, flaggedPoints, liftMeters = 1.5) {
       `,
       billboard: {
         image: flagIcon,
-        scale: 1.2, // start small; 10 was huge
+        // Force a compact, consistent on-map size for flags
+        width: 28,
+        height: 28,
+        scale: 1.0,
         verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
         heightReference: Cesium.HeightReference.NONE,
         disableDepthTestDistance: Number.POSITIVE_INFINITY,

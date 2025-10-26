@@ -331,6 +331,18 @@ async def get_case_all_points(case_id: str):
     points = await fetch_all_points_for_case(case_id)
     return {"points": points}
 
+
+@router.get("/cases/all-points-paginated")
+async def get_all_points_paginated(limit: int = 200, cursor: str = ""):
+    """Return points across all cases (allPoints subcollections) in pages.
+
+    - Orders by timestamp ascending for stable progressive rendering.
+    - `cursor` is an opaque token returned by the previous call; pass it back to continue.
+    """
+    from services.case_service import fetch_all_points_paginated
+    pts, next_cursor = await fetch_all_points_paginated(limit=max(1, int(limit)), cursor=cursor or None)
+    return {"points": pts, "nextCursor": next_cursor}
+
 @router.post("/cases/{case_id}/points/generate-description")
 async def generate_description_route(case_id: str, request: Request):
     """

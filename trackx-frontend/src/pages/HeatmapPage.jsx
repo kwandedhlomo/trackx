@@ -5,6 +5,7 @@ import { HeatmapLayer } from '@deck.gl/aggregation-layers';
 import { ScatterplotLayer } from '@deck.gl/layers';
 import Map from 'react-map-gl';
 import axios from 'axios';
+import { fetchHeatmapPointsProgressive } from "../services/heatmapDataService";
 import MapSwitcherPanel from "../components/MapSwitcherPanel";
 import { HexagonLayer } from '@deck.gl/aggregation-layers';
 
@@ -24,84 +25,32 @@ function HeatmapPage() {
 
 
   useEffect(() => {
-  const fetchAndProcessPoints = async () => {
-    try {
-      const res = await axios.get('http://localhost:8000/cases/all-points-with-case-ids');
-      const rawPoints = res.data.points;
+    const abortCtrl = new AbortController();
+    // Progressive load in pages of 200 and update the map as we go.
+    fetchHeatmapPointsProgressive({ pageSize: 200, onChunk: (chunk) => {
+      // Append chunk -> transform to deck.gl format
+      setPoints(prev => prev.concat(
+        (chunk || []).map(p => ({ position: [Number(p.lng) || 0, Number(p.lat) || 0], caseId: p.caseId, timestamp: p.timestamp }))
+      ));
+    }, signal: abortCtrl.signal }).catch(err => {
+      console.error('Heatmap progressive fetch failed:', err);
+    });
 
-      // Group by caseId
-      const grouped = {};
-      for (const point of rawPoints) {
-        const caseId = point.caseId;
-        if (!grouped[caseId]) grouped[caseId] = [];
-        grouped[caseId].push(point);
-      }
-
-      const finalPoints = [];
-
-      for (const caseId in grouped) {
-        const casePoints = grouped[caseId];
-
-        // Sort by record number in timestamp (e.g., "Record 1")
-        casePoints.sort((a, b) => {
-          const aNum = parseInt(a.timestamp?.replace(/\D/g, "")) || 0;
-          const bNum = parseInt(b.timestamp?.replace(/\D/g, "")) || 0;
-          return aNum - bNum;
-        });
-
-        // Label the first and last
-        casePoints.forEach((p, index) => {
-          const label =
-            index === 0
-              ? "start"
-              : index === casePoints.length - 1
-              ? "end"
-              : "middle";
-          finalPoints.push({
-            position: [p.lng, p.lat],
-            type: label,
-            caseId: p.caseId,
-            timestamp: p.timestamp,
-          });
-        });
-      }
-
-      console.log("Tagged points:", finalPoints);
-      setPoints(finalPoints);
-
-      
+    // Case metadata loaded once (small)
+    (async () => {
       try {
         const caseRes = await axios.get("http://localhost:8000/cases/all");
-        console.log("Raw case documents:", caseRes.data); 
-
-        const caseDocs = caseRes.data; 
-
-        const caseMap = {};
-        caseDocs.forEach(doc => {
-          console.log("Inspecting raw case doc:", doc); 
-
-          const id = doc.id; 
-          if (id) {
-            caseMap[id] = doc;
-          } else {
-            console.warn("Could not extract ID from case doc:", doc);
-          }
-        });
-
-
-        setCaseDataMap(caseMap);
-        console.log("Final caseDataMap keys:", Object.keys(caseMap)); 
-
-      } catch (caseError) {
-        console.error("Failed to fetch case metadata:", caseError);
+        const caseDocs = caseRes.data || [];
+        const map = {};
+        caseDocs.forEach(doc => { if (doc.id) map[doc.id] = doc; });
+        setCaseDataMap(map);
+      } catch (e) {
+        console.error('Failed to fetch case metadata:', e);
       }
-    } catch (error) {
-      console.error("Failed to fetch processed points:", error);
-    }
-  };
+    })();
 
-  fetchAndProcessPoints();
-}, []);
+    return () => abortCtrl.abort();
+  }, []);
 
 
 useEffect(() => {
