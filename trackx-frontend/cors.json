@@ -7,7 +7,7 @@
         "https://trackx-frontend-sigma.vercel.app"
       ],
       "method": ["GET", "HEAD"],
-      "responseHeader": ["Content-Type", "Authorization"],
+      "responseHeader": ["Content-Type", "Authorization", "x-goog-meta-*"],
       "maxAgeSeconds": 3600
     }
   ]

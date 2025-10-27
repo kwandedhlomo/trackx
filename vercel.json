@@ -1,0 +1,12 @@
+{
+  "builds": [
+    { "src": "package.json", "use": "@vercel/static-build", "config": { "distDir": "dist" } }
+  ],
+  "rewrites": [
+    { "source": "/api/(.*)", "destination": "/api/$1" },
+    { "source": "/cesium/(.*)", "destination": "/cesium/$1" },
+    { "source": "/assets/(.*)", "destination": "/assets/$1" },
+    { "source": "/(.*\\..*)", "destination": "/$1" },
+    { "source": "/(.*)", "destination": "/" }
+  ]
+}
