@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
-import { Upload, Info, CheckCircle, AlertCircle, FileText, Home, FilePlus2, FolderOpen, Briefcase, LayoutDashboard, UserPlus, X, Shield, AlertTriangle } from "lucide-react";
+import { Upload, Info, CheckCircle, AlertCircle, FileText, Home, FilePlus2, FolderOpen, Briefcase, LayoutDashboard, UserPlus, X, Shield, AlertTriangle, Search, Link2 } from "lucide-react";
 import Papa from "papaparse";
 import adflogo from "../assets/image-removebg-preview.png";
 import axios from "axios";
@@ -18,7 +18,7 @@ import TechnicalTermsSelector from "../components/TechnicalTermsSelector";
 import { normalizeTechnicalTermList } from "../utils/technicalTerms";
 import EvidenceLocker from "../components/EvidenceLocker";
 // Firebase services
-import { updateCaseAnnotations, getCurrentUserId } from "../services/firebaseServices";
+import { updateCaseAnnotations, getCurrentUserId, loadAllEvidence, searchEvidence, batchSaveEvidence } from "../services/firebaseServices";
 import RegionSelectorModal from "../components/RegionSelectorModal";
 
 
@@ -75,24 +75,30 @@ class FileSecurityScanner {
         results.warnings.push(`MIME type '${file.type}' may not be supported`);
       }
       results.fileHash = await this.generateFileHash(file);
-      const contentScan = await this.scanFileContent(file);
-      results.scanResults.contentScan = contentScan;
-      if (!contentScan.safe) {
-        results.safe = false;
-        results.threats.push(...contentScan.threats);
-      }
+
       if (ext === ".pdf") {
-        const pdfScan = await this.scanPDFStructure(file);
+        const pdfScan = await this.scanPDFStructureRelaxed(file);
         results.scanResults.pdfScan = pdfScan;
         if (!pdfScan.safe) {
           results.safe = false;
           results.threats.push(...pdfScan.threats);
         }
+        if (pdfScan.warnings && pdfScan.warnings.length > 0) {
+          results.warnings.push(...pdfScan.warnings);
+        }
+      } else {
+        const contentScan = await this.scanFileContent(file);
+        results.scanResults.contentScan = contentScan;
+        if (!contentScan.safe) {
+          results.safe = false;
+          results.threats.push(...contentScan.threats);
+        }
       }
       results.riskLevel = !results.safe ? "HIGH" : results.warnings.length ? "MEDIUM" : "LOW";
     } catch (e) {
-      results.safe = false;
-      results.threats.push(`Security scan failed: ${e.message}`);
+      console.warn("Security scan encountered an error:", e);
+      results.warnings.push(`Security scan encountered an error: ${e.message}`);
+      results.riskLevel = "MEDIUM";
     }
     return results;
   }
@@ -138,27 +144,43 @@ class FileSecurityScanner {
     } catch {}
     return res;
   }
-  async scanPDFStructure(file) {
-    const res = { safe: true, threats: [] };
+  async scanPDFStructureRelaxed(file) {
+    const res = { safe: true, threats: [], warnings: [] };
     try {
       const buf = await file.arrayBuffer();
       const text = new TextDecoder().decode(buf);
       if (!text.startsWith("%PDF-")) {
         res.safe = false;
         res.threats.push("Invalid PDF header (file may be corrupted)");
+        return res;
       }
-      for (const feature of ["/JavaScript", "/JS", "/Launch", "/SubmitForm", "/ImportData", "/ExportData", "/Movie", "/Sound", "/EmbeddedFile"]) {
+
+      if (text.includes("/JavaScript") || text.includes("/JS")) {
+        res.warnings.push("PDF contains JavaScript (common in interactive forms)");
+      }
+
+      for (const feature of ["/Launch", "/Movie", "/Sound"]) {
         if (text.includes(feature)) {
           res.safe = false;
           res.threats.push(`PDF contains potentially dangerous feature: ${feature}`);
         }
       }
+
       if (text.includes("/Encrypt")) {
-        res.safe = false;
-        res.threats.push("PDF is encrypted/password protected");
+        res.warnings.push("PDF is encrypted (may require password to open or process)");
       }
-    } catch {}
+
+      if (text.includes("/EmbeddedFile")) {
+        res.warnings.push("PDF contains embedded files");
+      }
+    } catch (error) {
+      console.warn("PDF structure scan error:", error);
+      res.warnings.push("Unable to fully scan PDF structure");
+    }
     return res;
+  }
+  async scanPDFStructure(file) {
+    return this.scanPDFStructureRelaxed(file);
   }
 }
 
@@ -221,6 +243,10 @@ function NewCasePage() {
   const [securityResults, setSecurityResults] = useState(null);
   const [showSecurityDetails, setShowSecurityDetails] = useState(false);
   const [evidenceItems, setEvidenceItems] = useState([]);
+  const [showEvidenceSearch, setShowEvidenceSearch] = useState(false);
+  const [evidenceSearchTerm, setEvidenceSearchTerm] = useState("");
+  const [evidenceSearchResults, setEvidenceSearchResults] = useState([]);
+  const [isSearchingEvidence, setIsSearchingEvidence] = useState(false);
   const API_BASE = (import.meta.env.VITE_API_URL || "http://localhost:8000").replace(/\/+$/, "");
   const formattedDateTime = new Date().toLocaleString();
   const canProceed = Boolean(
@@ -308,6 +334,92 @@ function NewCasePage() {
     setAssignedUsers((prev) => prev.filter((user) => user.id !== userId));
   };
 
+  // ============================================
+  // Evidence search and link helpers
+  // ============================================
+
+  const handleEvidenceSearch = async () => {
+    const term = evidenceSearchTerm.trim();
+    if (term.length < 2) {
+      openModal({
+        variant: "info",
+        title: "Keep typing",
+        description: "Enter at least two characters to search for evidence.",
+      });
+      return;
+    }
+
+    setIsSearchingEvidence(true);
+    try {
+      const results = await searchEvidence(term);
+      setEvidenceSearchResults(results);
+
+      if (results.length === 0) {
+        openModal({
+          variant: "info",
+          title: "No results",
+          description: `No evidence found matching "${term}". Try different keywords or search by case number.`,
+        });
+      }
+    } catch (error) {
+      console.error("Evidence search failed:", error);
+      openModal({
+        variant: "error",
+        title: "Search failed",
+        description: getFriendlyErrorMessage(
+          error,
+          "We couldn't search for evidence right now. Please try again."
+        ),
+      });
+    } finally {
+      setIsSearchingEvidence(false);
+    }
+  };
+
+  const linkExistingEvidence = (evidence) => {
+    if (evidenceItems.some((item) => item.id === evidence.id)) {
+      openModal({
+        variant: "info",
+        title: "Already Added",
+        description: "This evidence item is already in your evidence locker for this case.",
+      });
+      return;
+    }
+
+    const linkedEvidence = {
+      ...evidence,
+      caseNumber: caseNumber || evidence.caseNumber,
+    };
+
+    setEvidenceItems((prev) => [...prev, linkedEvidence]);
+
+    openModal({
+      variant: "success",
+      title: "Evidence Linked",
+      description: `Evidence item "${evidence.id}" has been successfully added to this case.`,
+    });
+
+    setEvidenceSearchResults((prev) => prev.filter((result) => result.id !== evidence.id));
+  };
+
+  const handleLoadAllEvidence = async () => {
+    setIsSearchingEvidence(true);
+    try {
+      const items = await loadAllEvidence(50);
+      setEvidenceSearchResults(items);
+      setShowEvidenceSearch(true);
+    } catch (error) {
+      console.error("Failed to load evidence:", error);
+      openModal({
+        variant: "error",
+        title: "Load failed",
+        description: "Could not load existing evidence. Please try again.",
+      });
+    } finally {
+      setIsSearchingEvidence(false);
+    }
+  };
+
 
   useEffect(() => {
     clearCaseSession();   // ✅ guarantees a clean slate when user lands on /new-case
@@ -357,7 +469,7 @@ function NewCasePage() {
         timestamp: loc.timestamp || null,
         ignitionStatus: loc.ignitionStatus || "Unknown",
         address: loc.address || null,
-        // keep original for “View original data”
+        // keep original for "View original data"
         originalData: {
           csvDescription: loc.description || null,
           rawData: loc.rawData || null,
@@ -889,7 +1001,7 @@ function NewCasePage() {
       /\b\d{2}[/-]\d{2}[/-]\d{4}[,\s]+\d{2}:\d{2}:\d{2}\b/g, // DD/MM/YYYY HH:MM:SS
       /\b\d{2}:\d{2}:\d{2}\b/g, // HH:MM:SS
       /\b\d{2}:\d{2}\b/g, // HH:MM
-      /Time[:\s]+(\d{2}:\d{2}(?::\d{2})?)/gi, // “Time: 12:34”
+      /Time[:\s]+(\d{2}:\d{2}(?::\d{2})?)/gi, // "Time: 12:34"
       /\b\d{4}\/\d{2}\/\d{2}\b/g, // YYYY/MM/DD
     ];
 
@@ -1443,7 +1555,6 @@ Please ensure your PDF contains GPS coordinates in one of these formats:
         urgency,
         userID: auth.currentUser ? auth.currentUser.uid : null,
         userIds: assignedUsers.map(u => u.id),
-        evidence_items: evidenceItems,
         csv_data: (parsedData.stoppedPoints || []).map((p) => ({
           latitude: p.lat,
           longitude: p.lng,
@@ -1467,7 +1578,7 @@ Please ensure your PDF contains GPS coordinates in one of these formats:
       const backendCaseId = created?.caseId || created?.id || created?.case_id;
       if (!backendCaseId) throw new Error("Backend did not return caseId");
 
-      // 2) Mirror to Firebase via Jon’s updater
+      // 2) Mirror to Firebase via Jon's updater
       const mirror = {
         caseNumber,
         caseTitle,
@@ -1481,7 +1592,6 @@ Please ensure your PDF contains GPS coordinates in one of these formats:
         urgency,
         userId: getCurrentUserId() || auth.currentUser?.uid || null,
         userIds: assignedUsers.map(u => u.id),
-        evidenceItems,
         // Persist selected technical terms at creation
         technicalTerms: normalizeTechnicalTermList(selectedTechnicalTerms || []),
         locations: (parsedData.stoppedPoints || []).map((p, i) => ({
@@ -1499,6 +1609,26 @@ Please ensure your PDF contains GPS coordinates in one of these formats:
       };
 
       await upsertFirebaseMirror(backendCaseId, mirror);
+
+      if (evidenceItems && evidenceItems.length > 0) {
+        try {
+          await batchSaveEvidence(
+            evidenceItems,
+            getCurrentUserId() || auth.currentUser?.uid,
+            caseNumber
+          );
+        } catch (evidenceError) {
+          console.error("Failed to save evidence to collection:", evidenceError);
+          openModal({
+            variant: "warning",
+            title: "Evidence Warning",
+            description:
+              "Case created, but there was an issue saving evidence items to the evidence database. Evidence is still attached locally.",
+          });
+        }
+      } else {
+        console.log("No evidence items to save");
+      }
 
       // 3) Route to annotations
       localStorage.setItem("trackxCurrentCaseId", backendCaseId);
@@ -1927,6 +2057,193 @@ const handleFile = async (selected) => {
             onChange={setSelectedTechnicalTerms}
             disabled={isProcessing}
           />
+
+          {/* Evidence Search & Link Section */}
+          <section className="md:col-span-2 space-y-4 rounded-2xl border border-white/10 bg-white/[0.018] p-6 shadow-[0_18px_45px_rgba(15,23,42,0.45)]">
+            <div className="flex flex-col gap-1 sm:flex-row sm:items-baseline sm:justify-between">
+              <div>
+                <h3 className="text-sm font-semibold text-white flex items-center gap-2">
+                  <Search className="h-5 w-5 text-purple-400" />
+                  Search & Link Existing Evidence
+                </h3>
+                <p className="text-xs text-gray-400 mt-1">
+                  Find and attach evidence from other cases to avoid duplication.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  const next = !showEvidenceSearch;
+                  setShowEvidenceSearch(next);
+                  if (next) {
+                    handleLoadAllEvidence();
+                  } else {
+                    setEvidenceSearchResults([]);
+                    setEvidenceSearchTerm("");
+                  }
+                }}
+                className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-gradient-to-r from-purple-900 to-indigo-900 px-4 py-2 text-sm font-semibold text-white shadow-[0_15px_35px_rgba(15,23,42,0.55)] transition hover:-translate-y-0.5"
+              >
+                <Search className="h-4 w-4" />
+                {showEvidenceSearch ? "Hide Search" : "Search Evidence"}
+              </button>
+            </div>
+
+            {showEvidenceSearch && (
+              <div className="space-y-4 rounded-2xl border border-white/10 bg-white/[0.02] p-4">
+                {/* Search Input */}
+                <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+                  <div className="relative flex-1">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+                    <input
+                      type="text"
+                      value={evidenceSearchTerm}
+                      onChange={(e) => setEvidenceSearchTerm(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          handleEvidenceSearch();
+                        }
+                      }}
+                      placeholder="Search by description, case number, or evidence ID..."
+                      className="w-full rounded-xl border border-white/10 bg-white/[0.02] pl-10 pr-3 py-2 text-sm text-white placeholder-gray-500 focus:border-purple-700/50 focus:outline-none focus:ring-2 focus:ring-purple-700/30"
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleEvidenceSearch}
+                    disabled={isSearchingEvidence}
+                    className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-gradient-to-r from-purple-900 via-indigo-900 to-purple-900 px-4 py-2 text-sm font-medium text-white shadow-[0_15px_35px_rgba(15,23,42,0.55)] transition hover:-translate-y-0.5 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    <Search className="w-4 h-4" />
+                    {isSearchingEvidence ? "Searching..." : "Search"}
+                  </button>
+                </div>
+
+                {/* Results Area */}
+                <div className="max-h-96 space-y-3 overflow-y-auto pr-2">
+                  {isSearchingEvidence ? (
+                    <div className="flex flex-col items-center justify-center py-8 text-center">
+                      <div className="mb-3 h-8 w-8 animate-spin rounded-full border-t-2 border-b-2 border-purple-500"></div>
+                      <p className="text-sm text-gray-400">Searching evidence database...</p>
+                    </div>
+                  ) : evidenceSearchResults.length > 0 ? (
+                    <>
+                      <div className="mb-3 flex items-center justify-between rounded-xl border border-purple-500/20 bg-purple-500/10 px-3 py-2">
+                        <span className="text-xs font-medium text-purple-200">
+                          Found {evidenceSearchResults.length} evidence item{evidenceSearchResults.length !== 1 ? "s" : ""}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEvidenceSearchResults([]);
+                            setEvidenceSearchTerm("");
+                          }}
+                          className="text-xs text-purple-300 hover:text-purple-100 transition"
+                        >
+                          Clear Results
+                        </button>
+                      </div>
+
+                      {evidenceSearchResults.map((ev) => {
+                        const isAlreadyLinked = evidenceItems.some((item) => item.id === ev.id);
+                        return (
+                          <div
+                            key={ev.id}
+                            className="group flex items-start justify-between gap-4 rounded-2xl border border-white/10 bg-white/[0.035] p-4 text-sm shadow-inner shadow-white/5 transition hover:border-purple-500/30 hover:bg-white/[0.05]"
+                          >
+                            <div className="flex-1 min-w-0">
+                              <div className="flex flex-wrap items-center gap-2 mb-2">
+                                <span className="inline-flex items-center rounded border border-purple-400/30 bg-purple-900/30 px-2 py-1 font-mono text-[11px] leading-none text-purple-200">
+                                  {ev.id}
+                                </span>
+                                {isAlreadyLinked && (
+                                  <span className="inline-flex items-center gap-1 rounded border border-green-400/30 bg-green-900/30 px-2 py-1 text-[10px] leading-none text-green-200">
+                                    <svg className="h-3 w-3" fill="currentColor" viewBox="0 0 20 20">
+                                      <path
+                                        fillRule="evenodd"
+                                        d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
+                                        clipRule="evenodd"
+                                      />
+                                    </svg>
+                                    LINKED
+                                  </span>
+                                )}
+                              </div>
+
+                              <p className="mb-2 text-sm leading-relaxed text-white">
+                                {ev.description || <span className="italic text-gray-500">(No description)</span>}
+                              </p>
+
+                              <div className="flex flex-wrap gap-3 text-xs text-gray-400">
+                                <span className="flex items-center gap-1">
+                                  <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                                  </svg>
+                                  Case: <span className="font-medium text-gray-300">{ev.caseNumber}</span>
+                                </span>
+                                <span>•</span>
+                                <span className="flex items-center gap-1">
+                                  <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                                  </svg>
+                                  {new Date(ev.dateAdded).toLocaleDateString()}
+                                </span>
+                              </div>
+
+                              {ev.relatedCases && ev.relatedCases.length > 1 && (
+                                <div className="mt-2 rounded-lg border border-blue-500/20 bg-blue-500/10 px-2 py-1">
+                                  <p className="text-xs text-blue-200">
+                                    <span className="font-medium">Also used in:</span>{" "}
+                                    {ev.relatedCases.filter((c) => c !== ev.caseNumber).join(", ")}
+                                  </p>
+                                </div>
+                              )}
+                            </div>
+
+                            <button
+                              type="button"
+                              onClick={() => linkExistingEvidence(ev)}
+                              disabled={isAlreadyLinked}
+                              className={`inline-flex shrink-0 items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold transition ${
+                                isAlreadyLinked
+                                  ? "cursor-not-allowed border border-white/10 bg-white/5 text-gray-500"
+                                  : "bg-gradient-to-r from-purple-600 to-indigo-600 text-white shadow-lg shadow-purple-500/20 hover:from-purple-500 hover:to-indigo-500"
+                              }`}
+                              title={isAlreadyLinked ? "Already linked to this case" : "Link this evidence to your case"}
+                            >
+                              <Link2 className="h-4 w-4" />
+                              {isAlreadyLinked ? "Linked" : "Link"}
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </>
+                  ) : evidenceSearchTerm ? (
+                    <div className="flex flex-col items-center justify-center py-8 text-center">
+                      <div className="mb-3 rounded-full bg-white/5 p-3">
+                        <Search className="h-6 w-6 text-gray-400" />
+                      </div>
+                      <p className="mb-1 text-sm font-medium text-white">No results found</p>
+                      <p className="text-xs text-gray-400">
+                        No evidence found matching "{evidenceSearchTerm}". Try different keywords.
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="flex flex-col items-center justify-center py-8 text-center">
+                      <div className="mb-3 rounded-full bg-white/5 p-3">
+                        <FileText className="h-6 w-6 text-gray-400" />
+                      </div>
+                      <p className="mb-1 text-sm font-medium text-white">Recent Evidence</p>
+                      <p className="text-xs text-gray-400">
+                        Showing recent evidence items. Use search above to find specific items.
+                      </p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </section>
 
           {/* Evidence Locker (shared, glassmorphism) */}
           <EvidenceLocker

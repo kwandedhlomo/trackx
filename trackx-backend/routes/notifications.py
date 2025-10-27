@@ -1,6 +1,7 @@
-from fastapi import APIRouter, HTTPException
-from services.notifications_service import add_notification, fetch_notifications, update_notification
-from models.notification_model import Notification, UpdateNotificationRequest
+from fastapi import APIRouter, HTTPException, Query
+from typing import Optional
+from services.notifications_service import add_notification, fetch_notifications, update_notification, delete_all_notifications
+from models.notification_model import UpdateNotificationRequest
 
 
 router = APIRouter()
@@ -26,7 +27,12 @@ async def create_notification(user_id: str, title: str, message: str, notificati
 
 
 @router.get("/{user_id}")
-async def get_notifications(user_id: str, page: int = 1, limit: int = 10):
+async def get_notifications(
+    user_id: str,
+    page: int = 1,
+    limit: int = 10,
+    notification_type: Optional[str] = Query(None, alias="type"),
+):
     """
     API endpoint to fetch paginated notifications for a user.
 
@@ -39,7 +45,7 @@ async def get_notifications(user_id: str, page: int = 1, limit: int = 10):
         dict: A dictionary containing a list of notifications and pagination metadata.
     """
     try:
-        notifications = await fetch_notifications(user_id)
+        notifications = await fetch_notifications(user_id, notification_type=notification_type)
         start = (page - 1) * limit
         end = start + limit
         paginated_notifications = notifications[start:end]
@@ -82,3 +88,12 @@ async def update_notification_status(user_id: str, notification_id: str, request
     except Exception as e:
         print(f"Error in update_notification_status route for notification {notification_id}: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to update notification: {str(e)}")
+
+
+@router.delete("/{user_id}")
+async def clear_notifications(user_id: str):
+    """Delete all notifications for a user."""
+    result = await delete_all_notifications(user_id)
+    if not result.get("success"):
+        raise HTTPException(status_code=500, detail=result.get("message", "Failed to delete notifications."))
+    return result

@@ -14,7 +14,10 @@ import {
     serverTimestamp,
     GeoPoint,
     deleteDoc,
-    increment 
+    increment,
+    onSnapshot,
+    writeBatch,
+    arrayUnion
   } from 'firebase/firestore';
   import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
   
@@ -29,6 +32,8 @@ import {
   const REPORTS_COLLECTION = 'reports'; // Separate collection for reports
   const LOCATIONS_SUBCOLLECTION = 'locations';
   const TECHNICAL_TERMS_COLLECTION = 'technicalTerms';
+  const EVIDENCE_COLLECTION = 'evidence';
+  const TASKS_SUBCOLLECTION = 'tasks';
   
   /**
    * Get current user ID with fallbacks
@@ -224,6 +229,271 @@ export const incrementTechnicalTermUsage = async (termId) => {
   }
 };
 
+// ============================================
+// EVIDENCE LOCKER FUNCTIONS
+// ============================================
+
+/**
+ * Save a single evidence item into the shared collection.
+ */
+export const saveEvidenceItem = async (evidenceItem, userId = null, caseNumber = null) => {
+  try {
+    if (!db) {
+      throw new Error('Firebase database not initialized');
+    }
+
+    const finalUserId = userId || getCurrentUserId();
+    const evidenceId = evidenceItem.id || `EV-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+    const evidenceRef = doc(db, EVIDENCE_COLLECTION, evidenceId);
+
+    const existingDoc = await getDoc(evidenceRef);
+    if (existingDoc.exists()) {
+      const existingData = existingDoc.data() || {};
+      if (caseNumber) {
+        await updateDoc(evidenceRef, {
+          description: evidenceItem.description || existingData.description || '',
+          originalCaseNumber: existingData.originalCaseNumber || caseNumber,
+          relatedCases: arrayUnion(caseNumber),
+          updatedAt: serverTimestamp(),
+        });
+      } else {
+        await updateDoc(evidenceRef, {
+          description: evidenceItem.description || existingData.description || '',
+          updatedAt: serverTimestamp(),
+        });
+      }
+    } else {
+      await setDoc(evidenceRef, {
+        evidenceId,
+        id: evidenceId,
+        description: evidenceItem.description || '',
+        originalCaseNumber: caseNumber || evidenceItem.caseNumber || 'Pending',
+        relatedCases: caseNumber ? [caseNumber] : [],
+        dateAdded: evidenceItem.dateAdded || new Date().toISOString(),
+        createdBy: finalUserId,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+    }
+
+    return evidenceId;
+  } catch (error) {
+    console.error('Error saving evidence item:', error);
+    throw new Error(`Failed to save evidence: ${error.message}`);
+  }
+};
+
+/**
+ * Load evidence items for a specific case number.
+ */
+export const loadEvidenceByCase = async (caseNumber) => {
+  try {
+    if (!db || !caseNumber) {
+      return [];
+    }
+
+    const evidenceRef = collection(db, EVIDENCE_COLLECTION);
+    const q = query(evidenceRef, where('relatedCases', 'array-contains', caseNumber));
+    const snapshot = await getDocs(q);
+
+    const evidenceItems = [];
+    snapshot.forEach((docSnap) => {
+      const data = docSnap.data() || {};
+      evidenceItems.push({
+        id: data.evidenceId || data.id || docSnap.id,
+        evidenceId: data.evidenceId || data.id || docSnap.id,
+        description: data.description || '',
+        caseNumber: data.originalCaseNumber || caseNumber,
+        dateAdded:
+          data.dateAdded ||
+          data.createdAt?.toDate?.()?.toISOString() ||
+          new Date().toISOString(),
+        relatedCases: data.relatedCases || [],
+      });
+    });
+
+    return evidenceItems;
+  } catch (error) {
+    console.error('Error loading evidence by case:', error);
+    return [];
+  }
+};
+
+/**
+ * Load a recent set of evidence items for searching/reuse.
+ */
+export const loadAllEvidence = async (limitCount = 100) => {
+  try {
+    if (!db) {
+      return [];
+    }
+
+    const evidenceRef = collection(db, EVIDENCE_COLLECTION);
+    const q = query(evidenceRef, orderBy('createdAt', 'desc'), limit(limitCount));
+    const snapshot = await getDocs(q);
+
+    const evidenceItems = [];
+    snapshot.forEach((docSnap) => {
+      const data = docSnap.data() || {};
+      evidenceItems.push({
+        id: data.evidenceId || data.id || docSnap.id,
+        evidenceId: data.evidenceId || data.id || docSnap.id,
+        description: data.description || '',
+        caseNumber: data.originalCaseNumber || 'Unknown',
+        dateAdded:
+          data.dateAdded ||
+          data.createdAt?.toDate?.()?.toISOString() ||
+          new Date().toISOString(),
+        relatedCases: data.relatedCases || [],
+      });
+    });
+
+    return evidenceItems;
+  } catch (error) {
+    console.error('Error loading all evidence:', error);
+    return [];
+  }
+};
+
+/**
+ * Perform a simple client-side search across stored evidence.
+ */
+export const searchEvidence = async (searchTerm) => {
+  try {
+    if (!db || !searchTerm) {
+      return [];
+    }
+
+    const evidenceRef = collection(db, EVIDENCE_COLLECTION);
+    const snapshot = await getDocs(evidenceRef);
+    const lower = searchTerm.toLowerCase();
+
+    const matches = [];
+    snapshot.forEach((docSnap) => {
+      const data = docSnap.data() || {};
+      if (
+        data.description?.toLowerCase?.().includes(lower) ||
+        data.originalCaseNumber?.toLowerCase?.().includes(lower) ||
+        data.evidenceId?.toLowerCase?.().includes(lower)
+      ) {
+        matches.push({
+          id: data.evidenceId || data.id || docSnap.id,
+          evidenceId: data.evidenceId || data.id || docSnap.id,
+          description: data.description || '',
+          caseNumber: data.originalCaseNumber || 'Unknown',
+          dateAdded:
+            data.dateAdded ||
+            data.createdAt?.toDate?.()?.toISOString() ||
+            new Date().toISOString(),
+          relatedCases: data.relatedCases || [],
+        });
+      }
+    });
+
+    return matches;
+  } catch (error) {
+    console.error('Error searching evidence:', error);
+    return [];
+  }
+};
+
+/**
+ * Update an existing evidence record.
+ */
+export const updateEvidenceItem = async (evidenceId, updates) => {
+  try {
+    if (!db || !evidenceId) {
+      return;
+    }
+
+    const evidenceRef = doc(db, EVIDENCE_COLLECTION, evidenceId);
+    await updateDoc(evidenceRef, {
+      ...updates,
+      updatedAt: serverTimestamp(),
+    });
+  } catch (error) {
+    console.error('Error updating evidence item:', error);
+    throw new Error(`Failed to update evidence: ${error.message}`);
+  }
+};
+
+/**
+ * Save a batch of evidence items.
+ */
+export const batchSaveEvidence = async (evidenceItems, userId = null, caseNumber = null) => {
+  try {
+    if (!db || !Array.isArray(evidenceItems) || evidenceItems.length === 0) {
+      return;
+    }
+
+    const finalUserId = userId || getCurrentUserId();
+    const batch = writeBatch(db);
+
+    evidenceItems.forEach((item) => {
+      const evidenceId = item.id || `EV-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+      const evidenceRef = doc(db, EVIDENCE_COLLECTION, evidenceId);
+
+      batch.set(
+        evidenceRef,
+        {
+          evidenceId,
+          id: evidenceId,
+          description: item.description || '',
+          originalCaseNumber: caseNumber || item.caseNumber || 'Pending',
+          relatedCases: caseNumber ? [caseNumber] : item.relatedCases || [],
+          dateAdded: item.dateAdded || new Date().toISOString(),
+          createdBy: finalUserId,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        },
+        { merge: true }
+      );
+    });
+
+    await batch.commit();
+  } catch (error) {
+    console.error('Error batch saving evidence:', error);
+    throw new Error(`Failed to batch save evidence: ${error.message}`);
+  }
+};
+
+/**
+ * Link an existing evidence item to a case.
+ */
+export const linkEvidenceToCase = async (evidenceId, caseNumber) => {
+  try {
+    if (!db || !evidenceId || !caseNumber) {
+      return;
+    }
+
+    const evidenceRef = doc(db, EVIDENCE_COLLECTION, evidenceId);
+    await updateDoc(evidenceRef, {
+      relatedCases: arrayUnion(caseNumber),
+      updatedAt: serverTimestamp(),
+    });
+  } catch (error) {
+    console.error('Error linking evidence to case:', error);
+    throw new Error(`Failed to link evidence: ${error.message}`);
+  }
+};
+
+/**
+ * Delete a stored evidence item.
+ */
+export const deleteEvidenceItem = async (evidenceId) => {
+  try {
+    if (!db || !evidenceId) {
+      return;
+    }
+
+    const evidenceRef = doc(db, EVIDENCE_COLLECTION, evidenceId);
+    await deleteDoc(evidenceRef);
+  } catch (error) {
+    console.error('Error deleting evidence:', error);
+    throw new Error(`Failed to delete evidence: ${error.message}`);
+  }
+};
+
 const fetchCaseDocsForUser = async (userId) => {
   if (!db) {
     throw new Error('Firebase database not initialized');
@@ -330,7 +600,7 @@ const fetchCaseDocsForUser = async (userId) => {
         dateOfIncident: caseData.dateOfIncident
           ? new Date(caseData.dateOfIncident)
           : new Date(),
-      
+
         region: caseData.region,
         provinceCode: caseData.provinceCode || null,
         provinceName: caseData.provinceName || caseData.region || null,
@@ -347,8 +617,6 @@ const fetchCaseDocsForUser = async (userId) => {
         reportIntro: caseData.reportIntro || '',
         reportConclusion: caseData.reportConclusion || '',
         selectedForReport: caseData.selectedForReport || [],
-
-        evidenceItems: caseData.evidenceItems || [],
         technicalTerms: caseData.technicalTerms || [],
       
         // TEMP backward-compat mirrors (safe to remove after migration)
@@ -500,7 +768,7 @@ const fetchCaseDocsForUser = async (userId) => {
         dateOfIncident:
           caseData.dateOfIncident?.toDate?.() || caseData.dateOfIncident ||
           caseData.date?.toDate?.() || caseData.date,   // fall back to legacy
-      
+
         region: caseData.region,
         provinceCode: caseData.provinceCode || null,
         provinceName: caseData.provinceName || caseData.region || null,
@@ -511,13 +779,12 @@ const fetchCaseDocsForUser = async (userId) => {
         userId: caseData.userId,
         userIds: caseData.userIds || (caseData.userId ? [caseData.userId] : []),
         locations: locations.filter(Boolean),
-        locationTitles: caseData.locationTitles || [],
-        reportIntro: caseData.reportIntro || '',
-        reportConclusion: caseData.reportConclusion || '',
-        selectedForReport: caseData.selectedForReport || [],
+      locationTitles: caseData.locationTitles || [],
+      reportIntro: caseData.reportIntro || '',
+      reportConclusion: caseData.reportConclusion || '',
+      selectedForReport: caseData.selectedForReport || [],
 
-        evidenceItems: caseData.evidenceItems || [],
-        technicalTerms: caseData.technicalTerms || [],
+      technicalTerms: caseData.technicalTerms || [],
       };
       
       
@@ -1178,6 +1445,92 @@ const fetchCaseDocsForUser = async (userId) => {
       console.error('Error creating user profile:', error);
       throw new Error(`Failed to create user profile: ${error.message}`);
     }
+  };
+
+
+  const mapTaskDoc = (docSnap) => {
+    const data = docSnap.data() || {};
+    return {
+      id: docSnap.id,
+      ...data,
+    };
+  };
+
+  export const subscribeToCaseTasks = (caseId, handler) => {
+    if (!db || !caseId || typeof handler !== 'function') {
+      console.warn('subscribeToCaseTasks missing parameters', { caseId });
+      return () => {};
+    }
+
+    const tasksRef = collection(db, CASES_COLLECTION, caseId, TASKS_SUBCOLLECTION);
+    const tasksQuery = query(tasksRef, orderBy('createdAt', 'asc'));
+
+    return onSnapshot(
+      tasksQuery,
+      (snapshot) => {
+        const tasks = snapshot.docs.map(mapTaskDoc);
+        handler(tasks);
+      },
+      (error) => {
+        console.error('Error listening to tasks:', error);
+        handler([]);
+      }
+    );
+  };
+
+  export const createCaseTask = async (caseId, payload) => {
+    if (!db || !caseId) {
+      throw new Error('Firebase database not initialized or caseId missing');
+    }
+    const tasksRef = collection(db, CASES_COLLECTION, caseId, TASKS_SUBCOLLECTION);
+    const taskPayload = {
+      ...payload,
+      status: payload.status || 'pending',
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    };
+    const docRef = await addDoc(tasksRef, taskPayload);
+    return docRef.id;
+  };
+
+  export const updateCaseTask = async (caseId, taskId, updates) => {
+    if (!db || !caseId || !taskId) {
+      throw new Error('Firebase database not initialized or identifiers missing');
+    }
+    const taskRef = doc(db, CASES_COLLECTION, caseId, TASKS_SUBCOLLECTION, taskId);
+    await updateDoc(taskRef, {
+      ...updates,
+      updatedAt: serverTimestamp(),
+    });
+  };
+
+  export const toggleCaseTaskCompletion = async ({ caseId, taskId, complete, userId }) => {
+    if (!db || !caseId || !taskId) {
+      throw new Error('Firebase database not initialized or identifiers missing');
+    }
+    const taskRef = doc(db, CASES_COLLECTION, caseId, TASKS_SUBCOLLECTION, taskId);
+    const payload = complete
+      ? {
+          status: 'completed',
+          completedBy: userId || null,
+          completedAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        }
+      : {
+          status: 'pending',
+          completedBy: null,
+          completedAt: null,
+          updatedAt: serverTimestamp(),
+        };
+    await updateDoc(taskRef, payload);
+  };
+
+  export const deleteCaseTask = async (caseId, taskId) => {
+    if (!db || !caseId || !taskId) {
+      throw new Error('Firebase database not initialized or identifiers missing');
+    }
+    const taskRef = doc(db, CASES_COLLECTION, caseId, TASKS_SUBCOLLECTION, taskId);
+    await deleteDoc(taskRef);
   };
 
   const sourceToBlob = async (src) => {

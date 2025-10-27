@@ -116,7 +116,11 @@ def _case_can_be_seen_by_user(case_dict: dict, user_id: str, user_role: str) -> 
     """Admins can see everything; others only their own."""
     if user_role == "admin":
         return True
-    return case_dict.get("userID") == user_id
+    owner_id = case_dict.get("userId") or case_dict.get("userID")
+    if owner_id == user_id:
+        return True
+    collaborators = case_dict.get("userIds") or case_dict.get("userIDs") or []
+    return user_id in collaborators
 
 def build_briefing_payload(user_id: str, user_role: str, case_ids: List[str]) -> Dict[str, Any]:
     cases = []

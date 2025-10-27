@@ -1,4 +1,4 @@
-﻿import { Link } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { motion } from "framer-motion";
 import { FaSearch, FaMapMarkerAlt, FaCalendarAlt } from "react-icons/fa";
 import adfLogo from "../assets/image-removebg-preview.png";
@@ -14,6 +14,7 @@ import { getFriendlyErrorMessage } from "../utils/errorMessages";
 import { Home, FilePlus2, FolderOpen, Briefcase, LayoutDashboard } from "lucide-react";
 import ZA_REGIONS from "../data/za_regions";
 import RegionSelectorModal from "../components/RegionSelectorModal";
+import NotificationBell from "../components/NotificationBell";
 
 
 
@@ -29,7 +30,7 @@ function ManageCasesPage() {
     const prov = ZA_REGIONS.find(p => p.code === provinceCode);
     const dName = prov?.districts?.find(d => String(d.code) === String(districtCode))?.name || "";
     if (!pName && !dName) return "";
-    return dName ? `${pName} â€” ${dName}` : pName;
+    return dName ? `${pName} - ${dName}` : pName;
   }, [region, provinceCode, districtCode]);
   const [date, setDate] = useState("");
   const [cases, setCases] = useState([]);
@@ -98,7 +99,7 @@ function ManageCasesPage() {
       openModal({
         variant: "success",
         title: "Case deleted",
-        description: `â€œ${caseItem.caseTitle}â€ has been removed successfully.`,
+        description: `"${caseItem.caseTitle}" has been removed successfully.`,
       });
       handleSearch(); 
     } catch (err) {
@@ -119,7 +120,7 @@ function ManageCasesPage() {
     openModal({
       variant: "success",
       title: "Case moved to Trash",
-      description: `â€œ${caseItem.caseTitle}â€ has been moved to the Trash Bin.`,
+      description: `"${caseItem.caseTitle}" has been moved to the Trash Bin.`,
     });
     handleSearch();
   } catch (err) {
@@ -136,7 +137,7 @@ function ManageCasesPage() {
     openModal({
       variant: "warning",
       title: "Delete case?",
-      description: `Are you sure you want to delete â€œ${caseItem.caseTitle}â€? This action cannot be undone.`,
+      description: `Are you sure you want to delete "${caseItem.caseTitle}"? This action cannot be undone.`,
       primaryAction: {
         label: "Delete case",
         closeOnClick: false,
@@ -152,7 +153,7 @@ function ManageCasesPage() {
   openModal({
     variant: "warning",
     title: "Move to Trash?",
-    description: `Are you sure you want to move â€œ${caseItem.caseTitle}â€ to the Trash Bin? You can restore it later.`,
+    description: `Are you sure you want to move "${caseItem.caseTitle}" to the Trash Bin? You can restore it later.`,
     primaryAction: {
       label: "Move to Trash",
       closeOnClick: false,
@@ -200,6 +201,7 @@ function ManageCasesPage() {
         </div>
 
         <div className="flex items-center gap-4 text-sm text-gray-200">
+          <NotificationBell className="hidden lg:block" />
           <Link
             to="/home"
             className="hidden md:inline-flex items-center rounded-full border border-white/10 bg-white/[0.02] px-4 py-2 text-xs font-semibold text-gray-200 shadow-inner shadow-white/5 transition hover:border-white/25 hover:text-white"
@@ -312,7 +314,7 @@ function ManageCasesPage() {
                     to="/new-case"
                     className="inline-flex items-center justify-center rounded-full bg-gradient-to-r from-blue-600 to-indigo-600 px-6 py-2.5 text-sm font-semibold text-white shadow-lg shadow-blue-500/25 transition hover:from-blue-500 hover:to-indigo-500"
                   >
-                    ï¼‹ Create case
+                    + Create case
                   </Link>
                   <Link
                     to="/home"
@@ -513,7 +515,7 @@ function ManageCasesPage() {
                   to="/new-case"
                   className="inline-flex items-center justify-center rounded-full bg-gradient-to-r from-blue-600 to-indigo-600 px-5 py-2 text-sm font-semibold text-white shadow-lg shadow-blue-500/20 transition hover:from-blue-500 hover:to-indigo-500"
                 >
-                  ï¼‹ Create case
+                  + Create case
                 </Link>
                 <Link
                   to="/home"

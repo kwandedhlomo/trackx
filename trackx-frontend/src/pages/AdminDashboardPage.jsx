@@ -8,6 +8,7 @@ import AnimatedMap from "../components/AnimatedMap";
 import { signOut } from "firebase/auth";
 import { auth, db } from "../firebase";
 import { doc, getDoc } from "firebase/firestore";
+import NotificationBell from "../components/NotificationBell";
 
 // NEW: Jon's technical terms seed
 import technicalTermsSeed from "../data/technicalTermsSeed";
@@ -124,6 +125,7 @@ function AdminDashboardPage() {
         </div>
 
         <div className="flex items-center gap-4 text-sm text-gray-200">
+          <NotificationBell className="hidden lg:block" />
           <div className="hidden text-right md:block">
             <span className="block text-xs text-gray-400">Last sync</span>
             <span>{formattedDateTime}</span>

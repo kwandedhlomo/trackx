@@ -1,8 +1,15 @@
-from firebase.firebase_config import db 
+from firebase.firebase_config import db
 from datetime import datetime
+from typing import Optional, Dict, Any
 
 
-async def add_notification(user_id: str, title: str, message: str, notification_type: str):
+async def add_notification(
+    user_id: str,
+    title: str,
+    message: str,
+    notification_type: str,
+    metadata: Optional[Dict[str, Any]] = None,
+):
     """
     Add a notification to the user's notifications subcollection.
 
@@ -22,7 +29,8 @@ async def add_notification(user_id: str, title: str, message: str, notification_
             "message": message,
             "type": notification_type,
             "timestamp": datetime.utcnow().isoformat(),  # Use UTC timestamp
-            "read": False  # Default to unread
+            "read": False,  # Default to unread
+            "metadata": metadata or {},
         }
 
         # Reference to the user's notifications subcollection
@@ -35,7 +43,7 @@ async def add_notification(user_id: str, title: str, message: str, notification_
     except Exception as e:
         return {"success": False, "message": f"Failed to add notification: {str(e)}"}
 
-async def fetch_notifications(user_id: str):
+async def fetch_notifications(user_id: str, notification_type: Optional[str] = None):
     """
     Fetch all notifications for a specific user.
 
@@ -60,6 +68,11 @@ async def fetch_notifications(user_id: str):
 
         # Sort notifications by timestamp (newest first)
         notifications_list.sort(key=lambda x: x["timestamp"], reverse=True)
+
+        if notification_type:
+            notifications_list = [
+                item for item in notifications_list if item.get("type") == notification_type
+            ]
 
         return notifications_list
     except Exception as e:
@@ -95,3 +108,24 @@ async def update_notification(user_id: str, notification_id: str, read: bool):
     except Exception as e:
         print(f"Error updating notification {notification_id} for user {user_id}: {str(e)}")
         raise Exception(f"Failed to update notification: {str(e)}")
+
+
+async def delete_all_notifications(user_id: str):
+    """
+    Delete all notifications for a specific user.
+    """
+    try:
+        notifications_ref = db.collection("users").document(user_id).collection("notifications")
+        docs = list(notifications_ref.stream())
+        if not docs:
+            return {"success": True, "deleted": 0}
+
+        batch = db.batch()
+        for doc in docs:
+            batch.delete(doc.reference)
+        batch.commit()
+
+        return {"success": True, "deleted": len(docs)}
+    except Exception as e:
+        print(f"Error deleting notifications for user {user_id}: {str(e)}")
+        return {"success": False, "message": f"Failed to delete notifications: {str(e)}"}

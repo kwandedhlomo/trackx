@@ -1,15 +1,28 @@
-﻿import { useState, useEffect } from "react";
+import { useState, useEffect } from "react";
 import axios from "axios";
 import { Link } from "react-router-dom";
 import { motion } from "framer-motion";
 import { FaTrashRestore, FaTrashAlt } from "react-icons/fa";
 import NotificationModal from "../components/NotificationModal";
 import useNotificationModal from "../hooks/useNotificationModal";
+import { useAuth } from "../context/AuthContext";
+import { auth } from "../firebase";
+import { signOut } from "firebase/auth";
+import adfLogo from "../assets/image-removebg-preview.png";
 
 function TrashBinPage() {
   const [cases, setCases] = useState([]);
   const { modalState, openModal, closeModal } = useNotificationModal();
   const [emptying, setEmptying] = useState(false);
+  const { profile } = useAuth();
+
+  const handleSignOut = async () => {
+    try {
+      await signOut(auth);
+    } catch (error) {
+      console.error("Sign-out failed:", error);
+    }
+  };
 
   useEffect(() => {
     fetchTrashedCases();
@@ -112,6 +125,30 @@ function TrashBinPage() {
       <div className="absolute inset-0 bg-gradient-to-br from-black via-gray-900 to-black -z-10" />
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(239,68,68,0.14),transparent_55%)]" />
 
+      <nav className="mx-6 mt-6 flex items-center justify-between rounded-3xl border border-white/10 bg-gradient-to-br from-black/80 via-slate-900/70 to-black/80 px-6 py-4 shadow-[0_25px_65px_rgba(8,11,24,0.6)] backdrop-blur-xl">
+        <Link to="/home" className="inline-flex items-center gap-2 text-sm font-semibold text-gray-300 transition hover:text-white">
+          <img src={adfLogo} alt="TrackX" className="h-10 w-auto" />
+          <span className="hidden sm:inline">Home</span>
+        </Link>
+        <h1 className="text-lg font-semibold uppercase tracking-[0.35em] text-white">Trash Bin</h1>
+        <div className="flex items-center gap-3 text-xs text-gray-300">
+          <div className="hidden sm:flex flex-col items-end">
+            <span className="font-semibold text-white">
+              {profile ? `${profile.firstName || ""} ${profile.surname || ""}`.trim() || "Investigator" : "Investigator"}
+            </span>
+            <button onClick={handleSignOut} className="text-red-400 transition hover:text-red-500">
+              Sign Out
+            </button>
+          </div>
+          <Link
+            to="/manage-cases"
+            className="inline-flex items-center rounded-full border border-white/15 bg-white/[0.05] px-3 py-1 text-sm font-medium text-gray-200 transition hover:border-white/30 hover:text-white"
+          >
+            Manage Cases
+          </Link>
+        </div>
+      </nav>
+
       <div className="mx-auto mt-10 w-full max-w-5xl px-6">
         <div className="rounded-3xl border border-white/10 bg-white/[0.018] p-8 shadow-[0_25px_70px_rgba(15,23,42,0.45)] backdrop-blur-2xl">
           <h1 className="text-2xl font-semibold text-white">Trash Bin</h1>
@@ -168,7 +205,13 @@ function TrashBinPage() {
             )}
           </div>
 
-          <div className="mt-6 flex justify-end">
+          <div className="mt-6 flex flex-wrap justify-end gap-3">
+            <Link
+              to="/home"
+              className="rounded-full border border-white/15 bg-white/[0.04] px-5 py-2 text-sm font-medium text-gray-300 transition hover:border-white/30 hover:text-white"
+            >
+              Back to Home
+            </Link>
             <Link
               to="/manage-cases"
               className="rounded-full border border-white/15 bg-white/[0.04] px-5 py-2 text-sm font-medium text-gray-300 transition hover:border-white/30 hover:text-white"
