@@ -10,21 +10,21 @@ import LandingPage from "../pages/LandingPage";
 import SignInPage from "../pages/SignInPage";
 import RegisterPage from "../pages/RegisterPage";
 import OverviewPage from "../pages/OverviewPage";
-import SimulationPage from "../pages/SimulationPage";
 import NewCasePage from "../pages/NewCasePage";
 import AnnotationsPage from "../pages/AnnotationsPage";
 import ManageCasesPage from "../pages/ManageCasesPage";
 import VerifyEmailPage from "../pages/VerifyEmailPage";
 import EditCasePage from "../pages/EditCase";
-import HeatmapPage from '../pages/HeatmapPage';
+import HeatmapPage from "../pages/HeatmapPage";
 import SimulationPage2 from "../pages/SimulationPage2";
 import WaitingRoomPage from "../pages/WaitingRoomPage";
 import AdminDashboardPage from "../pages/AdminDashboardPage";
 import PendingUsersPage from "../pages/PendingUsersPage";
-import AdminPanel from '../pages/AdminPanel.jsx'; 
+import AdminPanel from "../pages/AdminPanel.jsx";
 import ForgotPassword from "../pages/ForgotPassword";
 import MyCasesPage from "../pages/MyCasesPage.jsx";
 import TrashBinPage from "../pages/TrashBin.jsx";
+import CaseCollaborationPage from "../pages/CaseCollaborationPage";
 
 
 
@@ -147,16 +147,20 @@ function AppRouter() {
             </ProtectedRoute>
           }
         />
-        <Route
-          path="/forgot-password" 
-          element=
-          {<ForgotPassword />} 
-          />
+        
         <Route
           path="/my-cases"
           element={
             <ProtectedRoute>
               <MyCasesPage/>
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/cases/:caseId/collaboration"
+          element={
+            <ProtectedRoute>
+              <CaseCollaborationPage />
             </ProtectedRoute>
           }
         />
@@ -173,4 +177,6 @@ function AppRouter() {
       </Routes>
     </BrowserRouter>
   );
-}export default AppRouter;
+}
+
+export default AppRouter;

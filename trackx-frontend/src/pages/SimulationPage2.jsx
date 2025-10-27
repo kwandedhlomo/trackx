@@ -970,7 +970,6 @@ async function rebuildFlagBillboards(viewer, flaggedPoints, liftMeters = 1.5) {
       `,
       billboard: {
         image: flagIcon,
-        // Force a compact, consistent on-map size for flags
         width: 28,
         height: 28,
         scale: 1.0,
@@ -1083,10 +1082,12 @@ async function rebuildFlagBillboards(viewer, flaggedPoints, liftMeters = 1.5) {
         <Link to="/home" className="inline-flex">
           <img src={adflogo} alt="Logo" className="h-12 cursor-pointer hover:opacity-80 transition" />
         </Link>
-        <h1 className="text-xl font-bold">Route Simulation</h1>
-        <div>
-          <p className="text-sm">{profile ? `${profile.firstName} ${profile.surname}` : "Loading..."}</p>
-          <button onClick={handleSignOut} className="text-red-400 hover:text-red-600 text-xs">Sign Out</button>
+        <h1 className="text-xl font-semibold tracking-[0.3em] text-white uppercase">Route Simulation</h1>
+        <div className="text-right text-sm text-gray-200">
+          <p>{profile ? `${profile.firstName} ${profile.surname}` : "Loading..."}</p>
+          <button onClick={handleSignOut} className="text-red-400 hover:text-red-500 text-xs transition">
+            Sign Out
+          </button>
         </div>
       </nav>
 

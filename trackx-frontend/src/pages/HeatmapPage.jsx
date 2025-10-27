@@ -102,7 +102,7 @@ const startPointsLayer = new ScatterplotLayer({
 
     const caseDoc = caseDataMap[object.caseId];
     return caseDoc
-      ? `Start of Case: ${caseDoc.caseTitle || "Unknown"} – ${caseDoc.dateOfIncident || "No date"}`
+      ? `Start of Case: ${caseDoc.caseTitle || "Unknown"} - ${caseDoc.dateOfIncident || "No date"}`
       : "Start Point";
 
   } catch (e) {
@@ -168,7 +168,7 @@ const hexagonLayer = new HexagonLayer({
 
       const name = doc?.caseTitle || "Unknown Case";
       const date = doc?.dateOfIncident || "No date";
-      return `🔹 ${name} – ${date}`;
+      return `🔹 ${name} - ${date}`;
     });
 
     return {

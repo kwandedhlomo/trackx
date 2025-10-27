@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from "react";
 import { Link, useNavigate, useLocation } from "react-router-dom";
 import adflogo from "../assets/image-removebg-preview.png";
 import { motion } from "framer-motion";
-import { AlertTriangle, MapPin, FileText, Camera, Home, FilePlus2, FolderOpen, Briefcase, LayoutDashboard, Trash2, Plus } from "lucide-react";
+import { AlertTriangle, MapPin, FileText, Camera, Home, FilePlus2, FolderOpen, Briefcase, LayoutDashboard, Trash2, Plus, Search, Link2 } from "lucide-react";
 import jsPDF from "jspdf";
 import { useAuth } from "../context/AuthContext";
 import { signOut } from "firebase/auth";
@@ -15,19 +15,13 @@ import { getFriendlyErrorMessage } from "../utils/errorMessages";
 import TechnicalTermsSelector from "../components/TechnicalTermsSelector";
 import { formatTechnicalTerm, normalizeTechnicalTermList } from "../utils/technicalTerms";
 import EvidenceLocker from "../components/EvidenceLocker";
+import { consumeTaskHook } from "../utils/taskHooks";
 
 // ---- DOCX + save-as ----
 import { Document, Packer, Paragraph, TextRun, HeadingLevel, ImageRun } from "docx";
 import { saveAs } from "file-saver";
 
-// ---- Google Doc (optional) ----
 const API_BASE = (import.meta.env.VITE_API_URL || "").replace(/\/+$/, "");
-const REPORTS_ENDPOINT = `${API_BASE}/api/reports/google-doc`;
-const GOOGLE_OAUTH_CLIENT_ID = (import.meta.env.VITE_GOOGLE_OAUTH_CLIENT_ID || "").trim();
-const GOOGLE_SCOPES = [
-  "https://www.googleapis.com/auth/drive.file",
-  "https://www.googleapis.com/auth/documents",
-].join(" ");
 
 // ---- Firebase services ----
 import {
@@ -37,53 +31,16 @@ import {
   createReportDocument,
   getCaseReports,
   loadSnapshotsFromFirebase,
+  getCurrentUserId,
+  loadEvidenceByCase,
+  batchSaveEvidence,
+  loadAllEvidence,
+  searchEvidence,
+  linkEvidenceToCase,
 } from "../services/firebaseServices";
 
 // Optional (not used directly for embedding but left for completeness)
 const GOOGLE_MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
-
-
-
-
-// ---------- Google OAuth script loader ----------
-let gsiScriptPromise = null;
-function loadGsiScript() {
-  if (gsiScriptPromise) return gsiScriptPromise;
-  gsiScriptPromise = new Promise((resolve, reject) => {
-    if (window.google?.accounts?.oauth2) return resolve();
-    const s = document.createElement("script");
-    s.src = "https://accounts.google.com/gsi/client";
-    s.async = true;
-    s.defer = true;
-    s.onload = () => resolve();
-    s.onerror = () => reject(new Error("Failed to load Google Identity Services script"));
-    document.head.appendChild(s);
-  });
-  return gsiScriptPromise;
-}
-async function getGoogleAccessToken() {
-  if (!GOOGLE_OAUTH_CLIENT_ID) {
-    throw new Error("Google OAuth Client ID missing. Set VITE_GOOGLE_OAUTH_CLIENT_ID.");
-  }
-  await loadGsiScript();
-  return new Promise((resolve, reject) => {
-    try {
-      const tokenClient = window.google.accounts.oauth2.initTokenClient({
-        client_id: GOOGLE_OAUTH_CLIENT_ID,
-        scope: GOOGLE_SCOPES,
-        prompt: "",
-        callback: (response) => {
-          if (response?.access_token) resolve(response.access_token);
-          else reject(new Error("Failed to obtain Google access token"));
-        },
-        error_callback: (err) => reject(err instanceof Error ? err : new Error(err?.message || "Google OAuth failed")),
-      });
-      tokenClient.requestAccessToken();
-    } catch (e) {
-      reject(e);
-    }
-  });
-}
 
 // ---------- NEW: robust image normalization helpers ----------
 function getFormatFromDataURL(dataURL) {
@@ -261,8 +218,24 @@ function OverviewPage() {
   // Toggles
   const [generateReport, setGenerateReport] = useState(true);
   const [generateDocx, setGenerateDocx] = useState(true);
-  const [generateGoogleDoc, setGenerateGoogleDoc] = useState(false);
   const [generateSimulation, setGenerateSimulation] = useState(false);
+  const [taskHighlight, setTaskHighlight] = useState(null);
+  const highlightClass = (targetId) =>
+    taskHighlight?.highlightId === targetId
+      ? "task-hook-highlight border-blue-500/40 bg-blue-500/10"
+      : "";
+
+  const scrollToHighlight = (targetId, attempt = 0) => {
+    if (!targetId) return;
+    const element = document.getElementById(targetId);
+    if (element) {
+      element.scrollIntoView({ behavior: "smooth", block: "center" });
+      return;
+    }
+    if (attempt < 10) {
+      setTimeout(() => scrollToHighlight(targetId, attempt + 1), 120);
+    }
+  };
 
   // UI
   const [isLoading, setIsLoading] = useState(true);
@@ -286,14 +259,27 @@ function OverviewPage() {
   const totalLocations = locations.length;
   const selectedCount = selectedLocations.length;
   const snapshotsCapturedCount = snapshots.filter((s) => s && (s.mapImage || s.streetViewImage)).length;
-  const formattedDateTime = new Date().toLocaleString();
-  const savingStatus = isSaving
-    ? "Saving…"
-    : saveError
-    ? saveError
-    : lastSaved
-    ? `Saved ${lastSaved}`
-    : "";
+const formattedDateTime = new Date().toLocaleString();
+const savingStatus = isSaving
+  ? "Saving…"
+  : saveError
+  ? saveError
+  : lastSaved
+  ? `Saved ${lastSaved}`
+  : "";
+
+  useEffect(() => {
+    const hook = consumeTaskHook();
+    if (!hook || hook.stage !== "overview") {
+      return;
+    }
+    setTaskHighlight(hook);
+    requestAnimationFrame(() => scrollToHighlight(hook.highlightId));
+    const timeout = setTimeout(() => setTaskHighlight(null), 6000);
+    sessionStorage.removeItem("trackxTaskForceCaseId");
+    sessionStorage.removeItem("trackxIgnoreLocalCaseData");
+    return () => clearTimeout(timeout);
+  }, []);
 
   const showError = (title, error, fallback) =>
     openModal({
@@ -319,6 +305,10 @@ function OverviewPage() {
   // Evidence & Technical Terms
   const [evidenceItems, setEvidenceItems] = useState([]);
   const [technicalTerms, setTechnicalTerms] = useState([]);
+  const [showEvidenceSearch, setShowEvidenceSearch] = useState(false);
+  const [evidenceSearchTerm, setEvidenceSearchTerm] = useState("");
+  const [evidenceSearchResults, setEvidenceSearchResults] = useState([]);
+  const [isSearchingEvidence, setIsSearchingEvidence] = useState(false);
 
   //Intro & Conclusions states
   const [intro, setIntro] = useState("");
@@ -357,32 +347,66 @@ const normalizeEvidenceItems = (raw, caseNumber = caseDetails.caseNumber || "Pen
 
 
   // Evidence Locker actions
-  const addEvidence = () => {
-    const newEvidence = {
-      id: generateEvidenceId(),
-      description: "",
-      dateAdded: new Date().toISOString(),
-      caseNumber: caseDetails.caseNumber || "Pending",
-    };
-    const next = [...evidenceItems, newEvidence];
-    setEvidenceItems(next);
-    saveToLocalStorage({ evidenceItems: next });
+  const handleEvidenceSearch = async () => {
+    const term = evidenceSearchTerm.trim();
+    if (!term) {
+      await handleLoadAllEvidence();
+      return;
+    }
+
+    setIsSearchingEvidence(true);
+    try {
+      const results = await searchEvidence(term);
+      setEvidenceSearchResults(results);
+    } catch (error) {
+      console.error("Evidence search failed:", error);
+      showError("Search Error", error, "We couldn't search the evidence database. Please try again.");
+    } finally {
+      setIsSearchingEvidence(false);
+    }
   };
 
-  const updateEvidence = (id, description) => {
-    const next = evidenceItems.map((item) =>
-      item.id === id ? { ...item, description } : item
-    );
-    setEvidenceItems(next);
+  const handleLoadAllEvidence = async () => {
+    setIsSearchingEvidence(true);
+    try {
+      const items = await loadAllEvidence(50);
+      setEvidenceSearchResults(items);
+    } catch (error) {
+      console.error("Failed to load evidence list:", error);
+      showError("Load Error", error, "Could not load evidence items. Please try again.");
+    } finally {
+      setIsSearchingEvidence(false);
+    }
   };
 
-  const removeEvidence = (id) => {
-    const next = evidenceItems.filter((item) => item.id !== id);
-    setEvidenceItems(next);
-    saveToLocalStorage({ evidenceItems: next });
-  };
+  const linkExistingEvidence = async (evidence) => {
+    if (!caseDetails.caseNumber) {
+      showError("Cannot Link Evidence", null, "Case number is required before linking evidence.");
+      return;
+    }
 
-  const handleEvidenceBlur = () => saveData();
+    if (evidenceItems.some((item) => item.id === evidence.id)) {
+      showInfo("Already Linked", "This evidence item is already linked to the current case.");
+      return;
+    }
+
+    try {
+      await linkEvidenceToCase(evidence.id, caseDetails.caseNumber);
+      const linked = {
+        ...evidence,
+        caseNumber: caseDetails.caseNumber,
+      };
+      const next = [...evidenceItems, linked];
+      setEvidenceItems(next);
+      saveToLocalStorage({ evidenceItems: next });
+      setEvidenceSearchResults((prev) => prev.filter((item) => item.id !== evidence.id));
+
+      showSuccess("Evidence Linked", `Evidence ${evidence.id} has been added to this case.`);
+    } catch (error) {
+      console.error("Failed to link evidence:", error);
+      showError("Link Error", error, "We couldn't link the evidence item. Please try again.");
+    }
+  };
 
 
   const formatDateForDisplay = (dateInput) => {
@@ -498,7 +522,7 @@ useEffect(() => {
           const prettyRegion = (fb) => {
             const p = fb.provinceName || fb.region || "";
             const d = fb.districtName || "";
-            return d ? `${p} — ${d}` : p;
+            return d ? `${p} - ${d}` : p;
           };
           setCaseDetails({
             caseNumber: fb.caseNumber,
@@ -510,7 +534,6 @@ useEffect(() => {
           setLocations(fb.locations || []);
           setLocationTitles(fb.locationTitles || Array((fb.locations || []).length).fill(""));
           setReportIntro(fb.reportIntro || "");
-          setEvidenceItems(normalizeEvidenceItems(fb.evidenceItems || [], fb.caseNumber));
           setTechnicalTerms(normalizeTechnicalTermList(fb.technicalTerms || []));
           setReportConclusion(fb.reportConclusion || "");
           setSelectedLocations(fb.selectedForReport || []);
@@ -573,6 +596,24 @@ useEffect(() => {
   // eslint-disable-next-line react-hooks/exhaustive-deps
 }, []);
 
+useEffect(() => {
+  const fetchEvidence = async () => {
+    if (!caseDetails.caseNumber) {
+      return;
+    }
+    try {
+      const items = await loadEvidenceByCase(caseDetails.caseNumber);
+      if (items.length > 0) {
+        setEvidenceItems(items);
+      }
+    } catch (error) {
+      console.error("Failed to load evidence from Firebase:", error);
+    }
+  };
+
+  fetchEvidence();
+}, [caseDetails.caseNumber]);
+
 
   const loadFromLocalStorage = async () => {
     const s = localStorage.getItem("trackxCaseData");
@@ -588,7 +629,7 @@ useEffect(() => {
     const prettyRegion = (c) => {
       const p = c.provinceName || c.region || "";
       const d = c.districtName || "";
-      return d ? `${p} — ${d}` : p;
+      return d ? `${p} - ${d}` : p;
     };
     setCaseDetails({
       caseNumber: caseData.caseNumber,
@@ -600,7 +641,7 @@ useEffect(() => {
     setLocations(caseData.locations);
     setSelectedLocations(caseData.selectedForReport || []);
     setReportIntro(caseData.reportIntro || "");
-    setEvidenceItems(normalizeEvidenceItems(caseData.evidenceItems || [], caseData.caseNumber));
+    // Evidence is loaded separately from the shared evidence collection
     setTechnicalTerms(normalizeTechnicalTermList(caseData.technicalTerms || []));
     setReportConclusion(caseData.reportConclusion || "");
     setLocationTitles(caseData.locationTitles || Array(caseData.locations.length).fill(""));
@@ -674,11 +715,27 @@ const saveData = async (additionalData = {}) => {
       reportIntro: reportIntro || "",
       reportConclusion: reportConclusion || "",
       selectedForReport: selectedLocations,
-      evidenceItems,
       ...extraCopy,
       technicalTerms: termsForUpdate,
     };
     await updateCaseAnnotations(currentCaseId, updateData);
+
+    try {
+      if (caseDetails.caseNumber && evidenceItems.length > 0) {
+        await batchSaveEvidence(
+          evidenceItems,
+          getCurrentUserId(),
+          caseDetails.caseNumber
+        );
+      }
+    } catch (evidenceError) {
+      console.error("Error saving evidence collection:", evidenceError);
+      showError(
+        "Evidence Warning",
+        evidenceError,
+        "Case updated, but we couldn't update the evidence collection."
+      );
+    }
     setLastSaved(new Date().toLocaleTimeString());
     setSaveError(null);
   } catch (e) {
@@ -770,7 +827,7 @@ const generatePDF = async () => {
     pdf.text("DIGITAL FORENSIC REPORT", pdfWidth / 2, pdfHeight / 2 - 20, { align: "center" });
     pdf.setFontSize(14);
     // Use BETWEEN instead of case title
-    pdf.text(`Case: ${caseDetails.caseNumber} – ${displayBetween}`, pdfWidth / 2, pdfHeight / 2, { align: "center" });
+    pdf.text(`Case: ${caseDetails.caseNumber} - ${displayBetween}`, pdfWidth / 2, pdfHeight / 2, { align: "center" });
     pdf.text(`Investigator: ${profile?.firstName || ""} ${profile?.surname || ""}`, pdfWidth / 2, pdfHeight / 2 + 10, { align: "center" });
     pdf.text(`Date of Incident: ${caseDetails.dateOfIncident}`, pdfWidth / 2, pdfHeight / 2 + 20, { align: "center" });
     pdf.addPage();
@@ -822,11 +879,11 @@ const generatePDF = async () => {
     }
 
 
-    // --- 4. TRIPS – DATE ---
+    // --- 4. TRIPS - DATE ---
     const filtered = locations.filter((_, i) => selectedLocations.includes(i));
     if (filtered.length > 0) {
       pdf.setFontSize(16);
-      pdf.text(`4. TRIPS – ${caseDetails.dateOfIncident}`, margin, margin);
+      pdf.text(`4. TRIPS - ${caseDetails.dateOfIncident}`, margin, margin);
     }
 
     for (let i = 0; i < filtered.length; i++) {
@@ -950,7 +1007,7 @@ const generateDOCX = async () => {
 
   // --- COVER PAGE ---
   docChildren.push(makeHeading("DIGITAL FORENSIC REPORT", HeadingLevel.TITLE));
-  docChildren.push(makeText(`Case: ${payload.caseNumber} – ${displayBetween}`));
+  docChildren.push(makeText(`Case: ${payload.caseNumber} - ${displayBetween}`));
   docChildren.push(makeText(`Investigator: ${profile?.firstName || ""} ${profile?.surname || ""}`));
   docChildren.push(makeText(`Date of Incident: ${payload.dateOfIncident}`));
   docChildren.push(new Paragraph({ pageBreakBefore: true }));
@@ -988,12 +1045,12 @@ const generateDOCX = async () => {
     });
   }
 
-  // --- 4. TRIPS – DATE ---
+  // --- 4. TRIPS - DATE ---
   const snapByIdx = new Map((payload.snapshots || []).map((s) => [s.index, s]));
   const selected = payload.selectedIndices.map((i) => payload.locations[i]).filter(Boolean);
 
   if (selected.length > 0) {
-    docChildren.push(makeHeading(`4. TRIPS – ${payload.dateOfIncident}`, HeadingLevel.HEADING_1));
+    docChildren.push(makeHeading(`4. TRIPS - ${payload.dateOfIncident}`, HeadingLevel.HEADING_1));
   }
 
   for (let i = 0; i < selected.length; i++) {
@@ -1049,30 +1106,6 @@ const generateDOCX = async () => {
   const blob = await Packer.toBlob(doc);
   return blob;
 };
-
-
-
-  // --- Google Doc (optional) ---
-  const generateGoogleDocOnServer = async () => {
-    const payload = buildReportPayload();
-    const accessToken = await getGoogleAccessToken();
-    const res = await fetch(REPORTS_ENDPOINT, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
-      body: JSON.stringify(payload),
-    });
-    const bodyText = await res.text();
-    let maybeJson = null;
-    try {
-      maybeJson = JSON.parse(bodyText);
-    } catch {}
-    if (!res.ok) {
-      const detail = (maybeJson && (maybeJson.detail || maybeJson.message)) || bodyText || "Unknown error";
-      throw new Error(detail);
-    }
-    return maybeJson || {};
-  };
-
   // --- generation handler (merged) ---
 const handleGenerate = async () => {
   setIsGenerating(true);
@@ -1112,46 +1145,6 @@ const handleGenerate = async () => {
       } catch (err) {
         console.error("DOCX generation failed:", err);
         showError("DOCX generation failed", err, "We couldn't generate the DOCX report. Please try again.");
-      }
-    }
-
-    // Google Doc (optional)
-    if (generateGoogleDoc) {
-      try {
-        const data = await generateGoogleDocOnServer();
-        const name = `${data.title || "Report"}${base}.gdoc`;
-        newLocal.push({
-          id: Date.now() + 100,
-          type: "report",
-          name,
-          date: new Date().toISOString(),
-          googleDoc: true,
-          documentId: data.documentId,
-          webViewLink: data.webViewLink,
-        });
-        if (currentCaseId) {
-          try {
-            await createReportDocument(
-              currentCaseId,
-              {
-                reportType: "google-doc",
-                fileName: name,
-                documentId: data.documentId,
-                webViewLink: data.webViewLink,
-                introduction: reportIntro,
-                conclusion: reportConclusion,
-              },
-              getCurrentUserId()
-            );
-            const updated = await getCaseReports(currentCaseId);
-            setFirebaseReports(updated || []);
-          } catch (e) {
-            console.warn("Failed to save Google Doc metadata to Firebase:", e);
-          }
-        }
-      } catch (err) {
-        console.error("Google Doc generation failed:", err);
-        showError("Google Doc generation failed", err, "We couldn't create the Google Doc. Please try again.");
       }
     }
 
@@ -1508,15 +1501,15 @@ const handleGenerateConclusion = async () => {
             <div className="grid grid-cols-1 gap-4 text-sm text-gray-300 sm:grid-cols-2">
               <div>
                 <p className="text-xs uppercase tracking-wide text-gray-500">Case Number</p>
-                <p className="mt-1 text-base font-medium text-white">{caseDetails.caseNumber || "—"}</p>
+                <p className="mt-1 text-base font-medium text-white">{caseDetails.caseNumber || "-"}</p>
               </div>
               <div>
                 <p className="text-xs uppercase tracking-wide text-gray-500">Incident Date</p>
-                <p className="mt-1 text-base font-medium text-white">{caseDetails.dateOfIncident || "—"}</p>
+                <p className="mt-1 text-base font-medium text-white">{caseDetails.dateOfIncident || "-"}</p>
               </div>
               <div>
                 <p className="text-xs uppercase tracking-wide text-gray-500">Region</p>
-                <p className="mt-1 text-base font-medium text-white">{caseDetails.region || "—"}</p>
+                <p className="mt-1 text-base font-medium text-white">{caseDetails.region || "-"}</p>
               </div>
               <div>
                 <p className="text-xs uppercase tracking-wide text-gray-500">Between</p>
@@ -1644,7 +1637,12 @@ const handleGenerateConclusion = async () => {
         </div>
 
 {/* Report Intro */}
-<div className="rounded-3xl border border-white/10 bg-white/[0.018] p-6 shadow-[0_25px_70px_rgba(15,23,42,0.45)] backdrop-blur-2xl">
+<div
+  id="task-target-overview-intro"
+  className={`rounded-3xl border border-white/10 bg-white/[0.018] p-6 shadow-[0_25px_70px_rgba(15,23,42,0.45)] backdrop-blur-2xl ${highlightClass(
+    "task-target-overview-intro"
+  )}`}
+>
   {/* Header + Buttons Row */}
   <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
     <div>
@@ -1707,6 +1705,192 @@ const handleGenerateConclusion = async () => {
 </div>
 
 
+        {/* Evidence Search & Link Section */}
+        <section className="rounded-3xl border border-white/10 bg-white/[0.018] p-6 shadow-[0_25px_70px_rgba(15,23,42,0.45)] backdrop-blur-2xl">
+          <div className="flex flex-col gap-1 sm:flex-row sm:items-baseline sm:justify-between">
+            <div>
+              <h3 className="text-sm font-semibold text-white flex items-center gap-2">
+                <Search className="h-5 w-5 text-purple-400" />
+                Search & Link Existing Evidence
+              </h3>
+              <p className="text-xs text-gray-400 mt-1">
+                Pull in evidence collected for other cases to strengthen this overview.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                const next = !showEvidenceSearch;
+                setShowEvidenceSearch(next);
+                if (next) {
+                  handleLoadAllEvidence();
+                } else {
+                  setEvidenceSearchResults([]);
+                  setEvidenceSearchTerm("");
+                }
+              }}
+              className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-gradient-to-r from-purple-900 to-indigo-900 px-4 py-2 text-sm font-semibold text-white shadow-[0_15px_35px_rgba(15,23,42,0.55)] transition hover:-translate-y-0.5"
+            >
+              <Search className="h-4 w-4" />
+              {showEvidenceSearch ? "Hide Search" : "Browse Evidence"}
+            </button>
+          </div>
+
+          {showEvidenceSearch && (
+            <div className="mt-4 space-y-4 rounded-2xl border border-white/10 bg-white/[0.02] p-4">
+              <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+                <div className="relative flex-1">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+                  <input
+                    type="text"
+                    value={evidenceSearchTerm}
+                    onChange={(e) => setEvidenceSearchTerm(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        handleEvidenceSearch();
+                      }
+                    }}
+                    placeholder="Search by description, case number, or evidence ID..."
+                    className="w-full rounded-xl border border-white/10 bg-white/[0.02] pl-10 pr-3 py-2 text-sm text-white placeholder-gray-500 focus:border-purple-700/50 focus:outline-none focus:ring-2 focus:ring-purple-700/30"
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={handleEvidenceSearch}
+                  disabled={isSearchingEvidence}
+                  className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-gradient-to-r from-purple-900 via-indigo-900 to-purple-900 px-4 py-2 text-sm font-medium text-white shadow-[0_15px_35px_rgba(15,23,42,0.55)] transition hover:-translate-y-0.5 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <Search className="w-4 h-4" />
+                  {isSearchingEvidence ? "Searching..." : "Search"}
+                </button>
+              </div>
+
+              <div className="max-h-96 space-y-3 overflow-y-auto pr-2">
+                {isSearchingEvidence ? (
+                  <div className="flex flex-col items-center justify-center py-8 text-center">
+                    <div className="mb-3 h-8 w-8 animate-spin rounded-full border-t-2 border-b-2 border-purple-500"></div>
+                    <p className="text-sm text-gray-400">Searching evidence database...</p>
+                  </div>
+                ) : evidenceSearchResults.length > 0 ? (
+                  <>
+                    <div className="mb-3 flex items-center justify-between rounded-xl border border-purple-500/20 bg-purple-500/10 px-3 py-2">
+                      <span className="text-xs font-medium text-purple-200">
+                        Found {evidenceSearchResults.length} evidence item{evidenceSearchResults.length !== 1 ? "s" : ""}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEvidenceSearchResults([]);
+                          setEvidenceSearchTerm("");
+                        }}
+                        className="text-xs text-purple-300 hover:text-purple-100 transition"
+                      >
+                        Clear Results
+                      </button>
+                    </div>
+
+                    {evidenceSearchResults.map((ev) => {
+                      const isAlreadyLinked = evidenceItems.some((item) => item.id === ev.id);
+                      return (
+                        <div
+                          key={ev.id}
+                          className="group flex items-start justify-between gap-4 rounded-2xl border border-white/10 bg-white/[0.035] p-4 text-sm shadow-inner shadow-white/5 transition hover:border-purple-500/30 hover:bg-white/[0.05]"
+                        >
+                          <div className="flex-1 min-w-0">
+                            <div className="mb-2 flex flex-wrap items-center gap-2">
+                              <span className="inline-flex items-center rounded border border-purple-400/30 bg-purple-900/30 px-2 py-1 font-mono text-[11px] leading-none text-purple-200">
+                                {ev.id}
+                              </span>
+                              {isAlreadyLinked && (
+                                <span className="inline-flex items-center gap-1 rounded border border-green-400/30 bg-green-900/30 px-2 py-1 text-[10px] leading-none text-green-200">
+                                  <svg className="h-3 w-3" fill="currentColor" viewBox="0 0 20 20">
+                                    <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                                  </svg>
+                                  LINKED
+                                </span>
+                              )}
+                            </div>
+
+                            <p className="mb-2 text-sm leading-relaxed text-white">
+                              {ev.description || <span className="italic text-gray-500">(No description)</span>}
+                            </p>
+
+                            <div className="flex flex-wrap gap-3 text-xs text-gray-400">
+                              <span className="flex items-center gap-1">
+                                <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                                </svg>
+                                Case: <span className="font-medium text-gray-300">{ev.caseNumber}</span>
+                              </span>
+                              <span>•</span>
+                              <span className="flex items-center gap-1">
+                                <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                                </svg>
+                                {new Date(ev.dateAdded).toLocaleDateString()}
+                              </span>
+                            </div>
+
+                            {ev.relatedCases && ev.relatedCases.length > 1 && (
+                              <div className="mt-2 rounded-lg border border-blue-500/20 bg-blue-500/10 px-2 py-1">
+                                <p className="text-xs text-blue-200">
+                                  <span className="font-medium">Also used in:</span> {ev.relatedCases.filter((c) => c !== ev.caseNumber).join(", ")}
+                                </p>
+                              </div>
+                            )}
+                          </div>
+
+                          <button
+                            type="button"
+                            onClick={() => linkExistingEvidence(ev)}
+                            disabled={isAlreadyLinked}
+                            className={`inline-flex shrink-0 items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold transition ${
+                              isAlreadyLinked
+                                ? "cursor-not-allowed border border-white/10 bg-white/5 text-gray-500"
+                                : "bg-gradient-to-r from-purple-600 to-indigo-600 text-white shadow-lg shadow-purple-500/20 hover:from-purple-500 hover:to-indigo-500"
+                            }`}
+                            title={isAlreadyLinked ? "Already linked to this case" : "Link this evidence to your case"}
+                          >
+                            <Link2 className="h-4 w-4" />
+                            {isAlreadyLinked ? "Linked" : "Link"}
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </>
+                ) : evidenceSearchTerm ? (
+                  <div className="flex flex-col items-center justify-center py-8 text-center">
+                    <div className="mb-3 rounded-full bg-white/5 p-3">
+                      <Search className="h-6 w-6 text-gray-400" />
+                    </div>
+                    <p className="mb-1 text-sm font-medium text-white">No results found</p>
+                    <p className="text-xs text-gray-400">
+                      No evidence found matching "{evidenceSearchTerm}". Try different keywords.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="flex flex-col items-center justify-center py-8 text-center">
+                    <div className="mb-3 rounded-full bg-white/5 p-3">
+                      <FileText className="h-6 w-6 text-gray-400" />
+                    </div>
+                    <p className="mb-1 text-sm font-medium text-white">Recent Evidence</p>
+                    <p className="text-xs text-gray-400">
+                      Showing recent evidence items. Use search above to find specific items.
+                    </p>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </section>
+
+        <div
+          id="task-target-overview-evidence"
+          className={`rounded-3xl border border-white/10 bg-white/[0.018] p-6 shadow-[0_25px_70px_rgba(15,23,42,0.45)] backdrop-blur-2xl ${highlightClass(
+            "task-target-overview-evidence"
+          )}`}
+        >
           <EvidenceLocker
             evidenceItems={evidenceItems}
             onChange={(next) => {
@@ -1718,19 +1902,32 @@ const handleGenerateConclusion = async () => {
             allowAddRemove={!isSaving}
             caseNumber={caseDetails.caseNumber}
           />
+        </div>
 
 
-        <TechnicalTermsSelector
-          value={technicalTerms}
-          onChange={(items) => {
-            const next = normalizeTechnicalTermList(items);
-            setTechnicalTerms(next);
-            saveToLocalStorage({ technicalTerms: next });
-          }}
-          disabled={isSaving}
-        />
+        <div
+          id="task-target-overview-glossary"
+          className={`rounded-3xl border border-white/10 bg-white/[0.018] p-6 shadow-[0_25px_70px_rgba(15,23,42,0.45)] backdrop-blur-2xl ${highlightClass(
+            "task-target-overview-glossary"
+          )}`}
+        >
+          <TechnicalTermsSelector
+            value={technicalTerms}
+            onChange={(items) => {
+              const next = normalizeTechnicalTermList(items);
+              setTechnicalTerms(next);
+              saveToLocalStorage({ technicalTerms: next });
+            }}
+            disabled={isSaving}
+          />
+        </div>
         {/* Report Conclusion */}
-<div className="rounded-3xl border border-white/10 bg-white/[0.018] p-6 shadow-[0_25px_70px_rgba(15,23,42,0.45)] backdrop-blur-2xl">
+<div
+  id="task-target-overview-conclusion"
+  className={`rounded-3xl border border-white/10 bg-white/[0.018] p-6 shadow-[0_25px_70px_rgba(15,23,42,0.45)] backdrop-blur-2xl ${highlightClass(
+    "task-target-overview-conclusion"
+  )}`}
+>
   {/* Header + Buttons Row */}
   <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
     <div>
@@ -1825,7 +2022,12 @@ const handleGenerateConclusion = async () => {
         </div>
 
         {/* Generate */}
-        <div className="rounded-3xl border border-white/10 bg-white/[0.018] p-6 shadow-[0_25px_70px_rgba(15,23,42,0.45)] backdrop-blur-2xl">
+        <div
+          id="task-target-overview-export"
+          className={`rounded-3xl border border-white/10 bg-white/[0.018] p-6 shadow-[0_25px_70px_rgba(15,23,42,0.45)] backdrop-blur-2xl ${highlightClass(
+            "task-target-overview-export"
+          )}`}
+        >
           <div className="flex flex-col gap-4">
             <div>
               <h3 className="text-lg font-semibold text-white">Export & Simulation</h3>
@@ -1858,19 +2060,6 @@ const handleGenerateConclusion = async () => {
                   <div className="absolute top-0.5 left-0.5 h-4 w-4 rounded-full bg-white transition peer-checked:translate-x-4" />
                 </div>
               </label>
-              <label className="flex items-center justify-between rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm text-gray-200 transition hover:border-amber-500/40">
-                <span>Generate Google Doc</span>
-                <div className="relative">
-                  <input
-                    type="checkbox"
-                    checked={generateGoogleDoc}
-                    onChange={() => setGenerateGoogleDoc(!generateGoogleDoc)}
-                    className="peer sr-only"
-                  />
-                  <div className="h-5 w-9 rounded-full bg-white/15 transition peer-checked:bg-amber-500/70" />
-                  <div className="absolute top-0.5 left-0.5 h-4 w-4 rounded-full bg-white transition peer-checked:translate-x-4" />
-                </div>
-              </label>
               <label className="flex items-center justify-between rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm text-gray-200 transition hover:border-emerald-500/40">
                 <span>Generate Simulation</span>
                 <div className="relative">
@@ -1887,7 +2076,7 @@ const handleGenerateConclusion = async () => {
             </div>
             <button
               className={`inline-flex items-center justify-center gap-2 rounded-full px-6 py-2 text-sm font-semibold transition ${
-                (!generateReport && !generateDocx && !generateGoogleDoc && !generateSimulation) ||
+                (!generateReport && !generateDocx && !generateSimulation) ||
                 isGenerating ||
                 selectedLocations.length === 0
                   ? "cursor-not-allowed bg-white/10 text-gray-300"
@@ -1895,7 +2084,7 @@ const handleGenerateConclusion = async () => {
               }`}
               onClick={handleGenerate}
               disabled={
-                (!generateReport && !generateDocx && !generateGoogleDoc && !generateSimulation) ||
+                (!generateReport && !generateDocx && !generateSimulation) ||
                 isGenerating ||
                 selectedLocations.length === 0
               }
@@ -2054,31 +2243,43 @@ const handleGenerateConclusion = async () => {
       />
       {/* --- AI Suggestion Modal --- */}
 {showSuggestionModal && (
-  <div className="fixed inset-0 flex items-center justify-center bg-black bg-opacity-60 z-50">
-    <div className="bg-gray-800 p-6 rounded-xl shadow-2xl max-w-lg w-full border border-gray-700">
-      <h2 className="text-lg font-semibold text-white mb-4">
-        AI Suggested Improvements
-      </h2>
+  <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/65 backdrop-blur-sm px-4">
+    <div className="w-full max-w-lg rounded-3xl border border-white/12 bg-gradient-to-br from-slate-950/90 via-slate-900/85 to-black/85 p-6 shadow-[0_35px_80px_rgba(15,23,42,0.65)]">
+      <div className="mb-4 flex items-center justify-between">
+        <h2 className="text-lg font-semibold text-white">AI Suggested Improvements</h2>
+        <button
+          type="button"
+          onClick={() => setShowSuggestionModal(false)}
+          className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-white/15 text-gray-300 transition hover:border-white/40 hover:text-white"
+        >
+          <span aria-hidden="true">X</span>
+        </button>
+      </div>
 
       <textarea
-        className="w-full h-40 bg-gray-900 text-gray-100 border border-gray-700 rounded-md p-3 mb-4 resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"
+        className="w-full h-44 resize-none rounded-2xl border border-white/12 bg-white/[0.06] p-3 text-sm text-white placeholder-gray-400 shadow-inner shadow-black/20 transition focus:border-blue-500/60 focus:outline-none focus:ring-1 focus:ring-blue-500/50"
         value={suggestedText}
         onChange={(e) => setSuggestedText(e.target.value)}
       />
 
-      <div className="flex justify-end gap-3">
+      <div className="mt-4 flex justify-end gap-3">
         <button
-          className="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-gray-200 rounded-md transition"
+          type="button"
+          className="inline-flex items-center rounded-full border border-white/15 bg-white/[0.05] px-4 py-2 text-xs font-semibold text-gray-200 transition hover:border-white/35 hover:text-white"
           onClick={() => setShowSuggestionModal(false)}
         >
           Close
         </button>
 
         <button
-          className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-md transition"
+          type="button"
+          className="inline-flex items-center rounded-full bg-gradient-to-r from-emerald-600 to-teal-500 px-4 py-2 text-xs font-semibold text-white shadow-lg shadow-emerald-500/20 transition hover:from-emerald-500 hover:to-teal-400"
           onClick={() => {
             const raw = (suggestedText || "").trim();
-            if (!raw) return setShowSuggestionModal(false);
+            if (!raw) {
+              setShowSuggestionModal(false);
+              return;
+            }
 
             if (suggestTarget === "intro") setReportIntro(raw);
             else if (suggestTarget === "conclusion") setReportConclusion(raw);

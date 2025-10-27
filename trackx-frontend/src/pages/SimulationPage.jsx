@@ -3,33 +3,45 @@ import { Link } from "react-router-dom";
 import adflogo from "../assets/image-removebg-preview.png";
 //import profileIcon from "../assets/profile-icon.png"; 
 import { motion } from "framer-motion";
+import { useAuth } from "../context/AuthContext";
+import { auth } from "../firebase";
+import { signOut } from "firebase/auth";
 
 
 function SimulationPage() {
   const caseName = "Example Case XYZ";
+  const { profile } = useAuth();
+
+  const handleSignOut = async () => {
+    try {
+      await signOut(auth);
+    } catch (error) {
+      console.error("Failed to sign out:", error);
+    }
+  };
 
   return (
     <motion.div
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       transition={{ duration: 1 }}
-      className="relative min-h-screen text-white font-sans overflow-hidden"
+      className="relative min-h-screen text-white font-sans overflow-hidden flex flex-col"
     >
        {/* Gradient Background */}
        <div className="absolute inset-0 bg-gradient-to-br from-black via-gray-900 to-black -z-10" />
       {/* Navbar */}
       <nav className="flex items-center justify-between px-6 py-4 bg-gradient-to-r from-black to-gray-900 bg-opacity-80 backdrop-blur-md shadow-md">
         <Link to="/home" className="inline-flex">
-          <img src={adflogo} alt="Logo" className="h-12 cursor-pointer hover:opacity-80 transition" />
+          <img src={adflogo} alt="Logo" className="h-12 cursor-pointer transition hover:opacity-80" />
         </Link>
 
-        <h1 className="text-xl font-bold text-white">Simulation</h1>
+        <h1 className="text-xl font-semibold uppercase tracking-[0.3em] text-white">Simulation</h1>
 
-        <div className="flex items-center space-x-4">
-          <div>
-            <p className="text-sm">Name Surname</p>
-            <button className="text-red-400 hover:text-red-600 text-xs">Sign Out</button>
-          </div>
+        <div className="text-right text-sm text-gray-200">
+          <p>{profile ? `${profile.firstName} ${profile.surname}` : "Loading..."}</p>
+          <button onClick={handleSignOut} className="text-red-400 hover:text-red-500 text-xs transition">
+            Sign Out
+          </button>
         </div>
       </nav>
 

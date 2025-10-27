@@ -17,13 +17,18 @@ class CaseCreateRequest(BaseModel):
     case_title: str
     date_of_incident: str
     region: str
-    provinceCode: Optional[str] = None
-    provinceName: Optional[str] = None
-    districtCode: Optional[str] = None
-    districtName: Optional[str] = None
+    province_code: Optional[str] = Field(default=None, alias="provinceCode")
+    province_name: Optional[str] = Field(default=None, alias="provinceName")
+    district_code: Optional[str] = Field(default=None, alias="districtCode")
+    district_name: Optional[str] = Field(default=None, alias="districtName")
     between: Optional[str] = None
     urgency: str  
     csv_data: List[GpsPoint]  
-    all_points: List[GpsPoint] 
-    userID: Optional[str] = None
-    userIDs: Optional[List[str]] = Field(default_factory=list)
+    all_points: List[GpsPoint]
+    user_id: Optional[str] = Field(default=None, alias="userId")
+    user_ids: Optional[List[str]] = Field(default_factory=list, alias="userIds")
+    legacy_user_id: Optional[str] = Field(default=None, alias="userID")
+    legacy_user_ids: Optional[List[str]] = Field(default_factory=list, alias="userIDs")
+
+    class Config:
+        allow_population_by_field_name = True

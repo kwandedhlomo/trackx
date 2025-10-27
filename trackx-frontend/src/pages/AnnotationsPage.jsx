@@ -10,6 +10,8 @@ import axios from "axios";
 import NotificationModal from "../components/NotificationModal";
 import useNotificationModal from "../hooks/useNotificationModal";
 import { getFriendlyErrorMessage } from "../utils/errorMessages";
+import NotificationBell from "../components/NotificationBell";
+import { consumeTaskHook } from "../utils/taskHooks";
 
 
 // Import Firebase services
@@ -66,6 +68,24 @@ function AnnotationsPage() {
 
   const [isGenerating, setIsGenerating] = useState(false);
   const formattedDateTime = new Date().toLocaleString();
+  const taskHookRef = useRef(consumeTaskHook());
+  const [taskHighlight, setTaskHighlight] = useState(null);
+  const highlightClass = (targetId) =>
+    taskHighlight?.highlightId === targetId
+      ? "task-hook-highlight border-blue-500/40 bg-blue-500/10"
+      : "";
+
+  const scrollToHighlight = (targetId, attempt = 0) => {
+    if (!targetId) return;
+    const element = document.getElementById(targetId);
+    if (element) {
+      element.scrollIntoView({ behavior: "smooth", block: "center" });
+      return;
+    }
+    if (attempt < 10) {
+      setTimeout(() => scrollToHighlight(targetId, attempt + 1), 120);
+    }
+  };
 
   // ADD: click-away saver
   const handleBlur = () => {
@@ -137,10 +157,10 @@ function AnnotationsPage() {
   }, [GOOGLE_MAPS_API_KEY]);
 
   // ADD: Mount/refresh Street View panorama when location changes
-useEffect(() => {
-  if (!isGoogleMapsLoaded || !streetViewContainerRef.current) return;
-  const loc = locations[currentIndex];
-  if (!loc || !isNum(loc.lat) || !isNum(loc.lng)) return;
+  useEffect(() => {
+    if (!isGoogleMapsLoaded || !streetViewContainerRef.current) return;
+    const loc = locations[currentIndex];
+    if (!loc || !isNum(loc.lat) || !isNum(loc.lng)) return;
 
   const position = { lat: Number(loc.lat), lng: Number(loc.lng) };
 
@@ -163,6 +183,26 @@ useEffect(() => {
     panoramaRef.current.setPosition(position);
   }
 }, [currentIndex, locations, isGoogleMapsLoaded]);
+
+  useEffect(() => {
+    if (isLoading) {
+      return;
+    }
+    const hook = taskHookRef.current;
+  if (!hook || hook.stage !== "annotations") {
+    return;
+  }
+  if (typeof hook.locationIndex === "number" && locations[hook.locationIndex]) {
+    setCurrentIndex(hook.locationIndex);
+  }
+  setTaskHighlight(hook);
+    requestAnimationFrame(() => scrollToHighlight(hook.highlightId));
+  const timeout = setTimeout(() => setTaskHighlight(null), 6000);
+  taskHookRef.current = null;
+  sessionStorage.removeItem("trackxTaskForceCaseId");
+  localStorage.removeItem("trackxCurrentLocationIndex");
+  return () => clearTimeout(timeout);
+}, [isLoading, locations.length, setCurrentIndex]);
 
 
   // helper
@@ -467,8 +507,24 @@ useEffect(() => {
     setSaveError(null);
 
     try {
-      const localStr = localStorage.getItem("trackxCaseData");
-      const caseId = localStorage.getItem("trackxCurrentCaseId");
+      const hookPayload = taskHookRef.current;
+      const forcedCaseId =
+        hookPayload?.caseId || sessionStorage.getItem("trackxTaskForceCaseId") || null;
+      const forcedLocationIndex =
+        typeof hookPayload?.locationIndex === "number" ? hookPayload.locationIndex : null;
+      const ignoreLocalFlag = sessionStorage.getItem("trackxIgnoreLocalCaseData") === "1";
+
+      if (ignoreLocalFlag) {
+        sessionStorage.removeItem("trackxIgnoreLocalCaseData");
+      }
+
+      let localStr = ignoreLocalFlag ? null : localStorage.getItem("trackxCaseData");
+      let caseId = localStorage.getItem("trackxCurrentCaseId");
+
+      if (forcedCaseId) {
+        caseId = forcedCaseId;
+        localStorage.setItem("trackxCurrentCaseId", forcedCaseId);
+      }
 
       // 1) If we have local case data with locations, treat it as authoritative for a *new* session
       if (localStr) {
@@ -545,11 +601,17 @@ useEffect(() => {
 
           // optional: jump to requested index, clamp using latest length
           const storedIndex = parseInt(localStorage.getItem("trackxCurrentLocationIndex") || "0", 10);
-          setCurrentIndex(
-            Number.isFinite(storedIndex)
-              ? Math.max(0, Math.min(storedIndex, localCase.locations.length - 1))
-              : 0
-          );
+          if (forcedLocationIndex !== null && forcedLocationIndex !== undefined) {
+            setCurrentIndex(
+              Math.max(0, Math.min(forcedLocationIndex, localCase.locations.length - 1))
+            );
+          } else {
+            setCurrentIndex(
+              Number.isFinite(storedIndex)
+                ? Math.max(0, Math.min(storedIndex, localCase.locations.length - 1))
+                : 0
+            );
+          }
           localStorage.removeItem("trackxCurrentLocationIndex");
 
           setIsLoading(false);
@@ -592,11 +654,17 @@ useEffect(() => {
         }
 
         const storedIndex = parseInt(localStorage.getItem("trackxCurrentLocationIndex") || "0", 10);
-        setCurrentIndex(
-          Number.isFinite(storedIndex)
-            ? Math.max(0, Math.min(storedIndex, (fb.locations || []).length - 1))
-            : 0
-        );
+        if (forcedLocationIndex !== null && forcedLocationIndex !== undefined) {
+          setCurrentIndex(
+            Math.max(0, Math.min(forcedLocationIndex, (fb.locations || []).length - 1))
+          );
+        } else {
+          setCurrentIndex(
+            Number.isFinite(storedIndex)
+              ? Math.max(0, Math.min(storedIndex, (fb.locations || []).length - 1))
+              : 0
+          );
+        }
         localStorage.removeItem("trackxCurrentLocationIndex");
       } else {
         // truly nothing
@@ -859,6 +927,7 @@ useEffect(() => {
         </div>
 
         <div className="flex items-center gap-6 text-sm text-gray-200">
+          <NotificationBell className="hidden lg:block" />
           <div className="hidden text-right sm:block">
             {savingStatus && (
               <span className={saveError ? "text-rose-300" : isSaving ? "text-amber-300" : "text-emerald-300"}>
@@ -1017,7 +1086,12 @@ useEffect(() => {
                   </div>
                 </div>
 
-                <div className="flex items-center justify-between rounded-2xl border border-white/10 bg-white/[0.02] px-4 py-3 text-sm text-gray-300 shadow-inner shadow-white/5">
+                <div
+                  id="task-target-annotation-report"
+                  className={`flex items-center justify-between rounded-2xl border border-white/10 bg-white/[0.02] px-4 py-3 text-sm text-gray-300 shadow-inner shadow-white/5 ${highlightClass(
+                    "task-target-annotation-report"
+                  )}`}
+                >
                   <span>Include this location in report</span>
                   <label className="inline-flex items-center gap-2">
                     <input
@@ -1054,7 +1128,7 @@ useEffect(() => {
             </div>
 
             <div className="flex flex-col gap-3 rounded-2xl border border-white/10 bg-white/[0.02] px-4 py-3 text-sm text-gray-300 shadow-inner shadow-white/5">
-              <span>Annotations auto-save every 3 seconds.</span>
+              <span>Autosave: ON</span>
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <span className="text-xs text-gray-400">
                   Work through each stop to build a compelling movement report for investigators and prosecutors.
@@ -1073,11 +1147,14 @@ useEffect(() => {
               </div>
             </div>
 
-            <div className={`flex flex-col gap-3 rounded-2xl border border-white/10 px-4 py-3 text-sm transition ${
+            <div
+              id="task-target-annotation-imagery"
+              className={`flex flex-col gap-3 rounded-2xl border border-white/10 px-4 py-3 text-sm transition ${
               snapshotCaptured
                 ? "bg-emerald-500/10 text-emerald-200 shadow-[0_18px_45px_rgba(16,185,129,0.35)]"
                 : "bg-white/[0.02] text-gray-300 shadow-inner shadow-white/5"
-            }`}>
+            } ${highlightClass("task-target-annotation-imagery")}`}
+            >
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div className="flex items-center gap-2">
                   <div className={`flex h-8 w-8 items-center justify-center rounded-full border ${
@@ -1178,7 +1255,12 @@ useEffect(() => {
               </div>
             </div>
 
-            <div className="space-y-6 rounded-2xl border border-white/10 bg-white/[0.02] px-6 py-6 shadow-[0_18px_45px_rgba(15,23,42,0.45)]">
+            <div
+              id="task-target-annotation-form"
+              className={`space-y-6 rounded-2xl border border-white/10 bg-white/[0.02] px-6 py-6 shadow-[0_18px_45px_rgba(15,23,42,0.45)] ${highlightClass(
+                "task-target-annotation-form"
+              )}`}
+            >
               <div className="flex flex-col gap-2 sm:flex-row sm:items-baseline sm:justify-between">
                 <div>
                   <h3 className="text-lg font-semibold text-white">Add Location Context</h3>

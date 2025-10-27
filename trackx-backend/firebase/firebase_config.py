@@ -17,24 +17,19 @@ BASE_DIR = Path(__file__).resolve().parent  # .../trackx-backend/firebase
 def _load_credentials():
     # Option B: inline JSON (preferred for CI/Render)
     if CRED_JSON_ENV:
-        # Try multiple parsing strategies
         try:
-            # Strategy 1: Parse directly (no replacement)
             data = json.loads(CRED_JSON_ENV)
             return credentials.Certificate(data)
         except json.JSONDecodeError:
             try:
-                # Strategy 2: Replace escaped newlines
                 data = json.loads(CRED_JSON_ENV.replace("\\n", "\n"))
                 return credentials.Certificate(data)
             except json.JSONDecodeError:
                 try:
-                    # Strategy 3: Replace both types of newlines
                     cleaned = CRED_JSON_ENV.replace("\\n", "\n").replace("\\\\n", "\n")
                     data = json.loads(cleaned)
                     return credentials.Certificate(data)
                 except json.JSONDecodeError as e:
-                    # Log error details for debugging
                     print(f"❌ Failed to parse FIREBASE_SERVICE_ACCOUNT_JSON")
                     print(f"Error: {e}")
                     print(f"First 300 chars: {CRED_JSON_ENV[:300]}")

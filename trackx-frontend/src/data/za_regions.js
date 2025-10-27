@@ -2,7 +2,7 @@
 const ZA_REGIONS = [
   { code: "WC", name: "Western Cape", districts: [
     { code: 101, name: "Bellville" }, { code: 102, name: "Goodwood" }, { code: 103, name: "Cape" },
-    { code: 104, name: "Simon’s Town" }, { code: 105, name: "Wynberg" }, { code: 106, name: "Mitchells Plain" },
+    { code: 104, name: "Simon's Town" }, { code: 105, name: "Wynberg" }, { code: 106, name: "Mitchells Plain" },
     { code: 107, name: "Kuils River" }, { code: 108, name: "Paarl" }, { code: 109, name: "Stellenbosch" },
     { code: 110, name: "Somerset West" }, { code: 111, name: "Strand" }, { code: 112, name: "Wellington" },
     { code: 113, name: "Bredasdorp" }, { code: 114, name: "Caledon" }, { code: 115, name: "Hermanus" },

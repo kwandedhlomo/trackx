@@ -25,6 +25,7 @@ import NotificationModal from "../components/NotificationModal";
 import useNotificationModal from "../hooks/useNotificationModal";
 import { getFriendlyErrorMessage } from "../utils/errorMessages";
 import AnimatedMap from "../components/AnimatedMap";
+import NotificationBell from "../components/NotificationBell";
 
 
 function AdminPanel() {
@@ -83,7 +84,7 @@ function AdminPanel() {
         caseNumber: caseItem.caseNumber,
         caseTitle: caseItem.caseTitle,
         userIds: caseItem.userIds || caseItem.userIDs || [],
-        userID: caseItem.userID || null,
+        ownerId: caseItem.userId || caseItem.userID || null,
       }));
       setCases(formatted);
       if (!selectedCaseId && formatted.length) {
@@ -126,8 +127,8 @@ function AdminPanel() {
 
     const ids = targetCase.userIds && targetCase.userIds.length
       ? targetCase.userIds
-      : targetCase.userID
-      ? [targetCase.userID]
+      : targetCase.ownerId
+      ? [targetCase.ownerId]
       : [];
 
     if (!ids.length) {
@@ -244,7 +245,7 @@ function AdminPanel() {
       setCases((prev) =>
         prev.map((caseItem) =>
           caseItem.id === selectedCaseId
-            ? { ...caseItem, userIds: userIds, userID: userIds[0] }
+            ? { ...caseItem, userIds: userIds, ownerId: userIds[0] }
             : caseItem
         )
       );
@@ -447,6 +448,7 @@ const handleDeleteUser = async (userId, skipConfirmation = false) => {
           </div>
 
           <div className="flex items-center gap-6 text-sm text-gray-200">
+            <NotificationBell className="hidden lg:block" />
             <Link
               to="/home"
               className="rounded-full bg-white/[0.02] px-3 py-1.5 font-medium text-white transition hover:bg-white/15"
@@ -972,4 +974,3 @@ const handleDeleteUser = async (userId, skipConfirmation = false) => {
 }
 
 export default AdminPanel;
-

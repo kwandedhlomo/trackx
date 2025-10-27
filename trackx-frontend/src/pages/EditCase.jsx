@@ -18,6 +18,8 @@ import {
   LayoutDashboard,
   Trash2,
   Plus,
+  Search,
+  Link2,
 } from "lucide-react";
 import { clearCaseSession } from "../utils/caseSession";
 import NotificationModal from "../components/NotificationModal";
@@ -25,6 +27,7 @@ import useNotificationModal from "../hooks/useNotificationModal";
 import { getFriendlyErrorMessage } from "../utils/errorMessages";
 import EvidenceLocker from "../components/EvidenceLocker";
 import RegionSelectorModal from "../components/RegionSelectorModal";
+import { consumeTaskHook } from "../utils/taskHooks";
 
 
 // Firebase services (with Jon's updater)
@@ -35,6 +38,11 @@ import {
   getCurrentUserId,
   loadSnapshotsFromFirebase,
   getCaseReports,
+  loadEvidenceByCase,
+  batchSaveEvidence,
+  loadAllEvidence,
+  searchEvidence,
+  linkEvidenceToCase,
 } from "../services/firebaseServices";
 
 function EditCasePage() {
@@ -43,6 +51,11 @@ function EditCasePage() {
   const { profile } = useAuth();
   // Evidence Locker
   const [evidenceItems, setEvidenceItems] = useState([]);
+  const [loadingEvidence, setLoadingEvidence] = useState(false);
+  const [showEvidenceSearch, setShowEvidenceSearch] = useState(false);
+  const [evidenceSearchTerm, setEvidenceSearchTerm] = useState("");
+  const [evidenceSearchResults, setEvidenceSearchResults] = useState([]);
+  const [isSearchingEvidence, setIsSearchingEvidence] = useState(false);
 
 
   const { modalState, openModal, closeModal } = useNotificationModal();
@@ -81,7 +94,8 @@ function EditCasePage() {
   const [between, setBetween] = useState("");
   const [status, setStatus] = useState("not started");
   const [urgency, setUrgency] = useState("");
-  const [showMenu, setShowMenu] = useState(false);
+const [showMenu, setShowMenu] = useState(false);
+const [taskHighlight, setTaskHighlight] = useState(null);
 
   const [firebaseCase, setFirebaseCase] = useState(null);
   const [annotationsAvailable, setAnnotationsAvailable] = useState(false);
@@ -98,9 +112,22 @@ function EditCasePage() {
 
   const formattedDateTime = new Date().toLocaleString();
   const statusLabel = status ? status.replace(/\b\w/g, (char) => char.toUpperCase()) : "Not set";
-  const urgencyLabel = urgency || "Not set";
-  const regionLabel = region ? region.replace(/-/g, " ") : "Not specified";
-  const heroTitle = caseTitle?.trim() || "Untitled Case";
+const urgencyLabel = urgency || "Not set";
+const regionLabel = region ? region.replace(/-/g, " ") : "Not specified";
+const heroTitle = caseTitle?.trim() || "Untitled Case";
+const isHighlighted = (targetId) => taskHighlight?.highlightId === targetId;
+
+const scrollToHighlight = (targetId, attempt = 0) => {
+  if (!targetId) return;
+  const node = document.getElementById(targetId);
+  if (node) {
+    node.scrollIntoView({ behavior: "smooth", block: "center" });
+    return;
+  }
+  if (attempt < 10) {
+    window.setTimeout(() => scrollToHighlight(targetId, attempt + 1), 120);
+  }
+};
 
   const handleSignOut = async () => {
     try {
@@ -111,30 +138,107 @@ function EditCasePage() {
     }
   };
 
-  // Evidence Locker helpers
-  const generateEvidenceId = () => {
-    const timestamp = Date.now();
-    const random = Math.floor(Math.random() * 1000);
-    return `EV-${timestamp}-${random}`;
+  // ============ Evidence helpers ============
+
+  const loadEvidence = async (caseNum) => {
+    if (!caseNum) {
+      return;
+    }
+
+    setLoadingEvidence(true);
+    try {
+      const items = await loadEvidenceByCase(caseNum);
+      setEvidenceItems(items);
+    } catch (error) {
+      console.error("Error loading evidence:", error);
+      showError("Evidence Load Error", error, "Failed to load evidence items from database");
+    } finally {
+      setLoadingEvidence(false);
+    }
   };
 
-  const addEvidence = () => {
-    const newEvidence = {
-      id: generateEvidenceId(),
-      description: "",
-      dateAdded: new Date().toISOString(),
-      caseNumber: caseNumber || "Pending",
-    };
-    setEvidenceItems((prev) => [...prev, newEvidence]);
+  const saveEvidence = async () => {
+    if (!caseNumber || evidenceItems.length === 0) {
+      return;
+    }
+
+    try {
+      await batchSaveEvidence(
+        evidenceItems,
+        getCurrentUserId() || auth.currentUser?.uid,
+        caseNumber
+      );
+    } catch (error) {
+      console.error("Failed to save evidence:", error);
+      throw error;
+    }
   };
 
-  const updateEvidence = (id, description) => {
-    setEvidenceItems((prev) => prev.map((it) => (it.id === id ? { ...it, description } : it)));
+const handleEvidenceSearch = async () => {
+  if (!evidenceSearchTerm.trim()) {
+    await handleLoadAllEvidence();
+    return;
+  }
+
+    setIsSearchingEvidence(true);
+    try {
+      const results = await searchEvidence(evidenceSearchTerm.trim());
+      setEvidenceSearchResults(results);
+    } catch (error) {
+      console.error("Error searching evidence:", error);
+      showError("Search Error", error, "Failed to search evidence");
+    } finally {
+      setIsSearchingEvidence(false);
+    }
   };
 
-  const removeEvidence = (id) => {
-    setEvidenceItems((prev) => prev.filter((it) => it.id !== id));
+  const handleLoadAllEvidence = async () => {
+    setIsSearchingEvidence(true);
+    try {
+      const items = await loadAllEvidence(50);
+      setEvidenceSearchResults(items);
+    } catch (error) {
+      console.error("Error loading evidence list:", error);
+      showError("Load Error", error, "Failed to load evidence items");
+    } finally {
+      setIsSearchingEvidence(false);
+    }
   };
+
+  const handleLinkEvidence = async (evidence) => {
+    if (!caseNumber) {
+      showError("Cannot Link Evidence", null, "Case number is required before linking evidence.");
+      return;
+    }
+
+    const alreadyLinked = evidenceItems.some((item) => item.id === evidence.id);
+    if (alreadyLinked) {
+      showError("Already Linked", null, "This evidence is already linked to the case.");
+      return;
+    }
+
+    try {
+      await linkEvidenceToCase(evidence.id, caseNumber);
+      setEvidenceItems((prev) => [...prev, evidence]);
+      showSuccess("Evidence Linked", `Evidence ${evidence.id} has been linked to this case.`);
+  } catch (error) {
+    console.error("Error linking evidence:", error);
+    showError("Link Error", error, "Failed to link evidence to case");
+  }
+};
+
+  useEffect(() => {
+    const hook = consumeTaskHook();
+    if (!hook || hook.stage !== "metadata") {
+      return;
+    }
+    setTaskHighlight(hook);
+    requestAnimationFrame(() => scrollToHighlight(hook.highlightId));
+    const timeout = setTimeout(() => setTaskHighlight(null), 6000);
+    sessionStorage.removeItem("trackxTaskForceCaseId");
+    sessionStorage.removeItem("trackxIgnoreLocalCaseData");
+    return () => clearTimeout(timeout);
+  }, []);
 
 
   // Fetch case (Firebase first, then backend, else use provided state)
@@ -147,7 +251,6 @@ function EditCasePage() {
             const fb = await loadCaseWithAnnotations(caseIdFromLocation);
             setCaseData(fb);
             setFirebaseCase(fb);
-            setEvidenceItems(fb.evidenceItems || []);
           } catch (e) {
             console.warn("Firebase load failed; trying backend:", e);
             await fetchFromBackend();
@@ -156,7 +259,6 @@ function EditCasePage() {
           await fetchFromBackend();
         } else if (caseDataFromLocation) {
           setCaseData(caseDataFromLocation);
-          setEvidenceItems(caseDataFromLocation.evidenceItems || []);
         } else {
           console.error("No case identifier provided");
           setLoading(false);
@@ -177,7 +279,6 @@ function EditCasePage() {
         const found = (res.data?.cases || []).find((c) => c.doc_id === docIdFromLocation);
         if (found){
           setCaseData(found);
-          setEvidenceItems(found.evidence_items || found.evidenceItems || []);
         } 
         else console.warn("Case not found in backend");
       } catch (err) {
@@ -218,8 +319,13 @@ function EditCasePage() {
     setBetween(caseData.between || "");
     setStatus(caseData.status || "not started");
     setUrgency(caseData.urgency || "");
-    setEvidenceItems(caseData.evidenceItems || caseData.evidence_items || []);
   }, [caseData]);
+
+  useEffect(() => {
+    if (caseNumber) {
+      loadEvidence(caseNumber);
+    }
+  }, [caseNumber]);
 
   const checkForAnnotations = async () => {
     if (!caseData) return;
@@ -241,7 +347,6 @@ function EditCasePage() {
             const full = await loadCaseWithAnnotations(found.caseId);
             existing = full;
             setFirebaseCase(full);
-            setEvidenceItems(full.evidenceItems || []);
           }
         } catch (e) {
           console.warn("Could not load user cases:", e);
@@ -324,7 +429,6 @@ const handleUpdate = async (e) => {
   e.preventDefault();
 
   try {
-    // Normalized fields (include evidence)
     const normalized = {
       caseNumber: String(caseNumber || "").trim(),
       caseTitle: String(caseTitle || "").trim(),
@@ -337,25 +441,19 @@ const handleUpdate = async (e) => {
       between: String(between || "").trim(),
       status: status || "not started",
       urgency: urgency || "",
-      evidenceItems, // <-- include evidence in the cloud update
     };
 
-    // A) Backend update (compat)
     if (docIdFromLocation || caseData?.doc_id) {
       try {
         await axios.put("http://localhost:8000/cases/update", {
           doc_id: caseData?.doc_id || docIdFromLocation,
           ...normalized,
-          // For backend field parity:
-          evidence_items: evidenceItems,
         });
       } catch (backendError) {
         console.warn("Backend update failed:", backendError);
-        // non-fatal
       }
     }
 
-    // B) Firebase partial update (Jon's way)
     if (firebaseCase?.caseId) {
       try {
         const filteredUpdates = Object.fromEntries(
@@ -364,7 +462,6 @@ const handleUpdate = async (e) => {
         await updateCaseAnnotations(firebaseCase.caseId, filteredUpdates);
       } catch (fbErr) {
         console.warn("Firebase update failed:", fbErr);
-        // surface to user but don't crash the page
         showError(
           "Cloud update failed",
           fbErr,
@@ -372,6 +469,16 @@ const handleUpdate = async (e) => {
         );
         return;
       }
+    }
+
+    try {
+      await saveEvidence();
+    } catch (evidenceError) {
+      showError(
+        "Evidence Save Warning",
+        evidenceError,
+        "Case updated, but we could not save evidence items to the database."
+      );
     }
 
     showSuccess("Case updated", "Your changes have been saved successfully.", {
@@ -407,7 +514,6 @@ const handleUpdate = async (e) => {
         reportConclusion: firebaseCase.reportConclusion || "",
         selectedForReport: firebaseCase.selectedForReport || [],
         urgency: firebaseCase.urgency || "",
-        evidenceItems, // <-- include evidence
       };
     } else {
       // new case edit flow → hard reset so we don't pull an old case
@@ -425,7 +531,6 @@ const handleUpdate = async (e) => {
         reportIntro: "",
         reportConclusion: "",
         selectedForReport: [],
-        evidenceItems, // <-- include evidence
       };
     }
 
@@ -462,7 +567,6 @@ const handleUpdate = async (e) => {
         reportIntro: "",
         reportConclusion: "",
         selectedForReport: [],
-        evidenceItems, // <-- include evidence
       };
       localStorage.setItem("trackxCaseData", JSON.stringify(payload));
       localStorage.removeItem("trackxCurrentCaseId");
@@ -681,7 +785,7 @@ const handleUpdate = async (e) => {
               <div className="grid grid-cols-2 gap-4 text-sm text-gray-300">
                 <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-4">
                   <p className="text-xs uppercase tracking-wide text-gray-500">Case Number</p>
-                  <p className="mt-2 text-2xl font-semibold text-white">{caseNumber || "—"}</p>
+                  <p className="mt-2 text-2xl font-semibold text-white">{caseNumber || "-"}</p>
                   <p className="text-xs text-gray-500">Primary identifier for this matter.</p>
                 </div>
                 <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-4">
@@ -839,7 +943,14 @@ const handleUpdate = async (e) => {
             </div>
           </div>
 
-          <div className="rounded-3xl border border-white/10 bg-white/[0.018] p-6 shadow-[0_25px_70px_rgba(15,23,42,0.45)] backdrop-blur-2xl">
+          <div
+            id="task-target-metadata-case"
+            className={`rounded-3xl border border-white/10 bg-white/[0.018] p-6 shadow-[0_25px_70px_rgba(15,23,42,0.45)] backdrop-blur-2xl transition ${
+              isHighlighted("task-target-metadata-case")
+                ? "task-hook-highlight border-blue-500/40 bg-blue-500/10"
+                : ""
+            }`}
+          >
             <h2 className="text-lg font-semibold text-white">Case Information</h2>
             <p className="text-xs text-gray-400">
               Update core metadata and sync it across cloud and local storage.
@@ -891,7 +1002,7 @@ const handleUpdate = async (e) => {
                     {provinceName ? (
                       <span className="capitalize">
                         {provinceName}
-                        {districtName ? ` — ${districtName}` : ""}
+                        {districtName ? ` - ${districtName}` : ""}
                       </span>
                     ) : (
                       <span className="text-gray-400">Select province and district</span>
@@ -973,14 +1084,213 @@ const handleUpdate = async (e) => {
             }}
           />
 
+          {/* Evidence Search & Link Section */}
+          <section className="rounded-3xl border border-white/10 bg-white/[0.018] p-6 shadow-[0_25px_70px_rgba(15,23,42,0.45)] backdrop-blur-2xl">
+            <div className="flex flex-col gap-1 sm:flex-row sm:items-baseline sm:justify-between">
+              <div>
+                <h3 className="text-sm font-semibold text-white flex items-center gap-2">
+                  <Search className="h-5 w-5 text-purple-400" />
+                  Search & Link Existing Evidence
+                </h3>
+                <p className="text-xs text-gray-400 mt-1">
+                  Reuse evidence collected in other cases to avoid duplication.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  const next = !showEvidenceSearch;
+                  setShowEvidenceSearch(next);
+                  if (next) {
+                    handleLoadAllEvidence();
+                  } else {
+                    setEvidenceSearchResults([]);
+                    setEvidenceSearchTerm("");
+                  }
+                }}
+                className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-gradient-to-r from-purple-900 to-indigo-900 px-4 py-2 text-sm font-semibold text-white shadow-[0_15px_35px_rgba(15,23,42,0.55)] transition hover:-translate-y-0.5"
+              >
+                <Search className="h-4 w-4" />
+                {showEvidenceSearch ? "Hide Search" : "Browse Evidence"}
+              </button>
+            </div>
+
+            {showEvidenceSearch && (
+              <div className="mt-4 space-y-4 rounded-2xl border border-white/10 bg-white/[0.02] p-4">
+                <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+                  <div className="relative flex-1">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+                    <input
+                      type="text"
+                      value={evidenceSearchTerm}
+                      onChange={(e) => setEvidenceSearchTerm(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          handleEvidenceSearch();
+                        }
+                      }}
+                      placeholder="Search by description, case number, or evidence ID..."
+                      className="w-full rounded-xl border border-white/10 bg-white/[0.02] pl-10 pr-3 py-2 text-sm text-white placeholder-gray-500 focus:border-purple-700/50 focus:outline-none focus:ring-2 focus:ring-purple-700/30"
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleEvidenceSearch}
+                    disabled={isSearchingEvidence}
+                    className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-gradient-to-r from-purple-900 via-indigo-900 to-purple-900 px-4 py-2 text-sm font-medium text-white shadow-[0_15px_35px_rgba(15,23,42,0.55)] transition hover:-translate-y-0.5 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    <Search className="w-4 h-4" />
+                    {isSearchingEvidence ? "Searching..." : "Search"}
+                  </button>
+                </div>
+
+                <div className="max-h-96 space-y-3 overflow-y-auto pr-2">
+                  {isSearchingEvidence ? (
+                    <div className="flex flex-col items-center justify-center py-8 text-center">
+                      <div className="mb-3 h-8 w-8 animate-spin rounded-full border-t-2 border-b-2 border-purple-500"></div>
+                      <p className="text-sm text-gray-400">Searching evidence database...</p>
+                    </div>
+                  ) : evidenceSearchResults.length > 0 ? (
+                    <>
+                      <div className="mb-3 flex items-center justify-between rounded-xl border border-purple-500/20 bg-purple-500/10 px-3 py-2">
+                        <span className="text-xs font-medium text-purple-200">
+                          Found {evidenceSearchResults.length} evidence item{evidenceSearchResults.length !== 1 ? "s" : ""}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEvidenceSearchResults([]);
+                            setEvidenceSearchTerm("");
+                          }}
+                          className="text-xs text-purple-300 hover:text-purple-100 transition"
+                        >
+                          Clear Results
+                        </button>
+                      </div>
+
+                      {evidenceSearchResults.map((ev) => {
+                        const isAlreadyLinked = evidenceItems.some((item) => item.id === ev.id);
+                        return (
+                          <div
+                            key={ev.id}
+                            className="group flex items-start justify-between gap-4 rounded-2xl border border-white/10 bg-white/[0.035] p-4 text-sm shadow-inner shadow-white/5 transition hover:border-purple-500/30 hover:bg-white/[0.05]"
+                          >
+                            <div className="flex-1 min-w-0">
+                              <div className="mb-2 flex flex-wrap items-center gap-2">
+                                <span className="inline-flex items-center rounded border border-purple-400/30 bg-purple-900/30 px-2 py-1 font-mono text-[11px] leading-none text-purple-200">
+                                  {ev.id}
+                                </span>
+                                {isAlreadyLinked && (
+                                  <span className="inline-flex items-center gap-1 rounded border border-green-400/30 bg-green-900/30 px-2 py-1 text-[10px] leading-none text-green-200">
+                                    <svg className="h-3 w-3" fill="currentColor" viewBox="0 0 20 20">
+                                      <path
+                                        fillRule="evenodd"
+                                        d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
+                                        clipRule="evenodd"
+                                      />
+                                    </svg>
+                                    LINKED
+                                  </span>
+                                )}
+                              </div>
+
+                              <p className="mb-2 text-sm leading-relaxed text-white">
+                                {ev.description || <span className="italic text-gray-500">(No description)</span>}
+                              </p>
+
+                              <div className="flex flex-wrap gap-3 text-xs text-gray-400">
+                                <span className="flex items-center gap-1">
+                                  <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                                  </svg>
+                                  Case: <span className="font-medium text-gray-300">{ev.caseNumber}</span>
+                                </span>
+                                <span>•</span>
+                                <span className="flex items-center gap-1">
+                                  <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                                  </svg>
+                                  {new Date(ev.dateAdded).toLocaleDateString()}
+                                </span>
+                              </div>
+
+                              {ev.relatedCases && ev.relatedCases.length > 1 && (
+                                <div className="mt-2 rounded-lg border border-blue-500/20 bg-blue-500/10 px-2 py-1">
+                                  <p className="text-xs text-blue-200">
+                                    <span className="font-medium">Also used in:</span>{" "}
+                                    {ev.relatedCases.filter((c) => c !== ev.caseNumber).join(", ")}
+                                  </p>
+                                </div>
+                              )}
+                            </div>
+
+                            <button
+                              type="button"
+                              onClick={() => handleLinkEvidence(ev)}
+                              disabled={isAlreadyLinked}
+                              className={`inline-flex shrink-0 items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold transition ${
+                                isAlreadyLinked
+                                  ? "cursor-not-allowed border border-white/10 bg-white/5 text-gray-500"
+                                  : "bg-gradient-to-r from-purple-600 to-indigo-600 text-white shadow-lg shadow-purple-500/20 hover:from-purple-500 hover:to-indigo-500"
+                              }`}
+                              title={isAlreadyLinked ? "Already linked to this case" : "Link this evidence to your case"}
+                            >
+                              <Link2 className="h-4 w-4" />
+                              {isAlreadyLinked ? "Linked" : "Link"}
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </>
+                  ) : evidenceSearchTerm ? (
+                    <div className="flex flex-col items-center justify-center py-8 text-center">
+                      <div className="mb-3 rounded-full bg-white/5 p-3">
+                        <Search className="h-6 w-6 text-gray-400" />
+                      </div>
+                      <p className="mb-1 text-sm font-medium text-white">No results found</p>
+                      <p className="text-xs text-gray-400">
+                        No evidence found matching "{evidenceSearchTerm}". Try different keywords.
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="flex flex-col items-center justify-center py-8 text-center">
+                      <div className="mb-3 rounded-full bg-white/5 p-3">
+                        <FileText className="h-6 w-6 text-gray-400" />
+                      </div>
+                      <p className="mb-1 text-sm font-medium text-white">Recent Evidence</p>
+                      <p className="text-xs text-gray-400">
+                        Showing recent evidence items. Use search above to find specific items.
+                      </p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </section>
+
           {/* Evidence Locker */}
-          <EvidenceLocker
-            evidenceItems={evidenceItems}
-            onChange={setEvidenceItems}
-            caseNumber={caseNumber}
-            title="Evidence Locker"
-            subtitle="Manage evidence items for this case"
-          />
+          {loadingEvidence && (
+            <div className="mb-3 text-xs text-gray-400">
+              Loading evidence items for this case...
+            </div>
+          )}
+          <div
+            id="task-target-metadata-evidence"
+            className={`rounded-3xl border border-transparent transition ${
+              isHighlighted("task-target-metadata-evidence")
+                ? "task-hook-highlight border-blue-500/40 bg-blue-500/10"
+                : ""
+            }`}
+          >
+            <EvidenceLocker
+              evidenceItems={evidenceItems}
+              onChange={setEvidenceItems}
+              caseNumber={caseNumber}
+              title="Evidence Locker"
+              subtitle="Manage evidence items for this case"
+            />
+          </div>
 
           <div className="rounded-3xl border border-white/10 bg-white/[0.018] p-6 shadow-[0_25px_70px_rgba(15,23,42,0.45)] backdrop-blur-2xl">
             <div className="flex flex-wrap items-center justify-between gap-3">

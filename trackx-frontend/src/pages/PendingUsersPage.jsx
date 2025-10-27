@@ -17,6 +17,7 @@ import NotificationModal from "../components/NotificationModal";
 import useNotificationModal from "../hooks/useNotificationModal";
 import { getFriendlyErrorMessage } from "../utils/errorMessages";
 import { Home, FilePlus2, FolderOpen, Briefcase, LayoutDashboard, Users, UserCheck, UserX } from "lucide-react";
+import NotificationBell from "../components/NotificationBell";
 
 function PendingUsersPage() {
   const [allUsers, setAllUsers] = useState([]);
@@ -255,10 +256,22 @@ function PendingUsersPage() {
       </div>
   
       <div className="flex items-center gap-4 text-sm text-gray-200">
+        <NotificationBell className="hidden lg:block" />
         <span className="hidden text-right md:block">
           <span className="block text-xs text-gray-400">Pending • {pendingCount}</span>
           <span>{formattedDateTime}</span>
         </span>
+        <div className="flex flex-col items-end">
+          <span className="text-base font-semibold text-white">
+            {profile ? `${profile.firstName || ""} ${profile.surname || ""}`.trim() || "Administrator" : "Administrator"}
+          </span>
+          <button
+            onClick={handleSignOut}
+            className="text-xs text-gray-400 transition hover:text-white"
+          >
+            Sign Out
+          </button>
+        </div>
       </div>
     </nav>
   

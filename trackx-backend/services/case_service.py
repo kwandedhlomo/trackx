@@ -1,7 +1,6 @@
 from firebase.firebase_config import db
-from google.cloud.firestore_v1 import DocumentReference, SERVER_TIMESTAMP
+from google.cloud.firestore_v1 import DocumentReference
 from google.api_core.datetime_helpers import DatetimeWithNanoseconds
-from google.cloud.firestore_v1 import SERVER_TIMESTAMP
 from models.case_model import CaseCreateRequest
 import uuid
 from google.cloud import firestore
@@ -15,13 +14,13 @@ import time
 from datetime import timedelta
 from datetime import timezone
 from datetime import datetime
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 from services.notifications_service import add_notification  # Import the notifications service
 import os
 from dotenv import load_dotenv
 from openai import OpenAI
 from firebase_admin import firestore
-from firebase_admin.firestore import SERVER_TIMESTAMP
+from firebase_admin.firestore import SERVER_TIMESTAMP, DELETE_FIELD
 import logging
 
 logger = logging.getLogger(__name__)
@@ -38,6 +37,18 @@ def sanitize_firestore_data(data):
     for key, value in data.items():
         if isinstance(value, (str, int, float, bool)) or value is None:
             clean[key] = value
+        elif isinstance(value, list):
+            sanitized_list = []
+            for item in value:
+                if isinstance(item, (str, int, float, bool)) or item is None:
+                    sanitized_list.append(item)
+                elif isinstance(item, dict):
+                    sanitized_list.append(sanitize_firestore_data(item))
+                else:
+                    sanitized_list.append(str(item))
+            clean[key] = sanitized_list
+        elif isinstance(value, dict):
+            clean[key] = sanitize_firestore_data(value)
         elif isinstance(value, DatetimeWithNanoseconds):
             clean[key] = value.isoformat()
         elif isinstance(value, DocumentReference):
@@ -47,13 +58,75 @@ def sanitize_firestore_data(data):
     return clean
 
 
+def _normalize_case_user_fields(case_data: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Ensure case dictionaries expose a single canonical `userIds` list and `userId` owner field.
+    Removes legacy `userIDs`/`userID` keys while preserving backward compatibility.
+    """
+    raw_list = case_data.get("userIds")
+    if not isinstance(raw_list, list):
+        raw_list = case_data.get("userIDs") or []
+    normalized_list: List[str] = []
+    for uid in raw_list or []:
+        if uid and uid not in normalized_list:
+            normalized_list.append(uid)
+
+    primary_user = case_data.get("userId") or case_data.get("userID")
+    if primary_user:
+        if primary_user not in normalized_list:
+            normalized_list.insert(0, primary_user)
+    elif normalized_list:
+        primary_user = normalized_list[0]
+
+    case_data["userIds"] = normalized_list
+    case_data["userId"] = primary_user
+    case_data.pop("userIDs", None)
+    case_data.pop("userID", None)
+    case_data["isShared"] = len(normalized_list) > 1
+    return case_data
+
+
+def _extract_user_ids_from_payload_dict(payload: Dict[str, Any]) -> Tuple[List[str], Optional[str]]:
+    """
+    Collect unique user ids from any legacy naming variants in a request payload.
+    Returns (userIds list, primary userId).
+    """
+    candidate_lists = []
+    for key in ("userIds", "userIDs", "user_ids", "legacy_user_ids"):
+        value = payload.get(key)
+        if isinstance(value, list):
+            candidate_lists.append(value)
+
+    candidate_primary = (
+        payload.get("userId")
+        or payload.get("userID")
+        or payload.get("user_id")
+        or payload.get("legacy_user_id")
+    )
+
+    combined: List[str] = []
+    for entries in candidate_lists:
+        for uid in entries:
+            if uid and uid not in combined:
+                combined.append(uid)
+
+    if candidate_primary:
+        if candidate_primary not in combined:
+            combined.insert(0, candidate_primary)
+    elif combined:
+        candidate_primary = combined[0]
+
+    return combined, candidate_primary
+
+
 def _case_accessible_to_user(case_data: Dict[str, Any], user_id: str) -> bool:
+    case_data = _normalize_case_user_fields(dict(case_data))
     if not user_id:
         return True
-    user_ids = case_data.get("userIds") or case_data.get("userIDs") or []
+    user_ids = case_data.get("userIds") or []
     if isinstance(user_ids, list) and user_id in user_ids:
         return True
-    return case_data.get("userID") == user_id
+    return case_data.get("userId") == user_id
 
 
 def _get_case_documents_for_user(user_id: str, include_deleted: bool = False) -> Dict[str, Any]:
@@ -64,25 +137,20 @@ def _get_case_documents_for_user(user_id: str, include_deleted: bool = False) ->
     cases_ref = db.collection("cases")
     docs_map: Dict[str, Any] = {}
 
-    # Step 1: Fetch all docs (no risky Firestore filters)
     all_docs = list(cases_ref.stream())
 
     for doc in all_docs:
         data = doc.to_dict() or {}
 
-        # Skip soft-deleted unless explicitly requested
         if not include_deleted and data.get("is_deleted", False):
             continue
 
-        # Filter by user ownership if applicable
-        if user_id:
-            if not _case_accessible_to_user(data, user_id):
-                continue
+        if user_id and not _case_accessible_to_user(data, user_id):
+            continue
 
         docs_map[doc.id] = doc
 
     return docs_map
-
 from firebase_admin import firestore
 from firebase_admin.firestore import SERVER_TIMESTAMP
 from openai import OpenAI
@@ -215,6 +283,32 @@ async def generate_case_conclusion(case_title: str, region: str, intro_text: str
     )
     return (resp.choices[0].message.content or "").strip()
 
+async def suggest_text_improvement(text: str, context_type: str = "general") -> str:
+    """
+    Returns an improved version of the given text with grammar, spelling, and clarity fixes.
+    """
+    if not text.strip():
+        return ""
+
+    prompt = (
+        "You are an expert editor. Review the text below for grammar, spelling, and clarity. "
+        "Keep the meaning intact and maintain a formal tone suitable for a forensic report. "
+        f"Context type: {context_type}. Only output the corrected text.\n\n"
+        f"Text:\n{text}"
+    )
+
+    resp = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[
+            {"role": "system", "content": "You are a helpful and precise editor."},
+            {"role": "user", "content": prompt}
+        ],
+        max_tokens=500,
+        temperature=0.1,
+    )
+
+    return (resp.choices[0].message.content or "").strip()
+
 # --- Combined helper that creates both and stores to Firestore with aligned keys ---
 async def add_intro_conclusion(case_id: str):
     doc_ref = db.collection("cases").document(case_id)
@@ -254,11 +348,28 @@ async def add_intro_conclusion(case_id: str):
 
     return True, {"reportIntro": intro, "reportConclusion": conclusion}
 
-async def search_cases(case_name: str = "", region: str = "", date: str = "", user_id: str = "",
-                       status: str = "", urgency: str = "", include_deleted: bool = False, province: str = "", provinceCode: str = "", provinceName: str = "", district: str = "", districtCode: str = "", districtName: str = ""):
+async def search_cases(
+    case_name: str = "",
+    region: str = "",
+    date: str = "",
+    user_id: str = "",
+    status: str = "",
+    urgency: str = "",
+    include_deleted: bool = False,
+    province: str = "",
+    provinceCode: str = "",
+    provinceName: str = "",
+    district: str = "",
+    districtCode: str = "",
+    districtName: str = "",
+):
     try:
-        print(f"Received filters: case_name={case_name}, region={region}, date={date}, "
-              f"user_id={user_id}, status={status}, urgency={urgency}, include_deleted={include_deleted}")
+        print(
+            f"Received filters: case_name={case_name}, region={region}, date={date}, "
+            f"user_id={user_id}, status={status}, urgency={urgency}, "
+            f"province={province or provinceName or provinceCode}, "
+            f"district={district or districtName or districtCode}, include_deleted={include_deleted}"
+        )
 
         # Normalize province/district inputs early so both user and non-user paths can use them
         eff_province_code = (provinceCode or province or "").strip()
@@ -266,31 +377,23 @@ async def search_cases(case_name: str = "", region: str = "", date: str = "", us
         eff_district_code = (districtCode or district or "").strip()
         eff_district_name = (districtName or "").strip()
 
-        # Precompute legacy-friendly forms to avoid NameErrors in user-scoped path
         def _slugify(name: str) -> str:
             try:
-                s = ''.join(ch.lower() if ch.isalnum() else '-' for ch in name)
-                while '--' in s:
-                    s = s.replace('--', '-')
-                return s.strip('-')
+                s = "".join(ch.lower() if ch.isalnum() else "-" for ch in name)
+                while "--" in s:
+                    s = s.replace("--", "-")
+                return s.strip("-")
             except Exception:
                 return name
 
         province_slug = _slugify(eff_province_name) if eff_province_name else ""
         province_lower = eff_province_name.lower() if eff_province_name else ""
 
-        # Get all cases, applying soft-delete logic
         if user_id:
             docs_map = _get_case_documents_for_user(user_id, include_deleted=include_deleted)
             documents = list(docs_map.values())
         else:
-            docs_map = _get_case_documents_for_user("", include_deleted=include_deleted)
-            documents = list(docs_map.values())
             cases_ref = db.collection("cases")
-            eff_province_code = (provinceCode or province).strip() if (provinceCode or province) else ""
-            eff_province_name = (provinceName or region).strip() if (provinceName or region) else ""
-            eff_district_code = (districtCode or district).strip() if (districtCode or district) else ""
-            eff_district_name = (districtName).strip() if districtName else ""
 
             def apply_common(q):
                 if case_name:
@@ -307,16 +410,7 @@ async def search_cases(case_name: str = "", region: str = "", date: str = "", us
                     q = q.where("urgency", "==", urgency)
                 return q
 
-            def slugify(name: str) -> str:
-                try:
-                    s = ''.join(ch.lower() if ch.isalnum() else '-' for ch in name)
-                    while '--' in s:
-                        s = s.replace('--', '-')
-                    return s.strip('-')
-                except Exception:
-                    return name
-
-            province_slug = slugify(eff_province_name) if eff_province_name else ""
+            province_slug = _slugify(eff_province_name) if eff_province_name else ""
             province_lower = (eff_province_name or "").strip().lower()
 
             query_refs = []
@@ -324,21 +418,17 @@ async def search_cases(case_name: str = "", region: str = "", date: str = "", us
                 if eff_province_code:
                     query_refs.append(apply_common(cases_ref.where("provinceCode", "==", eff_province_code)))
                 if eff_province_name:
-                    # provinceName exact
                     query_refs.append(apply_common(cases_ref.where("provinceName", "==", eff_province_name)))
-                    # legacy region equals human name
                     query_refs.append(apply_common(cases_ref.where("region", "==", eff_province_name)))
-                    # legacy region equals slug (western-cape)
                     if province_slug and province_slug != eff_province_name:
                         query_refs.append(apply_common(cases_ref.where("region", "==", province_slug)))
-                    # legacy region equals lower-case with space ("western cape")
                     if province_lower and province_lower != eff_province_name and province_lower != province_slug:
                         query_refs.append(apply_common(cases_ref.where("region", "==", province_lower)))
             else:
                 base = apply_common(cases_ref)
                 if region:
                     base = base.where("region", "==", region)
-                    reg_slug = slugify(region)
+                    reg_slug = _slugify(region)
                     if reg_slug and reg_slug != region:
                         query_refs.append(apply_common(cases_ref.where("region", "==", reg_slug)))
                     reg_lower = region.strip().lower()
@@ -357,57 +447,56 @@ async def search_cases(case_name: str = "", region: str = "", date: str = "", us
         for doc in documents:
             if doc.id in seen_ids:
                 continue
-            data = doc.to_dict()
-                # Skip deleted cases unless explicitly included
+            data = doc.to_dict() or {}
+
             if not include_deleted and data.get("is_deleted", False):
                 continue
 
-            if not _case_accessible_to_user(data, user_id):
+            normalized = _normalize_case_user_fields(dict(data))
+            if not _case_accessible_to_user(normalized, user_id):
                 continue
-            if case_name and data.get("caseTitle") != case_name:
+            if case_name and normalized.get("caseTitle") != case_name:
                 continue
-            eff_province_code = (provinceCode or province).strip() if (provinceCode or province) else ""
-            eff_province_name = (provinceName or region).strip() if (provinceName or region) else ""
-            eff_district_code = (districtCode or district).strip() if (districtCode or district) else ""
-            eff_district_name = (districtName).strip() if districtName else ""
-
             if eff_province_code:
-                reg_val = (data.get("region") or "").strip()
+                reg_val = (normalized.get("region") or "").strip()
                 reg_norm = reg_val.lower()
                 if not (
-                    data.get("provinceCode") == eff_province_code or
-                    (eff_province_name and (
-                        data.get("provinceName") == eff_province_name or
-                        reg_val == eff_province_name or
-                        (province_slug and reg_val == province_slug) or
-                        (province_lower and reg_norm == province_lower)
-                    ))
+                    normalized.get("provinceCode") == eff_province_code
+                    or (
+                        eff_province_name
+                        and (
+                            normalized.get("provinceName") == eff_province_name
+                            or reg_val == eff_province_name
+                            or (province_slug and reg_val == province_slug)
+                            or (province_lower and reg_norm == province_lower)
+                        )
+                    )
                 ):
                     continue
             elif eff_province_name:
-                reg_val = (data.get("region") or "").strip()
+                reg_val = (normalized.get("region") or "").strip()
                 reg_norm = reg_val.lower()
                 if not (
-                    data.get("provinceName") == eff_province_name or
-                    reg_val == eff_province_name or
-                    (province_slug and reg_val == province_slug) or
-                    (province_lower and reg_norm == province_lower)
+                    normalized.get("provinceName") == eff_province_name
+                    or reg_val == eff_province_name
+                    or (province_slug and reg_val == province_slug)
+                    or (province_lower and reg_norm == province_lower)
                 ):
                     continue
-            if eff_district_code and (data.get("districtCode") != eff_district_code):
+            if eff_district_code and (normalized.get("districtCode") != eff_district_code):
                 continue
-            if (not eff_district_code) and eff_district_name and (data.get("districtName") != eff_district_name):
+            if (not eff_district_code) and eff_district_name and (normalized.get("districtName") != eff_district_name):
                 continue
             if region and not (eff_province_code or eff_province_name):
-                if data.get("region") != region:
+                if normalized.get("region") != region:
                     continue
-            if date and data.get("dateOfIncident") != date:
+            if date and normalized.get("dateOfIncident") != date:
                 continue
-            if status and data.get("status") != status:
+            if status and normalized.get("status") != status:
                 continue
-            if urgency and data.get("urgency") != urgency:
+            if urgency and normalized.get("urgency") != urgency:
                 continue
-            sanitized = sanitize_firestore_data(data)
+            sanitized = sanitize_firestore_data(normalized)
             sanitized["doc_id"] = doc.id
             results.append(sanitized)
             seen_ids.add(doc.id)
@@ -423,15 +512,13 @@ async def create_case(payload: CaseCreateRequest) -> str:
     try:
         case_id = str(uuid.uuid4())
 
-        raw_user_ids = list(getattr(payload, "userIDs", []) or getattr(payload, "userIds", []) or [])
-        legacy_user_id = getattr(payload, "userID", None)
-        if legacy_user_id:
-            raw_user_ids.append(legacy_user_id)
-        # ensure creator present at least once
-        user_ids = []
-        for uid in raw_user_ids:
-            if uid and uid not in user_ids:
-                user_ids.append(uid)
+        payload_dict = payload.dict(by_alias=True)
+        payload_dict.update(payload.dict())
+        user_ids, primary_user = _extract_user_ids_from_payload_dict(payload_dict)
+        if primary_user and primary_user not in user_ids:
+            user_ids.insert(0, primary_user)
+
+        is_shared = len(user_ids) > 1
 
         # Main case metadata
         case_data = {
@@ -439,16 +526,17 @@ async def create_case(payload: CaseCreateRequest) -> str:
             "caseTitle": payload.case_title,
             "dateOfIncident": payload.date_of_incident,
             "region": payload.region,
-            "provinceCode": getattr(payload, "provinceCode", None),
-            "provinceName": getattr(payload, "provinceName", None) or payload.region,
-            "districtCode": getattr(payload, "districtCode", None),
-            "districtName": getattr(payload, "districtName", None),
+            "provinceCode": payload.province_code,
+            "provinceName": payload.province_name or payload.region,
+            "districtCode": payload.district_code,
+            "districtName": payload.district_name,
             "between": payload.between,
             "urgency": payload.urgency, 
             "createdAt": firestore.SERVER_TIMESTAMP,
             "status": "in progress",
-            "userID": user_ids[0] if user_ids else legacy_user_id,
-            "userIds": user_ids,
+            "userId": primary_user or (user_ids[0] if user_ids else None),
+            "userIds": list(user_ids),
+            "isShared": is_shared,
         }
 
         # Save case document
@@ -532,6 +620,7 @@ async def update_case(data: dict):
         current_data = doc_ref.get().to_dict()
         if not current_data:
             return False, "Case not found"
+        current_data = _normalize_case_user_fields(current_data)
 
         # Prepare the fields to update
         update_fields = {
@@ -539,33 +628,31 @@ async def update_case(data: dict):
             "caseTitle": data.get("caseTitle"),
             "dateOfIncident": data.get("dateOfIncident"),
             "region": data.get("region"),
-            # New-style region fields (keep legacy region too)
-            "provinceCode": data.get("provinceCode"),
-            "provinceName": data.get("provinceName"),
-            "districtCode": data.get("districtCode"),
-            "districtName": data.get("districtName"),
             "between": data.get("between"),
             "status": data.get("status", "in progress"),
             "urgency": data.get("urgency"),
-            # Evidence (accept either snake_case from backend route or camelCase from frontend)
-            "evidenceItems": data.get("evidence_items") or data.get("evidenceItems"),
             "updatedBy": "system",
             "updatedAt": SERVER_TIMESTAMP,
         }
 
-        if "userIDs" in data or "userIds" in data:
-            incoming_user_ids = data.get("userIDs") or data.get("userIds") or []
-            if not isinstance(incoming_user_ids, list):
-                raise ValueError("userIds must be a list")
-            normalized_ids = []
-            for uid in incoming_user_ids:
-                if uid and uid not in normalized_ids:
-                    normalized_ids.append(uid)
-            update_fields["userIds"] = normalized_ids
-            if normalized_ids:
-                update_fields["userID"] = normalized_ids[0]
-        elif "userID" in data:
-            update_fields["userID"] = data.get("userID")
+        incoming_user_ids, primary_user = _extract_user_ids_from_payload_dict(data)
+        user_list_keys_present = any(
+            key in data for key in ("userIds", "userIDs", "user_ids", "legacy_user_ids")
+        )
+        if user_list_keys_present:
+            update_fields["userIds"] = incoming_user_ids
+            if incoming_user_ids:
+                update_fields["userId"] = primary_user or incoming_user_ids[0]
+            elif primary_user:
+                update_fields["userId"] = primary_user
+            else:
+                update_fields["userId"] = firestore.DELETE_FIELD
+            update_fields["isShared"] = len(incoming_user_ids) > 1
+            update_fields["userIDs"] = firestore.DELETE_FIELD
+            update_fields["userID"] = firestore.DELETE_FIELD
+        elif "userId" in data:
+            update_fields["userId"] = data.get("userId")
+            update_fields["userID"] = firestore.DELETE_FIELD
 
         # Remove fields that are not being updated
         update_fields = {k: v for k, v in update_fields.items() if v is not None}
@@ -593,13 +680,15 @@ async def update_case(data: dict):
             notification_message = f"Your case '{case_title}' has been updated."
 
         # Fetch the user ID associated with the case
-        target_user_ids = (
-            update_fields.get("userIds")
-            or current_data.get("userIds")
-            or []
-        )
-        if not target_user_ids and current_data.get("userID"):
-            target_user_ids = [current_data.get("userID")]
+        target_user_ids = update_fields.get("userIds") or current_data.get("userIds") or []
+        if not target_user_ids:
+            primary_target = update_fields.get("userId")
+            if primary_target is firestore.DELETE_FIELD:
+                primary_target = None
+            if not primary_target:
+                primary_target = current_data.get("userId")
+            if primary_target:
+                target_user_ids = [primary_target]
 
         notified = set()
         for uid in target_user_ids:
@@ -628,10 +717,8 @@ async def delete_case(doc_id: str):
         if not doc.exists:
             return False, "Case not found"
 
-        case_data = doc.to_dict()
+        case_data = _normalize_case_user_fields(doc.to_dict() or {})
         user_ids = case_data.get("userIds") or []
-        if not user_ids and case_data.get("userID"):
-            user_ids = [case_data.get("userID")]
         case_title = case_data.get("caseTitle", "Unknown Case")
 
         # Delete the case
@@ -685,7 +772,7 @@ async def restore_case(case_id: str):
 
         doc_ref.update({
             "is_deleted": False,
-            "deleted_at": firestore.DELETE_FIELD
+            "deleted_at": DELETE_FIELD
         })
         return {"success": True, "message": "Case restored"}
     except Exception as e:
@@ -705,7 +792,6 @@ async def permanently_delete_case(case_id: str):
         if not case_doc.exists:
             return {"success": False, "message": "Case not found"}
 
-        # Known subcollections used in the app
         subcollections = [
             "points",
             "allPoints",
@@ -718,7 +804,6 @@ async def permanently_delete_case(case_id: str):
             "notes",
         ]
 
-        # Helper: delete in batches to avoid huge transactions
         def _delete_all(coll_ref, batch_size: int = 250):
             deleted_total = 0
             while True:
@@ -732,21 +817,65 @@ async def permanently_delete_case(case_id: str):
                 deleted_total += len(docs)
             return deleted_total
 
-        # Delete all documents in each known subcollection (if present)
         for name in subcollections:
             try:
                 coll_ref = case_ref.collection(name)
                 _delete_all(coll_ref)
             except Exception as e:
-                # Log and continue; we don't want one missing collection to block others
                 print(f"Skip/failed deleting subcollection '{name}' for case {case_id}: {e}")
 
-        # Finally delete the case document itself
         case_ref.delete()
         return {"success": True, "message": "Case permanently deleted (including subcollections)"}
     except Exception as e:
         print(f"Error in permanently_delete_case: {e}")
         raise
+
+
+async def fetch_recent_points(limit: int = 10) -> list:
+    try:
+        results = []
+        try:
+            cg = db.collection_group("allPoints")
+            docs = list(
+                cg.order_by("timestamp", direction=firestore.Query.DESCENDING)
+                  .limit(max(1, int(limit)))
+                  .stream()
+            )
+            for d in docs:
+                data = d.to_dict() or {}
+                lat = data.get("lat")
+                lng = data.get("lng")
+                if lat is None or lng is None:
+                    continue
+                results.append({
+                    "lat": float(lat),
+                    "lng": float(lng),
+                    "timestamp": data.get("timestamp")
+                })
+        except Exception as primary_err:
+            print("Primary recent-points query failed (allPoints):", primary_err)
+
+        if not results:
+            try:
+                cg2 = db.collection_group("points")
+                docs2 = list(cg2.limit(max(1, int(limit))).stream())
+                for d in docs2:
+                    data = d.to_dict() or {}
+                    lat = data.get("lat")
+                    lng = data.get("lng")
+                    if lat is None or lng is None:
+                        continue
+                    results.append({
+                        "lat": float(lat),
+                        "lng": float(lng)
+                    })
+            except Exception as inner:
+                print("Fallback fetch from 'points' failed:", inner)
+
+        return results
+    except Exception as e:
+        print("Error in fetch_recent_points:", e)
+        return []
 
 
 async def fetch_all_points_paginated(limit: int = 200, cursor: str | None = None):
@@ -757,7 +886,6 @@ async def fetch_all_points_paginated(limit: int = 200, cursor: str | None = None
     - next_cursor: opaque string to pass back for the next page, or None when done
     """
     try:
-        # Build the base collection group query ordered by timestamp then document ID for stability
         cg = db.collection_group("allPoints")
         q = (
             cg.order_by("timestamp", direction=firestore.Query.ASCENDING)
@@ -765,14 +893,12 @@ async def fetch_all_points_paginated(limit: int = 200, cursor: str | None = None
               .limit(max(1, int(limit)))
         )
 
-        # Use an opaque cursor carrying the last doc path
         if cursor:
             try:
                 meta = json.loads(cursor)
                 last_path = meta.get("path")
                 if last_path:
                     snap = db.document(last_path).get()
-                    # start strictly after the last returned doc
                     q = q.start_after(document=snap)
             except Exception as e:
                 print(f"Ignoring invalid cursor: {e}")
@@ -785,7 +911,6 @@ async def fetch_all_points_paginated(limit: int = 200, cursor: str | None = None
             lng = data.get("lng")
             if lat is None or lng is None:
                 continue
-            # Extract caseId from path: cases/{id}/allPoints/{pointId}
             try:
                 case_id = d.reference.parent.parent.id
             except Exception:
@@ -806,6 +931,7 @@ async def fetch_all_points_paginated(limit: int = 200, cursor: str | None = None
     except Exception as e:
         print(f"Error in fetch_all_points_paginated: {e}")
         return [], None
+
 
 async def fetch_recent_cases(sort_by: str = "dateEntered", user_id: str = ""):
     docs_map = _get_case_documents_for_user(user_id)
@@ -828,7 +954,7 @@ async def fetch_recent_cases(sort_by: str = "dateEntered", user_id: str = ""):
     sorted_docs = sorted(docs_map.values(), key=_sort_key, reverse=True)
     results = []
     for doc in sorted_docs[:4]:
-        data = doc.to_dict() or {}
+        data = _normalize_case_user_fields(doc.to_dict() or {})
         sanitized = sanitize_firestore_data(data)
         sanitized["doc_id"] = doc.id
         results.append(sanitized)
@@ -897,53 +1023,6 @@ async def fetch_all_case_points():
         print("Error fetching case points:", e)
         return []
 
-async def fetch_recent_points(limit: int = 10) -> list:
-    try:
-        results = []
-        # Primary: collection group on 'allPoints' ordered by timestamp
-        try:
-            cg = db.collection_group("allPoints")
-            docs = list(
-                cg.order_by("timestamp", direction=firestore.Query.DESCENDING)
-                  .limit(max(1, int(limit)))
-                  .stream()
-            )
-            for d in docs:
-                data = d.to_dict() or {}
-                lat = data.get("lat")
-                lng = data.get("lng")
-                if lat is None or lng is None:
-                    continue
-                results.append({
-                    "lat": float(lat),
-                    "lng": float(lng),
-                    "timestamp": data.get("timestamp")
-                })
-        except Exception as primary_err:
-            print("Primary recent-points query failed (allPoints):", primary_err)
-
-        # Fallback: generic 'points' without guaranteed timestamps
-        if not results:
-            try:
-                cg2 = db.collection_group("points")
-                docs2 = list(cg2.limit(max(1, int(limit))).stream())
-                for d in docs2:
-                    data = d.to_dict() or {}
-                    lat = data.get("lat")
-                    lng = data.get("lng")
-                    if lat is None or lng is None:
-                        continue
-                    results.append({
-                        "lat": float(lat),
-                        "lng": float(lng)
-                    })
-            except Exception as inner:
-                print("Fallback fetch from 'points' failed:", inner)
-
-        return results
-    except Exception as e:
-        print("Error in fetch_recent_points:", e)
-        return []
     
 async def fetch_interpolated_points(case_id: str) -> list:
     try:
@@ -1362,16 +1441,19 @@ async def assign_case_users(case_id: str, user_ids: List[str]):
     if not snapshot.exists:
         raise ValueError("Case not found")
 
-    existing = snapshot.to_dict() or {}
+    existing = _normalize_case_user_fields(snapshot.to_dict() or {})
     previous_ids = set(existing.get("userIds") or [])
-    if not previous_ids and existing.get("userID"):
-        previous_ids.add(existing.get("userID"))
 
-    case_ref.update({
+    update_payload = {
         "userIds": normalized_ids,
-        "userID": normalized_ids[0],
+        "userId": normalized_ids[0],
+        "isShared": len(normalized_ids) > 1,
         "updatedAt": firestore.SERVER_TIMESTAMP,
-    })
+        "userIDs": firestore.DELETE_FIELD,
+        "userID": firestore.DELETE_FIELD,
+    }
+
+    case_ref.update(update_payload)
 
     case_title = existing.get("caseTitle", "Unknown Case")
 
@@ -1395,6 +1477,122 @@ async def assign_case_users(case_id: str, user_ids: List[str]):
         )
 
     return True
+
+
+async def add_case_comment(
+    case_id: str,
+    author_id: str,
+    text: str,
+    mentions: Optional[List[str]] = None,
+    notify_all: bool = False,
+) -> Dict[str, Any]:
+    if not case_id:
+        raise ValueError("Missing case_id")
+    if not author_id:
+        raise ValueError("Missing author_id")
+    if not text or not text.strip():
+        raise ValueError("Comment text cannot be empty")
+
+    case_ref = db.collection("cases").document(case_id)
+    case_snapshot = case_ref.get()
+    if not case_snapshot.exists:
+        raise ValueError("Case not found")
+
+    case_data = _normalize_case_user_fields(case_snapshot.to_dict() or {})
+    case_title = case_data.get("caseTitle", "Unknown Case")
+
+    permitted_user_ids = list(case_data.get("userIds") or [])
+    if not permitted_user_ids and case_data.get("userId"):
+        permitted_user_ids.append(case_data["userId"])
+
+    if permitted_user_ids and author_id not in permitted_user_ids:
+        raise ValueError("Author is not assigned to this case")
+
+    normalized_mentions: List[str] = []
+    for uid in (mentions or []):
+        if uid and uid in permitted_user_ids and uid != author_id and uid not in normalized_mentions:
+            normalized_mentions.append(uid)
+
+    author_name = "Investigator"
+    try:
+        author_doc = db.collection("users").document(author_id).get()
+        if author_doc.exists:
+            author_data = author_doc.to_dict() or {}
+            first = (author_data.get("firstName") or "").strip()
+            last = (author_data.get("surname") or "").strip()
+            display_name = f"{first} {last}".strip()
+            author_name = display_name or author_data.get("email") or author_name
+    except Exception:
+        pass
+
+    comment_payload = {
+        "authorId": author_id,
+        "authorDisplayName": author_name,
+        "text": text.strip(),
+        "mentions": normalized_mentions,
+        "notifyAll": bool(notify_all),
+        "createdAt": firestore.SERVER_TIMESTAMP,
+        "updatedAt": firestore.SERVER_TIMESTAMP,
+    }
+
+    comment_ref = case_ref.collection("comments").document()
+    comment_ref.set(comment_payload)
+
+    try:
+        case_ref.update({
+            "updatedAt": firestore.SERVER_TIMESTAMP,
+            "lastCommentAt": firestore.SERVER_TIMESTAMP,
+        })
+    except Exception:
+        logger.debug("Failed to update case timestamps after comment creation.", exc_info=True)
+
+    notification_targets = set(normalized_mentions)
+    if notify_all:
+        notification_targets.update(uid for uid in permitted_user_ids if uid and uid != author_id)
+
+    for target_uid in notification_targets:
+        try:
+            await add_notification(
+                user_id=target_uid,
+                title="New Comment",
+                message=f"{author_name} mentioned you in a comment.",
+                notification_type="COMMENT",
+                metadata={
+                    "caseId": case_id,
+                    "commentId": comment_ref.id,
+                    "authorId": author_id,
+                },
+            )
+        except Exception:
+            logger.debug("Failed to deliver comment notification", exc_info=True)
+
+    stored = comment_ref.get()
+    stored_data = stored.to_dict() or comment_payload
+    sanitized_comment = sanitize_firestore_data(stored_data)
+    sanitized_comment["id"] = stored.id
+    return sanitized_comment
+
+
+async def fetch_case_comments(case_id: str, limit: int = 100) -> List[Dict[str, Any]]:
+    if not case_id:
+        raise ValueError("Missing case_id")
+
+    case_ref = db.collection("cases").document(case_id)
+    if not case_ref.get().exists:
+        raise ValueError("Case not found")
+
+    comments_ref = case_ref.collection("comments").order_by("createdAt", direction=firestore.Query.ASCENDING)
+    if limit:
+        comments_ref = comments_ref.limit(limit)
+
+    comments = []
+    for doc in comments_ref.stream():
+        data = doc.to_dict() or {}
+        sanitized = sanitize_firestore_data(data)
+        sanitized["id"] = doc.id
+        comments.append(sanitized)
+
+    return comments
 
 async def generate_ai_description(lat, lng, timestamp, status: str = "", snapshot: str | None = None) -> str:
     """
@@ -1437,29 +1635,3 @@ async def generate_ai_description(lat, lng, timestamp, status: str = "", snapsho
     except Exception as e:
         # Don’t explode the route—return a friendly message the UI can show
         return f"AI description unavailable. Error: {str(e)}"
-
-async def suggest_text_improvement(text: str, context_type: str = "general") -> str:
-    """
-    Returns an improved version of the given text with grammar, spelling, and clarity fixes.
-    """
-    if not text.strip():
-        return ""
-
-    prompt = (
-        "You are an expert editor. Review the text below for grammar, spelling, and clarity. "
-        "Keep the meaning intact and maintain a formal tone suitable for a forensic report. "
-        f"Context type: {context_type}. Only output the corrected text.\n\n"
-        f"Text:\n{text}"
-    )
-
-    resp = client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[
-            {"role": "system", "content": "You are a helpful and precise editor."},
-            {"role": "user", "content": prompt}
-        ],
-        max_tokens=500,
-        temperature=0.1,
-    )
-
-    return (resp.choices[0].message.content or "").strip()

@@ -1,4 +1,4 @@
-﻿import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import { auth } from "../firebase";
@@ -6,7 +6,7 @@ import { useAuth } from "../context/AuthContext";
 import { signOut } from "firebase/auth";
 import axios from "axios";
 import adfLogo from "../assets/image-removebg-preview.png";
-import { Calendar, MapPin, Hash, Info, Route, Home, FilePlus2, FolderOpen, Briefcase, LayoutDashboard } from "lucide-react";
+import { Calendar, MapPin, Hash, Route, Home, FilePlus2, FolderOpen, Briefcase, LayoutDashboard, Info, Users } from "lucide-react";
 import { FaMapMarkerAlt } from "react-icons/fa";
 import {
   PieChart,
@@ -23,6 +23,7 @@ import RegionSelectorModal from "../components/RegionSelectorModal";
 import useNotificationModal from "../hooks/useNotificationModal";
 import { getFriendlyErrorMessage } from "../utils/errorMessages";
 import ZA_REGIONS from "../data/za_regions";
+import NotificationBell from "../components/NotificationBell";
 
 
 function MyCasesPage() {
@@ -31,8 +32,6 @@ function MyCasesPage() {
   const [showMenu, setShowMenu] = useState(false);
   const [myCases, setMyCases] = useState([]);
   const [selectedCase, setSelectedCase] = useState(null);
-  const [hoveredCase, setHoveredCase] = useState(null);
-  const [hoverData, setHoverData] = useState(null);
   const [notifications, setNotifications] = useState([]);
   const [currentPage, setCurrentPage] = useState(1); // Current page for notifications
   const [totalNotifications, setTotalNotifications] = useState(0); // Total notifications
@@ -43,17 +42,27 @@ function MyCasesPage() {
   const [region, setRegion] = useState("");
   const [provinceCode, setProvinceCode] = useState("");
   const [districtCode, setDistrictCode] = useState("");
-  const [showRegionModal, setShowRegionModal] = useState(false);  const selectedRegionLabel = useMemo(() => {
+  const [showRegionModal, setShowRegionModal] = useState(false);
+  const selectedRegionLabel = useMemo(() => {
     const pName = region || ZA_REGIONS.find(p => p.code === provinceCode)?.name || "";
     const prov = ZA_REGIONS.find(p => p.code === provinceCode);
     const dName = prov?.districts?.find(d => String(d.code) === String(districtCode))?.name || "";
     if (!pName && !dName) return "";
-    return dName ? `${pName} — ${dName}` : pName;
+    return dName ? `${pName} - ${dName}` : pName;
   }, [region, provinceCode, districtCode]);
   const prettyRegion = (c) => {
     const p = c?.provinceName || c?.region || "";
     const d = c?.districtName || "";
     return d ? `${p} - ${d}` : p;
+  };
+  const formatCaseDate = (value) => {
+    if (!value) return "";
+    if (typeof value === "string") return value;
+    if (value instanceof Date) return value.toLocaleDateString();
+    if (typeof value === "object" && typeof value.seconds === "number") {
+      return new Date(value.seconds * 1000).toLocaleDateString();
+    }
+    return String(value);
   };
   const [date, setDate] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
@@ -75,6 +84,51 @@ function MyCasesPage() {
       <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-white"></div>
     </div>
   );
+
+  const extractCaseUserIds = (caseItem) => {
+    const ids = new Set();
+
+    const listCandidates = [
+      caseItem?.userIds,
+      caseItem?.user_ids,
+      caseItem?.userIDs,
+      caseItem?.assignedUsers,
+      caseItem?.collaborators,
+    ];
+
+    listCandidates.forEach((list) => {
+      if (!list) return;
+      if (Array.isArray(list)) {
+        list.forEach((value) => {
+          if (value !== undefined && value !== null && String(value).trim()) {
+            ids.add(String(value));
+          }
+        });
+      } else if (String(list).trim()) {
+        ids.add(String(list));
+      }
+    });
+
+    const directCandidates = [
+      caseItem?.userId,
+      caseItem?.user_id,
+      caseItem?.ownerId,
+      caseItem?.createdBy,
+    ];
+
+    directCandidates.forEach((value) => {
+      if (value !== undefined && value !== null && String(value).trim()) {
+        ids.add(String(value));
+      }
+    });
+
+    return Array.from(ids);
+  };
+
+  const isSharedCase = (caseItem) => extractCaseUserIds(caseItem).length > 1;
+
+  const getCaseIdentifier = (caseItem) =>
+    caseItem?.caseId || caseItem?.case_id || caseItem?.doc_id || caseItem?.id || caseItem?.documentId;
 
   // Unified search (mirrors ManageCases, scoped by user)
   const handleSearch = async (overrides = {}) => {
@@ -108,7 +162,13 @@ function MyCasesPage() {
           urgency: urgencyFilter || undefined,
         },
       });
-      setMyCases(Array.isArray(response.data.cases) ? response.data.cases : []);
+      const rawCases = Array.isArray(response.data.cases) ? response.data.cases : [];
+      const filteredCases = rawCases.filter((caseItem) => {
+        if (!uid) return false;
+        const assignedIds = extractCaseUserIds(caseItem);
+        return assignedIds.some((assignedId) => String(assignedId) === String(uid));
+      });
+      setMyCases(filteredCases);
       setCasePage(1);
     } catch (error) {
       console.error("Failed to fetch user cases:", error);
@@ -141,31 +201,6 @@ function MyCasesPage() {
     }
   }, [myCases, casePage]);
 
-  // Fetch hover metadata
-  useEffect(() => {
-    if (!hoveredCase) {
-      setHoverData(null);
-      return;
-    }
-    const fetchPoints = async () => {
-      try {
-        const res = await axios.get(
-          `http://localhost:8000/cases/${hoveredCase.doc_id}/all-points`
-        );
-        const pts = res.data.points || [];
-        if (pts.length > 0) {
-          setHoverData({
-            first: pts[0],
-            last: pts[pts.length - 1],
-          });
-        }
-      } catch (e) {
-        console.error("Failed to load points for hover:", e);
-      }
-    };
-    fetchPoints();
-  }, [hoveredCase]);
-
   const handleSignOut = async () => {
     try {
       await signOut(auth);
@@ -177,8 +212,30 @@ function MyCasesPage() {
 
   const handleSelectCase = (caseItem) => setSelectedCase(caseItem);
 
-  const openStreetView = (lat, lng) =>
-    window.open(`https://www.google.com/maps?q=&layer=c&cbll=${lat},${lng}`, "_blank");
+  const handleOpenCollaboration = (caseItem, event) => {
+    event?.stopPropagation();
+    const caseIdentifier = getCaseIdentifier(caseItem);
+    if (!caseIdentifier) {
+      openModal({
+        variant: "error",
+        title: "Unable to open collaboration",
+        description:
+          "We couldn't determine the case identifier needed to open the collaboration workspace.",
+      });
+      return;
+    }
+    const summary = {
+      caseId: caseIdentifier,
+      caseNumber: caseItem?.caseNumber || null,
+      caseTitle: caseItem?.caseTitle || null,
+      urgency: caseItem?.urgency || null,
+      status: caseItem?.status || null,
+      userIds: extractCaseUserIds(caseItem),
+    };
+    navigate(`/cases/${caseIdentifier}/collaboration`, {
+      state: { caseSummary: summary },
+    });
+  };
 
   // Update status
   const handleStatusChange = async (caseItem, newStatus) => {
@@ -212,15 +269,15 @@ function MyCasesPage() {
     }
   };
 
-  const deleteSelectedCase = async (caseItem) => {
+  const moveCaseToTrash = async (caseItem) => {
     closeModal();
     if (!caseItem) return;
     try {
-      await axios.delete(`http://localhost:8000/cases/delete/${caseItem.doc_id}`);
+      await axios.put(`http://localhost:8000/cases/soft-delete/${caseItem.doc_id}`);
       openModal({
         variant: "success",
-        title: "Case deleted",
-        description: `"${caseItem.caseTitle}" has been removed successfully.`,
+        title: "Case moved to Trash",
+        description: `"${caseItem.caseTitle}" has been moved to the Trash Bin.`,
       });
       setMyCases((prev) => prev.filter((c) => c.doc_id !== caseItem.doc_id));
       if (selectedCase?.doc_id === caseItem.doc_id) {
@@ -230,8 +287,8 @@ function MyCasesPage() {
       console.error("Delete failed:", err);
       openModal({
         variant: "error",
-        title: "Delete failed",
-        description: getFriendlyErrorMessage(err, "We couldn't delete the case. Please try again."),
+        title: "Move failed",
+        description: getFriendlyErrorMessage(err, "We couldn't move the case to Trash. Please try again."),
       });
     }
   };
@@ -241,12 +298,12 @@ function MyCasesPage() {
     const caseReference = selectedCase;
     openModal({
       variant: "warning",
-      title: "Delete case?",
-      description: `Are you sure you want to delete "${caseReference.caseTitle}"? This action cannot be undone.`,
+      title: "Move case to Trash?",
+      description: `Are you sure you want to move "${caseReference.caseTitle}" to the Trash Bin? You can restore it later from Trash.`,
       primaryAction: {
-        label: "Delete case",
+        label: "Move to Trash",
         closeOnClick: false,
-        onClick: () => deleteSelectedCase(caseReference),
+        onClick: () => moveCaseToTrash(caseReference),
       },
       secondaryAction: {
         label: "Cancel",
@@ -313,6 +370,32 @@ function MyCasesPage() {
       );
     } catch (error) {
       console.error("Failed to update notification read status:", error);
+    }
+  };
+
+  const clearAllNotifications = async () => {
+    try {
+      const uid = auth.currentUser?.uid;
+      if (!uid) {
+        console.warn("No user ID found. Cannot clear notifications.");
+        return;
+      }
+      await axios.delete(`http://localhost:8000/notifications/${uid}`);
+      setNotifications([]);
+      setTotalNotifications(0);
+      setCurrentPage(1);
+      openModal({
+        variant: "success",
+        title: "Notifications cleared",
+        description: "All notifications have been removed.",
+      });
+    } catch (error) {
+      console.error("Failed to clear notifications:", error);
+      openModal({
+        variant: "error",
+        title: "Clear failed",
+        description: getFriendlyErrorMessage(error, "We couldn't clear notifications. Please try again."),
+      });
     }
   };
 
@@ -424,6 +507,7 @@ function MyCasesPage() {
         </div>
   
         <div className="flex items-center gap-4 text-sm text-gray-200">
+          <NotificationBell className="hidden lg:block" />
           <Link
             to="/home"
             className="hidden md:inline-flex items-center rounded-full border border-white/10 bg-white/[0.02] px-4 py-2 text-xs font-semibold text-gray-200 shadow-inner shadow-white/5 transition hover:border-white/25 hover:text-white"
@@ -647,8 +731,6 @@ function MyCasesPage() {
                         : 'border-white/10 bg-white/[0.04]'
                     }`}
                     onClick={() => handleSelectCase(caseItem)}
-                    onMouseEnter={() => setHoveredCase(caseItem)}
-                    onMouseLeave={() => setHoveredCase(null)}
                   >
                     <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                       <div>
@@ -659,15 +741,24 @@ function MyCasesPage() {
                               {caseItem.urgency}
                             </span>
                           )}
+                          {isSharedCase(caseItem) && (
+                            <span
+                              className="inline-flex items-center gap-1 rounded-full border border-blue-400/40 bg-blue-500/10 px-2 py-0.5 text-[11px] font-semibold text-blue-200"
+                              title="Shared case"
+                            >
+                              <Users size={12} />
+                              Shared
+                            </span>
+                          )}
                         </p>
                         <div className="mt-2 flex flex-wrap gap-x-4 gap-y-2 text-xs text-gray-400">
                           <span className="flex items-center gap-1">
                             <Hash size={12} />
-                            {caseItem.caseNumber || 'â€”'}
+                            {caseItem.caseNumber || '-'}
                           </span>
                           <span className="flex items-center gap-1">
                             <Calendar size={12} />
-                            {caseItem.dateOfIncident || 'N/A'}
+                            {formatCaseDate(caseItem.dateOfIncident) || 'N/A'}
                           </span>
                           <span className="flex items-center gap-1 capitalize">
                             <MapPin size={12} />
@@ -712,63 +803,7 @@ function MyCasesPage() {
                         </Link>
                       </div>
                     </div>
-                  {hoveredCase?.doc_id === caseItem.doc_id && (
-                    <div className="absolute right-0 top-0 z-[120] w-80 translate-x-[calc(100%+1rem)] rounded-2xl border border-white/10 bg-black/85 p-4 text-xs text-gray-200 shadow-2xl backdrop-blur-xl">
-                        <h3 className="mb-2 flex items-center gap-2 text-sm font-semibold text-white">
-                          <Info size={14} /> Case metadata
-                        </h3>
-                        <div className="space-y-2">
-                          <p className="flex items-center gap-2">
-                            <Calendar size={12} />
-                            Date: {caseItem.dateOfIncident || 'N/A'}
-                          </p>
-                          <p className="flex items-center gap-2 capitalize">
-                            <MapPin size={12} />
-                            Region: {prettyRegion(caseItem) || 'Unknown'}
-                          </p>
-                          <p className="flex items-center gap-2">
-                            <Route size={12} />
-                            Between: {caseItem.between || 'N/A'}
-                          </p>
-                          <p className="flex items-center gap-2">
-                            <Hash size={12} />
-                            Case #: {caseItem.caseNumber || 'N/A'}
-                          </p>
-                          <p className="flex items-center gap-2">
-                            <span
-                              className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${
-                                caseItem.status === 'completed'
-                                  ? 'bg-emerald-500/15 text-emerald-200 border border-emerald-400/40'
-                                  : caseItem.status === 'in progress'
-                                  ? 'bg-amber-500/15 text-amber-200 border border-amber-400/40'
-                                  : 'bg-rose-500/20 text-rose-200 border border-rose-400/40'
-                              }`}
-                            >
-                              {caseItem.status}
-                            </span>
-                          </p>
-                          {hoverData && (
-                            <div className="pt-2 text-[11px] text-gray-300">
-                              <p className="font-semibold text-gray-200">Points</p>
-                              <button
-                                type="button"
-                                onClick={() => openStreetView(hoverData.first.lat, hoverData.first.lng)}
-                                className="mt-1 block w-full rounded border border-white/10 bg-white/[0.04] px-2 py-1 text-left text-xs text-white transition hover:border-blue-400/40 hover:text-blue-200"
-                              >
-                                 First: {hoverData.first.lat.toFixed(4)}, {hoverData.first.lng.toFixed(4)}
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => openStreetView(hoverData.last.lat, hoverData.last.lng)}
-                                className="mt-1 block w-full rounded border border-white/10 bg-white/[0.04] px-2 py-1 text-left text-xs text-white transition hover:border-blue-400/40 hover:text-blue-200"
-                              >
-                                 Last: {hoverData.last.lat.toFixed(4)}, {hoverData.last.lng.toFixed(4)}
-                              </button>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                  )}
+                  
                 </div>
               ))
             ) : (
@@ -826,7 +861,7 @@ function MyCasesPage() {
                   </p>
                   <p className="flex items-center gap-2">
                     <Calendar size={14} />
-                    {selectedCase.dateOfIncident || 'Date unknown'}
+                    {formatCaseDate(selectedCase.dateOfIncident) || 'Date unknown'}
                   </p>
                   <p className="flex items-center gap-2 capitalize">
                     <MapPin size={14} />
@@ -849,6 +884,18 @@ function MyCasesPage() {
                   >
                     Manage Case
                   </Link>
+                  <button
+                    type="button"
+                    onClick={() => handleOpenCollaboration(selectedCase)}
+                    className={`inline-flex items-center justify-center rounded-full border px-4 py-2 text-xs font-semibold transition ${
+                      isSharedCase(selectedCase)
+                        ? 'border-blue-400/40 bg-blue-500/15 text-blue-100 hover:border-blue-400/70 hover:text-white'
+                        : 'border-white/15 bg-white/[0.05] text-gray-200 hover:border-white/30 hover:text-white'
+                    }`}
+                  >
+                    <Users size={14} className="mr-1" />
+                    Collaborate
+                  </button>
                   <button
                     type="button"
                     onClick={openAISummary}
@@ -875,7 +922,7 @@ function MyCasesPage() {
                     onClick={requestCaseDeletion}
                     className="inline-flex items-center justify-center rounded-full border border-rose-500/40 bg-rose-500/10 px-4 py-2 text-xs font-semibold text-rose-200 transition hover:border-rose-500/60 hover:text-white"
                   >
-                    Delete Case
+                    Move to Trash
                   </button>
                 </div>
               </div>
@@ -916,7 +963,18 @@ function MyCasesPage() {
           )}
   
           <section className="flex h-full flex-col rounded-3xl border border-white/10 bg-white/[0.018] p-6 shadow-[0_25px_70px_rgba(15,23,42,0.45)] backdrop-blur-2xl">
-            <h2 className="text-lg font-semibold text-white">Notifications</h2>
+            <div className="flex items-center justify-between gap-3">
+              <h2 className="text-lg font-semibold text-white">Notifications</h2>
+              {notifications.length > 0 && (
+                <button
+                  type="button"
+                  onClick={clearAllNotifications}
+                  className="inline-flex items-center rounded-full border border-white/15 bg-white/[0.05] px-3 py-1 text-xs font-semibold text-gray-200 transition hover:border-white/40 hover:text-white"
+                >
+                  Clear All
+                </button>
+              )}
+            </div>
             {notifications.length > 0 ? (
               <div className="mt-4 flex flex-1 flex-col overflow-hidden">
                 <ul className="space-y-3 overflow-y-auto pr-1 text-sm text-gray-200">
@@ -1046,8 +1104,3 @@ function MyCasesPage() {
 }
 
 export default MyCasesPage;
-
-
-
-
-

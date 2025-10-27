@@ -1,28 +1,39 @@
 from fastapi import APIRouter, Query, HTTPException, Body, Form, UploadFile, File, Request, FastAPI
-from services.case_service import search_cases
-from services.case_service import update_case
-from services.case_service import delete_case
-from services.case_service import get_region_case_counts
-from services.case_service import get_case_counts_by_month
+from services.case_service import (
+    search_cases,
+    update_case,
+    get_region_case_counts,
+    get_case_counts_by_month,
+    create_case,
+    generate_ai_description,
+    generate_case_intro,
+    generate_case_conclusion,
+    fetch_annotation_descriptions,
+    add_intro_conclusion,
+    add_case_comment,
+    fetch_case_comments,
+    soft_delete_case,
+    restore_case,
+    permanently_delete_case,
+    suggest_text_improvement,
+    fetch_recent_points,
+    fetch_all_points_paginated,
+    fetch_all_case_points_with_case_ids,
+    fetch_last_points_per_case,
+)
 from fastapi.responses import JSONResponse
 from fastapi.encoders import jsonable_encoder
 from models.case_model import CaseCreateRequest, GpsPoint
-from services.case_service import create_case  
 import json
 import csv
 import io
 from typing import Optional
-from firebase.firebase_config import db  
+from firebase.firebase_config import db
 from datetime import datetime
-from services.case_service import generate_ai_description
 from fastapi.middleware.cors import CORSMiddleware
 from firebase_admin import firestore
-from services.case_service import add_intro_conclusion  # Import your AI service function
-from services.case_service import generate_case_intro, generate_case_conclusion, fetch_annotation_descriptions, add_intro_conclusion
-from firebase.firebase_config import db
 from google.cloud.firestore_v1 import SERVER_TIMESTAMP
-from services.case_service import suggest_text_improvement
-from services.case_service import soft_delete_case, restore_case, permanently_delete_case
+from models.comment_model import CaseCommentCreateRequest
 
 db = firestore.client()
 
@@ -90,8 +101,7 @@ async def ai_review_text(request: dict = Body(...)):
 @router.get("/cases/search")
 async def search_cases_route(
     user_id: str = "",
-    case_name: str = "",
-    searchTerm: str = "",
+    case_name: str = Query("", alias="searchTerm"),
     region: str = "",
     date: str = "",
     status: str = "",
@@ -102,32 +112,30 @@ async def search_cases_route(
     district: str = "",
     districtCode: str = "",
     districtName: str = "",
+    includeDeleted: bool = Query(False, alias="includeDeleted"),
 ):
-    effective_case_name = searchTerm or case_name or ""
     print(
-        f"Received query parameters: user_id={user_id}, case_name={effective_case_name}, region={region}, date={date}, status={status}, urgency={urgency}, province={province or provinceName or provinceCode}, district={district or districtName or districtCode}"
+        f"Received query parameters: user_id={user_id}, case_name={case_name}, region={region}, "
+        f"date={date}, status={status}, urgency={urgency}, province={province or provinceName or provinceCode}, "
+        f"district={district or districtName or districtCode}, includeDeleted={includeDeleted}"
     )
 
-    try:
-        results = await search_cases(
-            case_name=effective_case_name,
-            region=region,
-            date=date,
-            user_id=user_id,
-            status=status,
-            urgency=urgency,
-            include_deleted=False,
-            province=province,
-            provinceCode=provinceCode,
-            provinceName=provinceName,
-            district=district,
-            districtCode=districtCode,
-            districtName=districtName,
-        )
-        return {"cases": results}
-    except Exception as e:
-        print(f"/cases/search failed: {e}")
-        return {"cases": []}
+    results = await search_cases(
+        case_name=case_name,
+        region=region,
+        date=date,
+        user_id=user_id,
+        status=status,
+        urgency=urgency,
+        include_deleted=includeDeleted,
+        province=province,
+        provinceCode=provinceCode,
+        provinceName=provinceName,
+        district=district,
+        districtCode=districtCode,
+        districtName=districtName,
+    )
+    return {"cases": results}
 
 @router.post("/cases/create")
 async def create_case_route(case_request: CaseCreateRequest):
@@ -162,15 +170,46 @@ async def update_case_route(request: Request):
     else:
         raise HTTPException(status_code=400, detail=message)
 
-#DELETE
-#@router.delete("/cases/delete/{doc_id}")
-#async def delete_case_route(doc_id: str):
-#    success, message = await delete_case(doc_id)
-#    if success:
-#        return {"success": True}
-#    else:
-#       raise HTTPException(status_code=400, detail=message)
-    #
+@router.put("/cases/soft-delete/{case_id}")
+async def soft_delete_case_endpoint(case_id: str):
+    """Soft delete — mark as trashed."""
+    try:
+        result = await soft_delete_case(case_id)
+        return JSONResponse(status_code=200, content=result)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/cases/trashed")
+async def get_trashed_cases():
+    """Retrieve all trashed cases."""
+    try:
+        trashed_ref = db.collection("cases").where("is_deleted", "==", True)
+        results = [doc.to_dict() | {"doc_id": doc.id} for doc in trashed_ref.stream()]
+        return {"cases": results}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.put("/cases/restore/{case_id}")
+async def restore_case_endpoint(case_id: str):
+    """Restore a case from the trash bin."""
+    try:
+        result = await restore_case(case_id)
+        return JSONResponse(status_code=200, content=result)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/cases/delete/{case_id}")
+async def permanently_delete_case_endpoint(case_id: str):
+    """Permanently delete a trashed case."""
+    try:
+        result = await permanently_delete_case(case_id)
+        return JSONResponse(status_code=200, content=result)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @router.get("/cases/monthly-counts")
 async def get_monthly_case_counts(user_id: str = ""):
     print(f"Backend received monthly count request with user_id: {user_id}")
@@ -188,6 +227,58 @@ async def get_all_case_points():
     from services.case_service import fetch_all_case_points
     points = await fetch_all_case_points()
     return {"points": points}
+
+@router.get("/cases/recent-points")
+async def get_recent_points(limit: int = 10):
+    """Return the most recent N points across all cases for a lightweight mini-heatmap."""
+    pts = await fetch_recent_points(limit=limit)
+    return {"points": pts}
+
+
+@router.get("/cases/all-points-with-case-ids")
+async def get_all_points_with_case_ids():
+    points = await fetch_all_case_points_with_case_ids()
+    return {"points": points}
+
+
+@router.get("/cases/all-points-paginated")
+async def get_all_points_paginated(limit: int = 200, cursor: Optional[str] = None):
+    points, next_cursor = await fetch_all_points_paginated(limit=limit, cursor=cursor)
+    return {"points": points, "nextCursor": next_cursor}
+
+
+@router.get("/cases/last-points")
+async def get_last_case_points():
+    points = await fetch_last_points_per_case()
+    return {"points": points}
+
+
+@router.post("/cases/{case_id}/comments")
+async def create_case_comment(case_id: str, payload: CaseCommentCreateRequest):
+    try:
+        comment = await add_case_comment(
+            case_id=case_id,
+            author_id=payload.author_id,
+            text=payload.text,
+            mentions=payload.mentions,
+            notify_all=payload.notify_all,
+        )
+        return {"comment": comment}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to add comment: {exc}")
+
+
+@router.get("/cases/{case_id}/comments")
+async def get_case_comments(case_id: str, limit: int = 100):
+    try:
+        comments = await fetch_case_comments(case_id, limit=limit)
+        return {"comments": comments}
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to fetch comments: {exc}")
 
 
 #new attempt: 
@@ -265,26 +356,6 @@ async def get_case_czml(case_number: str):
         print(f"Error generating CZML: {str(e)}")
         raise HTTPException(status_code=500, detail="Failed to generate CZML.")
     
-@router.get("/cases/last-points")
-async def get_last_case_points():
-    from services.case_service import fetch_last_points_per_case
-    points = await fetch_last_points_per_case()
-    return {"points": points}
-
-@router.get("/cases/recent-points")
-async def get_recent_points(limit: int = 10):
-    """Return the most recent N points across all cases for a lightweight mini-heatmap."""
-    from services.case_service import fetch_recent_points
-    pts = await fetch_recent_points(limit=limit)
-    return {"points": pts}
-
-    # For the heatmap page: Added by jon
-@router.get("/cases/all-points-with-case-ids")
-async def get_all_points_with_case_ids():
-    from services.case_service import fetch_all_case_points_with_case_ids
-    points = await fetch_all_case_points_with_case_ids()
-    return {"points": points}
-
 @router.get("/cases/all")
 async def get_all_cases():
     try:
@@ -331,18 +402,6 @@ async def get_case_all_points(case_id: str):
     points = await fetch_all_points_for_case(case_id)
     return {"points": points}
 
-
-@router.get("/cases/all-points-paginated")
-async def get_all_points_paginated(limit: int = 200, cursor: str = ""):
-    """Return points across all cases (allPoints subcollections) in pages.
-
-    - Orders by timestamp ascending for stable progressive rendering.
-    - `cursor` is an opaque token returned by the previous call; pass it back to continue.
-    """
-    from services.case_service import fetch_all_points_paginated
-    pts, next_cursor = await fetch_all_points_paginated(limit=max(1, int(limit)), cursor=cursor or None)
-    return {"points": pts, "nextCursor": next_cursor}
-
 @router.post("/cases/{case_id}/points/generate-description")
 async def generate_description_route(case_id: str, request: Request):
     """
@@ -381,43 +440,3 @@ async def generate_description_route(case_id: str, request: Request):
     except Exception as e:
         print(f"Error generating AI description: {str(e)}")
         raise HTTPException(status_code=500, detail="Failed to generate AI description.")
-
-@router.put("/cases/soft-delete/{case_id}")
-async def soft_delete_case_endpoint(case_id: str):
-    """Soft delete — mark as trashed."""
-    try:
-        result = await soft_delete_case(case_id)
-        return JSONResponse(status_code=200, content=result)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.get("/cases/trashed")
-async def get_trashed_cases():
-    """Retrieve all trashed cases."""
-    try:
-        trashed_ref = db.collection("cases").where("is_deleted", "==", True)
-        results = [doc.to_dict() | {"doc_id": doc.id} for doc in trashed_ref.stream()]
-        return {"cases": results}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.put("/cases/restore/{case_id}")
-async def restore_case_endpoint(case_id: str):
-    """Restore a case from the trash bin."""
-    try:
-        result = await restore_case(case_id)
-        return JSONResponse(status_code=200, content=result)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.delete("/cases/delete/{case_id}")
-async def permanently_delete_case_endpoint(case_id: str):
-    """Permanently delete a trashed case."""
-    try:
-        result = await permanently_delete_case(case_id)
-        return JSONResponse(status_code=200, content=result)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
