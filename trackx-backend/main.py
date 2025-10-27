@@ -19,25 +19,20 @@ load_dotenv()
 # Create FastAPI instance
 app = FastAPI()
 
-# Setup CORS to allow frontend to access backend
-raw_origins = os.getenv("ALLOWED_ORIGINS", "")
-origins = [origin.strip() for origin in raw_origins.split(",") if origin.strip()]
-
-default_origins = [
-    "http://localhost:5173",
-    "http://127.0.0.1:5173",
-    "https://trackx-frontend-sigma.vercel.app",
-]
-
-if "*" in origins:
-    origins = ["*"]
-
+# Setup CORS - MUST BE BEFORE ROUTES
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins or default_origins,
+    allow_origins=[
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "https://trackx-frontend-sigma.vercel.app",
+        "https://trackx-frontend-sigma.vercel.app/",  # With trailing slash
+    ],
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
     allow_headers=["*"],
+    expose_headers=["*"],
+    max_age=3600,
 )
 
 # Mount routers
