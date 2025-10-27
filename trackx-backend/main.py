@@ -27,12 +27,19 @@ app = FastAPI()
 #  Setup CORS to allow frontend to access backend
 raw_origins = os.getenv("ALLOWED_ORIGINS", "")
 origins = [origin.strip() for origin in raw_origins.split(",") if origin.strip()]
+
+default_origins = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "https://trackx-frontend-n3bc.onrender.com",
+]
+
 if "*" in origins:
     origins = ["*"]
-# 
+
 app.add_middleware(
     CORSMiddleware,
-     allow_origins=["*"],
+    allow_origins=origins or default_origins,
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -81,5 +88,4 @@ def proxy_image_data_url(url: str = Query(..., description="Public image URL to 
     content_type = r.headers.get("Content-Type") or mimetypes.guess_type(url)[0] or "image/png"
     b64 = base64.b64encode(r.content).decode("ascii")
     return {"dataUrl": f"data:{content_type};base64,{b64}"}
-
 

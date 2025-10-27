@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useNavigate } from "react-router-dom";
-import axios from "axios";
 import { Bell, CheckCircle2, Loader2, MessageCircle, X } from "lucide-react";
 import { auth } from "../firebase";
+import axiosInstance from "../api/axios";
 
 const PANEL_LIMIT = 10;
 const PANEL_WIDTH = 320;
@@ -37,7 +37,7 @@ function NotificationBell({ className = "", limit = PANEL_LIMIT }) {
       }
       try {
         setIsLoading(true);
-        const response = await axios.get(`http://localhost:8000/notifications/${uid}`, {
+        const response = await axiosInstance.get(`/notifications/${uid}`, {
           params: { page, limit, type: "COMMENT" },
         });
         const fetched = (response.data.notifications || []).filter(
@@ -122,8 +122,8 @@ function NotificationBell({ className = "", limit = PANEL_LIMIT }) {
     }
     const updated = !notification.read;
     try {
-      await axios.patch(
-        `http://localhost:8000/notifications/${uid}/${notification.id}`,
+      await axiosInstance.patch(
+        `/notifications/${uid}/${notification.id}`,
         { read: updated },
         { headers: { "Content-Type": "application/json" } }
       );

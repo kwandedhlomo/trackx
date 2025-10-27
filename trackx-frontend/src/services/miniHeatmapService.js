@@ -1,7 +1,7 @@
 // Lightweight cache for mini heatmap points across pages
 // Caches in-memory and mirrors state to localStorage with a short TTL.
 
-import axios from 'axios';
+import axiosInstance from "../api/axios";
 
 const CACHE_KEY = 'miniHeatmapPointsCache-v1';
 // default TTL in ms
@@ -54,8 +54,8 @@ export async function getMiniHeatmapPoints({ limit = 10, ttlMs = DEFAULT_TTL } =
     return inMemory.pending;
   }
 
-  inMemory.pending = axios
-    .get('http://localhost:8000/cases/recent-points', { params: { limit } })
+  inMemory.pending = axiosInstance
+    .get("/cases/recent-points", { params: { limit } })
     .then((res) => {
       const points = res?.data?.points || [];
       const expiresAt = Date.now() + ttlMs;

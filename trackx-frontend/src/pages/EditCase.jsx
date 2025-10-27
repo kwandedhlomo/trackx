@@ -2,7 +2,6 @@ import React, { useState, useEffect } from "react";
 import { useLocation, useNavigate, Link } from "react-router-dom";
 import { motion } from "framer-motion";
 import adflogo from "../assets/image-removebg-preview.png";
-import axios from "axios";
 import { useAuth } from "../context/AuthContext";
 import { signOut } from "firebase/auth";
 import { auth } from "../firebase";
@@ -28,6 +27,7 @@ import { getFriendlyErrorMessage } from "../utils/errorMessages";
 import EvidenceLocker from "../components/EvidenceLocker";
 import RegionSelectorModal from "../components/RegionSelectorModal";
 import { consumeTaskHook } from "../utils/taskHooks";
+import axiosInstance from "../api/axios";
 
 
 // Firebase services (with Jon's updater)
@@ -275,7 +275,7 @@ const handleEvidenceSearch = async () => {
 
     const fetchFromBackend = async () => {
       try {
-        const res = await axios.get("http://localhost:8000/cases/search", { params: {} });
+        const res = await axiosInstance.get("/cases/search", { params: {} });
         const found = (res.data?.cases || []).find((c) => c.doc_id === docIdFromLocation);
         if (found){
           setCaseData(found);
@@ -445,7 +445,7 @@ const handleUpdate = async (e) => {
 
     if (docIdFromLocation || caseData?.doc_id) {
       try {
-        await axios.put("http://localhost:8000/cases/update", {
+        await axiosInstance.put("/cases/update", {
           doc_id: caseData?.doc_id || docIdFromLocation,
           ...normalized,
         });

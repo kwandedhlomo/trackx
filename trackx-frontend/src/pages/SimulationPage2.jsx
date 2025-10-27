@@ -4,7 +4,6 @@ import * as Cesium from "cesium";
 import { Cartesian3 } from "cesium";
 import adflogo from "../assets/image-removebg-preview.png";
 import { motion } from "framer-motion";
-import axios from "axios";
 import SimulationSidebar from "../components/SimulationSidebar";
 import { db } from "../firebase";
 import { useAuth } from "../context/AuthContext";
@@ -27,6 +26,7 @@ console.log("flagIcon path:", flagIcon);
 import NotificationModal from "../components/NotificationModal";
 import useNotificationModal from "../hooks/useNotificationModal";
 import { getFriendlyErrorMessage } from "../utils/errorMessages";
+import axiosInstance from "../api/axios";
 
 
 
@@ -350,7 +350,7 @@ function onToggleProjection() {
         viewerRef.current.cesiumElement.dataSources.removeAll();
       }
 
-        const res = await axios.get(`http://localhost:8000/cases/czml/${caseNumber}`);
+        const res = await axiosInstance.get(`/cases/czml/${caseNumber}`);
         setCzml(res.data);
       } catch (err) {
         console.error("Error fetching CZML:", err);

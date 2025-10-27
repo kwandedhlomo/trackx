@@ -1,5 +1,4 @@
 import { useEffect, useState, useMemo } from "react";
-import axios from "axios";
 import { useAuth } from "../context/AuthContext";
 import { useNavigate, Link } from "react-router-dom";
 import { motion } from "framer-motion";
@@ -26,10 +25,10 @@ import useNotificationModal from "../hooks/useNotificationModal";
 import { getFriendlyErrorMessage } from "../utils/errorMessages";
 import AnimatedMap from "../components/AnimatedMap";
 import NotificationBell from "../components/NotificationBell";
+import axiosInstance from "../api/axios";
 
 
 function AdminPanel() {
-  const API_BASE = (import.meta.env.VITE_API_URL || "http://localhost:8000").replace(/\/+$/, "");
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [roleFilter, setRoleFilter] = useState("all");
@@ -56,7 +55,7 @@ function AdminPanel() {
   const fetchUsers = async () => {
     setLoading(true);
     try {
-      const response = await axios.get(`${API_BASE}/admin/users`, {
+      const response = await axiosInstance.get("/admin/users", {
         params: {
           role: roleFilter !== "all" ? roleFilter : undefined,
           search: search || undefined,
@@ -78,7 +77,7 @@ function AdminPanel() {
   const fetchCases = async () => {
     setIsFetchingCases(true);
     try {
-      const { data } = await axios.get(`${API_BASE}/cases/all`);
+      const { data } = await axiosInstance.get("/cases/all");
       const formatted = (data || []).map((caseItem) => ({
         id: caseItem.id || caseItem.caseId,
         caseNumber: caseItem.caseNumber,
@@ -137,7 +136,7 @@ function AdminPanel() {
     }
 
     try {
-      const { data } = await axios.post(`${API_BASE}/admin/users/lookup`, {
+      const { data } = await axiosInstance.post("/admin/users/lookup", {
         user_ids: ids,
       });
       const userList = data?.users?.length ? data.users : ids.map((id) => ({ id, name: id, email: "" }));
@@ -174,7 +173,7 @@ function AdminPanel() {
     }
 
     try {
-      const { data } = await axios.get(`${API_BASE}/admin/users`, {
+      const { data } = await axiosInstance.get("/admin/users", {
         params: {
           search: term,
           page_size: 10,
@@ -238,7 +237,7 @@ function AdminPanel() {
     setIsAssigningUsers(true);
     try {
       const userIds = selectedCaseUsers.map((user) => user.id);
-      await axios.post(`${API_BASE}/admin/cases/${selectedCaseId}/assign-users`, {
+      await axiosInstance.post(`/admin/cases/${selectedCaseId}/assign-users`, {
         user_ids: userIds,
       });
 
@@ -290,7 +289,7 @@ const toggleRole = async (userId, currentRole, skipConfirmation = false) => {
   }
 
   try {
-    await axios.post(`${API_BASE}/admin/update-role/${userId}`, {
+    await axiosInstance.post(`/admin/update-role/${userId}`, {
       new_role: newRole,
     });
 
@@ -341,7 +340,7 @@ const handleDeleteUser = async (userId, skipConfirmation = false) => {
 
   try {
     const targetUser = users.find((user) => user.id === userId);
-    await axios.delete(`${API_BASE}/admin/delete-user/${userId}`);
+    await axiosInstance.delete(`/admin/delete-user/${userId}`);
     setUsers((prevUsers) => prevUsers.filter((user) => user.id !== userId));
     openModal({
       variant: "success",

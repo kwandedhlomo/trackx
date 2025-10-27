@@ -4,10 +4,10 @@ import { DeckGL } from '@deck.gl/react';
 import { HeatmapLayer } from '@deck.gl/aggregation-layers';
 import { ScatterplotLayer } from '@deck.gl/layers';
 import Map from 'react-map-gl';
-import axios from 'axios';
 import { fetchHeatmapPointsProgressive } from "../services/heatmapDataService";
 import MapSwitcherPanel from "../components/MapSwitcherPanel";
 import { HexagonLayer } from '@deck.gl/aggregation-layers';
+import axiosInstance from "../api/axios";
 
 
 
@@ -39,7 +39,7 @@ function HeatmapPage() {
     // Case metadata loaded once (small)
     (async () => {
       try {
-        const caseRes = await axios.get("http://localhost:8000/cases/all");
+        const caseRes = await axiosInstance.get("/cases/all");
         const caseDocs = caseRes.data || [];
         const map = {};
         caseDocs.forEach(doc => { if (doc.id) map[doc.id] = doc; });
@@ -56,7 +56,7 @@ function HeatmapPage() {
 useEffect(() => {
   const fetchCaseDocuments = async () => {
     try {
-      const res = await axios.get("http://localhost:8000/cases/all"); 
+      const res = await axiosInstance.get("/cases/all"); 
       const cases = res.data;
 
       const map = {};

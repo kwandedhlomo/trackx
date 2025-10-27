@@ -22,12 +22,12 @@ import { auth } from "../firebase";
 import { useAuth } from "../context/AuthContext";
 import { signOut } from "firebase/auth";
 import { useNavigate } from "react-router-dom";
-import axios from "axios";
 import MiniHeatMapWindow from "../components/MiniHeatMapWindow";
 import NotificationBell from "../components/NotificationBell";
 import RegionSelectorModal from "../components/RegionSelectorModal";
 import { getMiniHeatmapPoints } from "../services/miniHeatmapService";
 import { getGlobePoints } from "../services/globePointsService";
+import axiosInstance from "../api/axios";
 
 
 function HomePage() {
@@ -424,7 +424,7 @@ function HomePage() {
     useEffect(() => {
       const fetchRecentCases = async () => {
         try {
-          const response = await axios.get("http://localhost:8000/cases/recent", {
+          const response = await axiosInstance.get("/cases/recent", {
             params: {
               sortBy,
               ...(profile?.role !== "admin" && profile?.userID ? { user_id: profile.userID } : {})
@@ -447,7 +447,7 @@ function HomePage() {
     useEffect(() => {
       const fetchAllCases = async () => {
         try {
-          const response = await axios.get("http://localhost:8000/cases/search", {
+          const response = await axiosInstance.get("/cases/search", {
             params: profile?.role === "admin" ? {} : { user_id: profile?.userID },
           });
 

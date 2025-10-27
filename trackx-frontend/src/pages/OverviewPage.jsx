@@ -8,7 +8,6 @@ import { useAuth } from "../context/AuthContext";
 import { signOut } from "firebase/auth";
 import { auth } from "../firebase";
 import FirebaseStatus from "../components/FirebaseStatus";
-import axios from "axios";
 import NotificationModal from "../components/NotificationModal";
 import useNotificationModal from "../hooks/useNotificationModal";
 import { getFriendlyErrorMessage } from "../utils/errorMessages";
@@ -16,12 +15,12 @@ import TechnicalTermsSelector from "../components/TechnicalTermsSelector";
 import { formatTechnicalTerm, normalizeTechnicalTermList } from "../utils/technicalTerms";
 import EvidenceLocker from "../components/EvidenceLocker";
 import { consumeTaskHook } from "../utils/taskHooks";
+import axiosInstance from "../api/axios";
 
 // ---- DOCX + save-as ----
 import { Document, Packer, Paragraph, TextRun, HeadingLevel, ImageRun } from "docx";
 import { saveAs } from "file-saver";
 
-const API_BASE = (import.meta.env.VITE_API_URL || "").replace(/\/+$/, "");
 
 // ---- Firebase services ----
 import {
@@ -796,7 +795,7 @@ const handleTextImprovement = async (target) => {
       return;
     }
 
-    const response = await axios.post(`${API_BASE}/cases/ai-review`, {
+    const response = await axiosInstance.post("/cases/ai-review", {
       text: textToImprove,
       contextType: target,
     });
@@ -1296,7 +1295,7 @@ const handleGenerateIntro = async () => {
   if (!currentCaseId) return;
   try {
     setLoadingIntro(true);
-    const res = await axios.post(`${API_BASE}/cases/${currentCaseId}/ai-intro`, {
+    const res = await axiosInstance.post(`/cases/${currentCaseId}/ai-intro`, {
       // optional context payload if you want; currently backend reads from Firestore
     });
     const intro = res.data.reportIntro || "";
@@ -1313,7 +1312,7 @@ const handleGenerateConclusion = async () => {
   if (!currentCaseId) return;
   try {
     setLoadingConclusion(true);
-    const res = await axios.post(`${API_BASE}/cases/${currentCaseId}/ai-conclusion`);
+    const res = await axiosInstance.post(`/cases/${currentCaseId}/ai-conclusion`);
     const conclusion = res.data.reportConclusion || "";
     setReportConclusion(conclusion);
     await saveData({ reportConclusion: conclusion });

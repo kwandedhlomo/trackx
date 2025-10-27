@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { motion } from "framer-motion";
-import axios from "axios";
 import {
   ArrowLeft,
   Loader2,
@@ -36,8 +35,7 @@ import {
   getStageConfig,
 } from "../constants/taskRegistry";
 import { setTaskHook } from "../utils/taskHooks";
-
-const API_BASE_URL = "http://localhost:8000";
+import axiosInstance from "../api/axios";
 
 const INITIAL_TASK_BUILDER_STATE = {
   stage: "",
@@ -131,7 +129,7 @@ const loadComments = useCallback(async () => {
   }
   setLoadingComments(true);
   try {
-    const response = await axios.get(`${API_BASE_URL}/cases/${caseId}/comments`, {
+    const response = await axiosInstance.get(`/cases/${caseId}/comments`, {
       params: { limit: 200 },
     });
     setComments(response.data?.comments || []);
@@ -247,7 +245,7 @@ useEffect(() => {
         return;
       }
 
-      const response = await axios.post(`${API_BASE_URL}/admin/users/lookup`, {
+      const response = await axiosInstance.post(`/admin/users/lookup`, {
         user_ids: participantIds,
       });
       const fetchedUsers = response.data?.users || [];
@@ -880,7 +878,7 @@ const handleSuggestionKeyDown = (event) => {
         mentionIds.delete(currentUserId);
       }
 
-      await axios.post(`${API_BASE_URL}/cases/${caseId}/comments`, {
+      await axiosInstance.post(`/cases/${caseId}/comments`, {
         authorId: currentUserId,
         text: messageWithMentions,
         mentions: Array.from(mentionIds),

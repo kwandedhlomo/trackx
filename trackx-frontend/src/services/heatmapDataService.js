@@ -1,7 +1,7 @@
 // Progressive fetch + cache for the main heatmap
 // Fetches /cases/all-points-paginated in pages and caches combined results for 5 minutes.
 
-import axios from 'axios';
+import axiosInstance from "../api/axios";
 
 const CACHE_KEY = 'heatmapPointsCache-v1';
 const DEFAULT_TTL = 5 * 60 * 1000; // 5 minutes
@@ -51,7 +51,7 @@ export async function fetchHeatmapPointsProgressive({ pageSize = 200, onChunk, s
     try {
       for (;;) {
         if (cancelled) break;
-        const res = await axios.get('http://localhost:8000/cases/all-points-paginated', {
+        const res = await axiosInstance.get("/cases/all-points-paginated", {
           params: { limit: pageSize, cursor },
         });
         const { points = [], nextCursor } = res.data || {};
@@ -71,7 +71,7 @@ export async function fetchHeatmapPointsProgressive({ pageSize = 200, onChunk, s
       // Fallback: try legacy one-shot endpoint if pagination fails at the start
       if (!all.length) {
         try {
-          const res = await axios.get('http://localhost:8000/cases/all-points-with-case-ids');
+          const res = await axiosInstance.get("/cases/all-points-with-case-ids");
           const pts = (res.data?.points || []).map(p => ({
             lat: p.lat,
             lng: p.lng,

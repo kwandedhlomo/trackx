@@ -1,5 +1,4 @@
 import { useState, useEffect } from "react";
-import axios from "axios";
 import { Link } from "react-router-dom";
 import { motion } from "framer-motion";
 import { FaTrashRestore, FaTrashAlt } from "react-icons/fa";
@@ -9,6 +8,7 @@ import { useAuth } from "../context/AuthContext";
 import { auth } from "../firebase";
 import { signOut } from "firebase/auth";
 import adfLogo from "../assets/image-removebg-preview.png";
+import axiosInstance from "../api/axios";
 
 function TrashBinPage() {
   const [cases, setCases] = useState([]);
@@ -30,7 +30,7 @@ function TrashBinPage() {
 
   const fetchTrashedCases = async () => {
     try {
-      const res = await axios.get("http://localhost:8000/cases/trashed");
+      const res = await axiosInstance.get("/cases/trashed");
       setCases(res.data.cases || []);
     } catch (err) {
       console.error("Failed to fetch trashed cases:", err);
@@ -39,7 +39,7 @@ function TrashBinPage() {
 
   const handleRestore = async (id) => {
     try {
-      await axios.put(`http://localhost:8000/cases/restore/${id}`);
+      await axiosInstance.put(`/cases/restore/${id}`);
       openModal({
         variant: "success",
         title: "Case Restored",
@@ -57,7 +57,7 @@ function TrashBinPage() {
 
   const handlePermanentDelete = async (id) => {
     try {
-      await axios.delete(`http://localhost:8000/cases/delete/${id}`);
+      await axiosInstance.delete(`/cases/delete/${id}`);
       openModal({
         variant: "success",
         title: "Case Permanently Deleted",
@@ -88,7 +88,7 @@ function TrashBinPage() {
           try {
             const ids = cases.map(c => c.doc_id).filter(Boolean);
             const results = await Promise.allSettled(
-              ids.map(id => axios.delete(`http://localhost:8000/cases/delete/${id}`))
+              ids.map(id => axiosInstance.delete(`/cases/delete/${id}`))
             );
             const succeeded = results.filter(r => r.status === 'fulfilled').length;
             const failed = results.length - succeeded;

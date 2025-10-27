@@ -10,6 +10,7 @@ import "../css/register-animations.css";
 import NotificationModal from "../components/NotificationModal";
 import useNotificationModal from "../hooks/useNotificationModal";
 import { getFriendlyErrorMessage } from "../utils/errorMessages";
+import axiosInstance from "../api/axios";
 
 export default function RegisterPage() {
   const navigate = useNavigate()
@@ -72,30 +73,17 @@ export default function RegisterPage() {
         createdAt: new Date().toISOString(),
       });
 
-      const idToken = await user.getIdToken();
+      await user.getIdToken();
 
-      const response = await fetch(`${import.meta.env.VITE_API_URL}/auth/register`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${idToken}`,
-        },
-        body: JSON.stringify({
-          first_name: firstName,
-          surname: surname,
-          email,
-          id_number: idNumber,
-          investigator_id: investigatorId,
-          dob,
-          password,
-        }),
+      await axiosInstance.post("/auth/register", {
+        first_name: firstName,
+        surname: surname,
+        email,
+        id_number: idNumber,
+        investigator_id: investigatorId,
+        dob,
+        password,
       });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.detail || "Registration failed");
-      }
 
       navigate("/verify-email");
     } catch (error) {

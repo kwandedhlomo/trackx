@@ -4,7 +4,6 @@ import { motion } from "framer-motion";
 import { auth } from "../firebase";
 import { useAuth } from "../context/AuthContext";
 import { signOut } from "firebase/auth";
-import axios from "axios";
 import adfLogo from "../assets/image-removebg-preview.png";
 import { Calendar, MapPin, Hash, Route, Home, FilePlus2, FolderOpen, Briefcase, LayoutDashboard, Info, Users } from "lucide-react";
 import { FaMapMarkerAlt } from "react-icons/fa";
@@ -24,6 +23,7 @@ import useNotificationModal from "../hooks/useNotificationModal";
 import { getFriendlyErrorMessage } from "../utils/errorMessages";
 import ZA_REGIONS from "../data/za_regions";
 import NotificationBell from "../components/NotificationBell";
+import axiosInstance from "../api/axios";
 
 
 function MyCasesPage() {
@@ -148,7 +148,7 @@ function MyCasesPage() {
     try {
       const uid = auth.currentUser?.uid;
       if (!uid) return;
-      const response = await axios.get("http://localhost:8000/cases/search", {
+      const response = await axiosInstance.get("/cases/search", {
         params: {
           user_id: uid,
           searchTerm: nextSearchTerm || undefined,
@@ -240,7 +240,7 @@ function MyCasesPage() {
   // Update status
   const handleStatusChange = async (caseItem, newStatus) => {
     try {
-      await axios.put("http://localhost:8000/cases/update", {
+      await axiosInstance.put("/cases/update", {
         ...caseItem,
         status: newStatus,
       });
@@ -255,7 +255,7 @@ function MyCasesPage() {
   // Update urgency
   const handleTagChange = async (caseItem, newUrgency) => {
     try {
-      await axios.put("http://localhost:8000/cases/update", {
+      await axiosInstance.put("/cases/update", {
         ...caseItem,
         urgency: newUrgency,
       });
@@ -273,7 +273,7 @@ function MyCasesPage() {
     closeModal();
     if (!caseItem) return;
     try {
-      await axios.put(`http://localhost:8000/cases/soft-delete/${caseItem.doc_id}`);
+    await axiosInstance.put(`/cases/soft-delete/${caseItem.doc_id}`);
       openModal({
         variant: "success",
         title: "Case moved to Trash",
@@ -319,7 +319,7 @@ function MyCasesPage() {
         console.warn("No user ID found. Cannot fetch notifications.");
         return;
       }
-      const response = await axios.get(`http://localhost:8000/notifications/${uid}`, {
+      const response = await axiosInstance.get(`/notifications/${uid}`, {
         params: { page, limit: notificationsPerPage },
       });
       setNotifications(response.data.notifications || []);
@@ -357,8 +357,8 @@ function MyCasesPage() {
       }
 
       const updatedReadStatus = !notification.read;
-      await axios.patch(
-        `http://localhost:8000/notifications/${uid}/${notification.id}`,
+        await axiosInstance.patch(
+        `/notifications/${uid}/${notification.id}`,
         { read: updatedReadStatus },
         { headers: { "Content-Type": "application/json" } }
       );
@@ -380,7 +380,7 @@ function MyCasesPage() {
         console.warn("No user ID found. Cannot clear notifications.");
         return;
       }
-      await axios.delete(`http://localhost:8000/notifications/${uid}`);
+      await axiosInstance.delete(`/notifications/${uid}`);
       setNotifications([]);
       setTotalNotifications(0);
       setCurrentPage(1);
@@ -416,12 +416,12 @@ function MyCasesPage() {
 
     try {
       // 1) Derive (re)build rollup for this case
-      await axios.post(`http://localhost:8000/derive/cases/${selectedCase.doc_id}`);
+      await axiosInstance.post(`/derive/cases/${selectedCase.doc_id}`);
 
       // 2) Call AI
       const uid = auth.currentUser?.uid;
       const role = profile?.role || "user";
-      const res = await axios.post("http://localhost:8000/ai/briefings", {
+      const res = await axiosInstance.post("/ai/briefings", {
         user_id: uid,
         user_role: role,
         case_ids: [selectedCase.doc_id],

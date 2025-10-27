@@ -6,7 +6,6 @@ import adflogo from "../assets/image-removebg-preview.png";
 import { useAuth } from "../context/AuthContext";
 import { signOut } from "firebase/auth";
 import { auth } from "../firebase";
-import axios from "axios";
 import NotificationModal from "../components/NotificationModal";
 import useNotificationModal from "../hooks/useNotificationModal";
 import { getFriendlyErrorMessage } from "../utils/errorMessages";
@@ -23,6 +22,7 @@ import {
   saveSnapshotsToFirebase,
   getCurrentUserId
 } from "../services/firebaseServices";
+import axiosInstance from "../api/axios";
 
 function AnnotationsPage() {
   const navigate = useNavigate();
@@ -110,8 +110,8 @@ function AnnotationsPage() {
         status: loc.ignitionStatus || "Stopped",
       };
   
-      const { data } = await axios.post(
-        `${API_BASE}/cases/${currentCaseId}/points/generate-description`,
+      const { data } = await axiosInstance.post(
+        `/cases/${currentCaseId}/points/generate-description`,
         payload,
         { headers: { "Content-Type": "application/json" } }
       );
@@ -134,9 +134,7 @@ function AnnotationsPage() {
     }
   };
   
-
   // near other constants
-  const API_BASE = (import.meta.env.VITE_API_URL || "").replace(/\/+$/, "");
 
   // Google Maps API Key 
   const GOOGLE_MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
@@ -207,12 +205,10 @@ function AnnotationsPage() {
 
   // helper
   async function fetchDataUrlViaProxy(rawUrl) {
-    const res = await fetch(`${API_BASE}/api/proxy-image-data-url?url=${encodeURIComponent(rawUrl)}`);
-    if (!res.ok) {
-      const text = await res.text();
-      throw new Error(text || `Proxy fetch failed (${res.status})`);
-    }
-    const { dataUrl } = await res.json();
+    const res = await axiosInstance.get("/api/proxy-image-data-url", {
+      params: { url: rawUrl },
+    });
+    const { dataUrl } = res.data || {};
     if (!dataUrl || !dataUrl.startsWith("data:image/")) {
       throw new Error("Invalid data URL from proxy");
     }

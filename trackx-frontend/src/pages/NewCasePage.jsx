@@ -4,7 +4,6 @@ import { motion } from "framer-motion";
 import { Upload, Info, CheckCircle, AlertCircle, FileText, Home, FilePlus2, FolderOpen, Briefcase, LayoutDashboard, UserPlus, X, Shield, AlertTriangle, Search, Link2 } from "lucide-react";
 import Papa from "papaparse";
 import adflogo from "../assets/image-removebg-preview.png";
-import axios from "axios";
 import { auth } from "../firebase";
 import { signOut } from "firebase/auth";
 import { useAuth } from "../context/AuthContext";
@@ -20,6 +19,7 @@ import EvidenceLocker from "../components/EvidenceLocker";
 // Firebase services
 import { updateCaseAnnotations, getCurrentUserId, loadAllEvidence, searchEvidence, batchSaveEvidence } from "../services/firebaseServices";
 import RegionSelectorModal from "../components/RegionSelectorModal";
+import axiosInstance from "../api/axios";
 
 
 
@@ -247,7 +247,6 @@ function NewCasePage() {
   const [evidenceSearchTerm, setEvidenceSearchTerm] = useState("");
   const [evidenceSearchResults, setEvidenceSearchResults] = useState([]);
   const [isSearchingEvidence, setIsSearchingEvidence] = useState(false);
-  const API_BASE = (import.meta.env.VITE_API_URL || "http://localhost:8000").replace(/\/+$/, "");
   const formattedDateTime = new Date().toLocaleString();
   const canProceed = Boolean(
     parsedData && parsedData.stoppedPoints && parsedData.stoppedPoints.length > 0 && !isProcessing
@@ -289,7 +288,7 @@ function NewCasePage() {
 
     setIsSearchingUsers(true);
     try {
-      const { data } = await axios.get(`${API_BASE}/admin/users`, {
+      const { data } = await axiosInstance.get("/admin/users", {
         params: {
           search: term,
           page_size: 10,
@@ -1570,8 +1569,7 @@ Please ensure your PDF contains GPS coordinates in one of these formats:
         })),
       };
 
-      const base = (import.meta.env.VITE_API_URL || "http://localhost:8000").replace(/\/+$/,"");
-      const { data: created } = await axios.post(`${base}/cases/create`, payload, {
+      const { data: created } = await axiosInstance.post("/cases/create", payload, {
         headers: { "Content-Type": "application/json" },
       });
 

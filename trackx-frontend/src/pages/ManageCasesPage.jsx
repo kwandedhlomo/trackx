@@ -3,7 +3,6 @@ import { motion } from "framer-motion";
 import { FaSearch, FaMapMarkerAlt, FaCalendarAlt } from "react-icons/fa";
 import adfLogo from "../assets/image-removebg-preview.png";
 import { useState, useEffect, useMemo } from "react";
-import axios from "axios";
 import { useAuth } from "../context/AuthContext";
 import { signOut } from "firebase/auth";
 import { auth } from "../firebase";
@@ -15,6 +14,7 @@ import { Home, FilePlus2, FolderOpen, Briefcase, LayoutDashboard } from "lucide-
 import ZA_REGIONS from "../data/za_regions";
 import RegionSelectorModal from "../components/RegionSelectorModal";
 import NotificationBell from "../components/NotificationBell";
+import axiosInstance from "../api/axios";
 
 
 
@@ -67,7 +67,7 @@ function ManageCasesPage() {
     setRegion(prov ? prov.name : "");
 
     try {
-      const response = await axios.get("http://localhost:8000/cases/search", {
+      const response = await axiosInstance.get("/cases/search", {
         params: {
           searchTerm: nextSearchTerm || undefined,
           region: prov?.name || undefined,
@@ -95,7 +95,7 @@ function ManageCasesPage() {
   /*const performDelete = async (caseItem) => {
     closeModal();
     try {
-      await axios.delete(`http://localhost:8000/cases/delete/${caseItem.doc_id}`);
+      await axiosInstance.delete(`/cases/delete/${caseItem.doc_id}`);
       openModal({
         variant: "success",
         title: "Case deleted",
@@ -116,7 +116,7 @@ function ManageCasesPage() {
   const performSoftDelete = async (caseItem) => {
   closeModal();
   try {
-    await axios.put(`http://localhost:8000/cases/soft-delete/${caseItem.doc_id}`);
+    await axiosInstance.put(`/cases/soft-delete/${caseItem.doc_id}`);
     openModal({
       variant: "success",
       title: "Case moved to Trash",

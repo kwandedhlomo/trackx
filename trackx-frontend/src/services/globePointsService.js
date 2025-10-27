@@ -1,7 +1,7 @@
 // Cache and background-friendly fetcher for globe points
 // Uses in-memory + localStorage cache to avoid repeat fetches between navigations.
 
-import axios from 'axios';
+import axiosInstance from "../api/axios";
 
 const CACHE_KEY = 'globePointsCache-v1';
 const DEFAULT_TTL = 5 * 60 * 1000; // 5 minutes
@@ -41,8 +41,8 @@ export async function getGlobePoints({ ttlMs = DEFAULT_TTL } = {}) {
 
   if (inMemory.pending) return inMemory.pending;
 
-  inMemory.pending = axios
-    .get('http://localhost:8000/cases/last-points')
+  inMemory.pending = axiosInstance
+    .get("/cases/last-points")
     .then((res) => {
       const points = res?.data?.points || [];
       const expiresAt = Date.now() + ttlMs;
@@ -62,4 +62,3 @@ export function clearGlobePointsCache() {
   inMemory = { points: null, expiresAt: 0, pending: null };
   try { localStorage.removeItem(CACHE_KEY); } catch {}
 }
-
