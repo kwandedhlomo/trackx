@@ -73,18 +73,26 @@ def _build_report_block(case_id: str, cdata: dict) -> dict:
             continue
         loc = locs[i] or {}
 
+        # Normalize nested original/raw data; Firestore may store nulls instead of dicts
+        orig_data = loc.get("originalData")
+        if not isinstance(orig_data, dict):
+            orig_data = {}
+        raw_data = orig_data.get("rawData")
+        if not isinstance(raw_data, dict):
+            raw_data = {}
+
         # Title priority: explicit override array > doc.title > originalData.rawData.Name > address > fallback
         if i < len(titles_ovr) and titles_ovr[i]:
             title = titles_ovr[i]
         else:
             title = (
                 loc.get("title")
-                or (loc.get("originalData") or {}).get("rawData", {}).get("Name")
+                or raw_data.get("Name")
                 or loc.get("address")
                 or f"Location {i+1}"
             )
 
-        pretty_addr = (loc.get("originalData") or {}).get("rawData", {}).get("Name")
+        pretty_addr = raw_data.get("Name")
         address = loc.get("address") or pretty_addr
 
         report_locs.append({
